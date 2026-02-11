@@ -1,0 +1,245 @@
+{
+  "atlas_name": "C57BL/6 Mouse Brain Coarse Parcellation (22 ROIs)",
+  "source_atlas": "C57BL/6 Mouse Brain MRI Atlas (University of Antwerp)",
+  "n_rois": 22,
+  "index_range": "0-22",
+  "note": "Created 2026-01-05. Coarse parcellation grouping 46 original ROIs into 22 regions. Drops white matter and septal nucleus.",
+  "citation": "Pallast N, Wieters F, Nill M, et al. (2017) Alzheimers Res Ther 9:94. doi:10.1186/s13195-017-0329-8",
+  "categories": {
+    "subcortical": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    "cortical": [15, 16, 17, 18, 19, 20, 21, 22],
+    "other": [0]
+  },
+  "rois": {
+    "0": {
+      "id": 0,
+      "abbreviation": "Exterior",
+      "name": "Exterior",
+      "hemisphere": null,
+      "original_indices": [0],
+      "original_labels": ["Exterior"],
+      "color_hex": "000000",
+      "color_rgb": [0, 0, 0]
+    },
+    "1": {
+      "id": 1,
+      "abbreviation": "Thal_L",
+      "name": "Thalamus_L",
+      "hemisphere": "L",
+      "original_indices": [4],
+      "original_labels": ["Thalamus_L"],
+      "color_hex": "00a3a3",
+      "color_rgb": [0, 163, 163]
+    },
+    "2": {
+      "id": 2,
+      "abbreviation": "Hypo_L",
+      "name": "Hypothalamus_L",
+      "hemisphere": "L",
+      "original_indices": [5],
+      "original_labels": ["Hypothalamus_L"],
+      "color_hex": "13e5f6",
+      "color_rgb": [19, 229, 246]
+    },
+    "3": {
+      "id": 3,
+      "abbreviation": "Amyg_L",
+      "name": "Amygdala_L",
+      "hemisphere": "L",
+      "original_indices": [6],
+      "original_labels": ["Amygdala_L"],
+      "color_hex": "0000ff",
+      "color_rgb": [0, 0, 255]
+    },
+    "4": {
+      "id": 4,
+      "abbreviation": "Hipp_L",
+      "name": "Hippocampus_L",
+      "hemisphere": "L",
+      "original_indices": [7],
+      "original_labels": ["Hippocampus_L"],
+      "color_hex": "ff00ff",
+      "color_rgb": [255, 0, 255]
+    },
+    "5": {
+      "id": 5,
+      "abbreviation": "Cblm_L",
+      "name": "Cerebellum_L",
+      "hemisphere": "L",
+      "original_indices": [8],
+      "original_labels": ["Cerebellum_L"],
+      "color_hex": "e183e1",
+      "color_rgb": [225, 131, 225]
+    },
+    "6": {
+      "id": 6,
+      "abbreviation": "Str_L",
+      "name": "Striatum_L",
+      "hemisphere": "L",
+      "original_indices": [9],
+      "original_labels": ["Striatum_L"],
+      "color_hex": "d96666",
+      "color_rgb": [217, 102, 102]
+    },
+    "7": {
+      "id": 7,
+      "abbreviation": "OB_L",
+      "name": "Olfactory_Bulb_L",
+      "hemisphere": "L",
+      "original_indices": [11],
+      "original_labels": ["Olfactory_Bulb_L"],
+      "color_hex": "59e666",
+      "color_rgb": [89, 230, 102]
+    },
+    "8": {
+      "id": 8,
+      "abbreviation": "Thal_R",
+      "name": "Thalamus_R",
+      "hemisphere": "R",
+      "original_indices": [27],
+      "original_labels": ["Thalamus_R"],
+      "color_hex": "246862",
+      "color_rgb": [36, 104, 98]
+    },
+    "9": {
+      "id": 9,
+      "abbreviation": "Hypo_R",
+      "name": "Hypothalamus_R",
+      "hemisphere": "R",
+      "original_indices": [28],
+      "original_labels": ["Hypothalamus_R"],
+      "color_hex": "1a5e5c",
+      "color_rgb": [26, 94, 92]
+    },
+    "10": {
+      "id": 10,
+      "abbreviation": "Amyg_R",
+      "name": "Amygdala_R",
+      "hemisphere": "R",
+      "original_indices": [29],
+      "original_labels": ["Amygdala_R"],
+      "color_hex": "100d41",
+      "color_rgb": [16, 13, 65]
+    },
+    "11": {
+      "id": 11,
+      "abbreviation": "Hipp_R",
+      "name": "Hippocampus_R",
+      "hemisphere": "R",
+      "original_indices": [30],
+      "original_labels": ["Hippocampus_R"],
+      "color_hex": "750667",
+      "color_rgb": [117, 6, 103]
+    },
+    "12": {
+      "id": 12,
+      "abbreviation": "Cblm_R",
+      "name": "Cerebellum_R",
+      "hemisphere": "R",
+      "original_indices": [31],
+      "original_labels": ["Cerebellum_R"],
+      "color_hex": "d273c6",
+      "color_rgb": [210, 115, 198]
+    },
+    "13": {
+      "id": 13,
+      "abbreviation": "Str_R",
+      "name": "Striatum_R",
+      "hemisphere": "R",
+      "original_indices": [32],
+      "original_labels": ["Striatum_R"],
+      "color_hex": "904d48",
+      "color_rgb": [144, 77, 72]
+    },
+    "14": {
+      "id": 14,
+      "abbreviation": "OB_R",
+      "name": "Olfactory_Bulb_R",
+      "hemisphere": "R",
+      "original_indices": [34],
+      "original_labels": ["Olfactory_Bulb_R"],
+      "color_hex": "489176",
+      "color_rgb": [72, 145, 118]
+    },
+    "15": {
+      "id": 15,
+      "abbreviation": "DorsRos_L",
+      "name": "Dorsal_Rostral_L",
+      "hemisphere": "L",
+      "original_indices": [13, 14, 15, 16, 23],
+      "original_labels": ["Cortex_Frontal_Association_L", "Cortex_Orbital_L", "Cortex_Motor_L", "Cortex_Cingulate_L", "Cortex_Prelimbic_L"],
+      "color_hex": "00ea00",
+      "color_rgb": [0, 234, 0]
+    },
+    "16": {
+      "id": 16,
+      "abbreviation": "SS_L",
+      "name": "Somatosensory_L",
+      "hemisphere": "L",
+      "original_indices": [17],
+      "original_labels": ["Cortex_Somatosensory_1_L"],
+      "color_hex": "ff0080",
+      "color_rgb": [255, 0, 128]
+    },
+    "17": {
+      "id": 17,
+      "abbreviation": "DorsCau_L",
+      "name": "Dorsal_Caudal_L",
+      "hemisphere": "L",
+      "original_indices": [18, 19, 20, 22],
+      "original_labels": ["Cortex_Retrosplenial_L", "Cortex_Parietal_Association_L", "Cortex_Auditory_L", "Cortex_Visual_L"],
+      "color_hex": "ff8000",
+      "color_rgb": [255, 128, 0]
+    },
+    "18": {
+      "id": 18,
+      "abbreviation": "VentCau_L",
+      "name": "Ventral_Caudal_L",
+      "hemisphere": "L",
+      "original_indices": [12, 21],
+      "original_labels": ["Cortex_Piriform_L", "Cortex_Rhinal_L"],
+      "color_hex": "3dc2c2",
+      "color_rgb": [61, 194, 194]
+    },
+    "19": {
+      "id": 19,
+      "abbreviation": "DorsRos_R",
+      "name": "Dorsal_Rostral_R",
+      "hemisphere": "R",
+      "original_indices": [36, 37, 38, 39, 46],
+      "original_labels": ["Cortex_Frontal_Association_R", "Cortex_Orbital_R", "Cortex_Motor_R", "Cortex_Cingulate_R", "Cortex_Prelimbic_R"],
+      "color_hex": "117c05",
+      "color_rgb": [17, 124, 5]
+    },
+    "20": {
+      "id": 20,
+      "abbreviation": "SS_R",
+      "name": "Somatosensory_R",
+      "hemisphere": "R",
+      "original_indices": [40],
+      "original_labels": ["Cortex_Somatosensory_1_R"],
+      "color_hex": "931a5a",
+      "color_rgb": [147, 26, 90]
+    },
+    "21": {
+      "id": 21,
+      "abbreviation": "DorsCau_R",
+      "name": "Dorsal_Caudal_R",
+      "hemisphere": "R",
+      "original_indices": [41, 42, 43, 45],
+      "original_labels": ["Cortex_Retrosplenial_R", "Cortex_Parietal_Association_R", "Cortex_Auditory_R", "Cortex_Visual_R"],
+      "color_hex": "a43d08",
+      "color_rgb": [164, 61, 8]
+    },
+    "22": {
+      "id": 22,
+      "abbreviation": "VentCau_R",
+      "name": "Ventral_Caudal_R",
+      "hemisphere": "R",
+      "original_indices": [35, 44],
+      "original_labels": ["Cortex_Piriform_R", "Cortex_Rhinal_R"],
+      "color_hex": "078197",
+      "color_rgb": [7, 129, 151]
+    }
+  }
+}

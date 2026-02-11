@@ -1,0 +1,98 @@
+# Shell-Based Extended Ellipsoid Source Localization Configuration
+# Extends ellipsoid anteriorly to cover olfactory bulb region
+# For comparison testing - may be removed after evaluation
+
+pipeline:
+  name: "Shell Ellipsoid Extended (Olfactory)"
+  bem_type: ellipsoid
+  source_type: shell
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_mask: "data/atlas/Atlas_3DRois_brain.nii.gz"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null  # Specify via command line
+
+electrode:
+  projection_method: "intensity"
+  skull_offset_mm: 0.0
+  bregma_vox: [30, 149, 41]
+  lambda_vox: [30, 97, 41]
+  create_visualization: true
+
+bem:
+  ellipsoid:
+    n_layers: 3  # Brain, skull, scalp
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]
+    ellipsoid_method: 'axis_aligned'
+    ellipsoid_margin: 1.23
+    # EXTENDED: Shift center anteriorly and extend Y axis for olfactory bulb
+    center_offset_mm: [0.0, 0.8, 0.0]  # Shift 0.8mm anterior
+    axis_extensions_mm: [0.0, 1.5, 0.0]  # Extend Y semi-axis by 1.5mm
+    use_cache: true
+    force_recreate: true  # Force rebuild to apply extensions
+
+source_space:
+  shell:
+    n_shells: 3  # Number of concentric shells
+    shell_scales: [0.5, 0.75, 0.95]  # Scale factors relative to brain radius (0.95 = near surface)
+    min_points_per_shell: 30
+    max_points_per_shell: 120
+    scale_by_area: true
+    filter_dorsal: false
+    filter_above_electrodes: true  # Remove sources above electrode level
+    electrode_margin_mm: 0.3  # Safety margin below electrode min Z
+    filter_exterior: true  # Remove sources outside brain (Exterior ROI)
+    distribution: fibonacci
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA
+  snr: 3.0
+  lambda2: null
+  depth_weighting: 0.0
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: false
+
+outputs:
+  dir: null
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
+
+# Configuration Notes:
+# --------------------
+# This configuration extends the standard shell_ellipsoid preset to cover
+# the olfactory bulb region which protrudes anteriorly beyond the main
+# brain ellipsoid.
+#
+# Extensions applied:
+# - center_offset_mm: [0, 0.8, 0] - Shifts ellipsoid 0.8mm anterior
+# - axis_extensions_mm: [0, 1.5, 0] - Extends Y semi-axis by 1.5mm
+#
+# This is a TEST configuration to evaluate impact on localization accuracy.
+# If results are good, these extensions may be incorporated into standard presets.
+#
+# Olfactory bulb coverage gap:
+# - Olfactory bulb Y extent: 4.3 to 7.8mm
+# - Standard source Y extent: -7.4 to 6.2mm
+# - Gap: ~1.6mm at anterior end
+# - Extended source Y extent: should reach ~8mm

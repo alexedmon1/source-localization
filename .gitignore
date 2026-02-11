@@ -1,0 +1,114 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# uv
+uv.lock.backup
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# EEG data files (user data, not committed)
+*.fif
+*.set
+*.fdt
+*.edf
+*.bdf
+*.vhdr
+*.vmrk
+*.eeg
+*.raw
+
+# Large matrix/array files
+*.mat
+*.h5
+*.hdf5
+*.npy
+
+# MRI/Neuroimaging data
+*.nii
+*.nii.gz
+*.mgz
+*.mgh
+
+# EXCEPT bundled atlas data (package data)
+!src/source_localization/data/atlas/*.nii
+!src/source_localization/data/atlas/*.nii.gz
+!src/source_localization/data/atlas/coarse_parcellation/*.nii
+!src/source_localization/data/atlas/coarse_parcellation/*.nii.gz
+
+# Pipeline outputs
+results/
+output/
+validation/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Secrets
+.env
+.env.local
+credentials.json
+*.key
+*.pem

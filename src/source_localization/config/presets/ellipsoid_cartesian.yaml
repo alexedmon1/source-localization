@@ -1,0 +1,111 @@
+pipeline:
+  name: "Ellipsoidal BEM + Volumetric Sources"
+  bem_type: ellipsoid
+  source_type: cartesian
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null
+
+electrode:
+  projection_method: "intensity"  # 'intensity', 'rbf', or 'none'
+  skull_offset_mm: 0.0  # Distance from skull surface (0.0 = at surface)
+  bregma_vox: [30, 149, 41]  # Bregma voxel coordinates (0-indexed) for validation
+  lambda_vox: [30, 97, 41]  # Lambda voxel coordinates (0-indexed) for validation
+  create_visualization: true  # Create electrode registration visualization
+
+bem:
+  ellipsoid:
+    n_layers: 3  # Brain, skull, scalp
+    conductivities: [0.33, 0.0042, 0.33]  # Brain, skull (80:1 ratio), scalp
+    radii_ratios: [0.87, 0.92, 1.0]  # Will be computed from ellipsoid fitting
+    ellipsoid_method: 'axis_aligned'  # Use axis-aligned fitting (avoids PCA axis swaps)
+    ellipsoid_margin: 1.23  # 23% expansion margin (matches adv_test)
+    use_cache: true
+    force_recreate: false
+
+source_space:
+  volumetric:
+    # Auto-spacing: calculates optimal grid spacing from brain volume and channel count
+    # Formula: spacing = (brain_volume / target_sources)^(1/3)
+    # For 30 channels with target_ratio=7: spacing ≈ 1.37mm → ~210 sources
+    spacing_mm: 'auto'
+
+    # Target sources per channel (default: 7)
+    # This ratio balances coverage vs. collinearity:
+    #   - 3-5:  Conservative, best for statistics, may miss small regions
+    #   - 7:    Balanced (matches validated roi_based preset with 6.9 sources/ch)
+    #   - 10:   Dense coverage, moderate collinearity risk
+    #   - 15+:  High collinearity, not recommended for LMM/statistical models
+    #
+    # Validation evidence (30 channels):
+    #   - 34 sources/ch (1033 sources): 2.2% ROI accuracy, 94% pairs correlated
+    #   - 7 sources/ch (206 sources):   15.9% ROI accuracy, 6.4% pairs correlated
+    target_sources_per_channel: 7
+
+    # Maximum ratio before warning (default: 15)
+    # Above this, consider surface or ROI-based source space instead
+    max_sources_per_channel: 15
+
+    # To use fixed spacing instead of auto, set spacing_mm to a number:
+    # spacing_mm: 1.5  # Fixed 1.5mm spacing (~161 sources)
+
+    pos_mm: 0.0
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA  # Recommended: sLORETA for best localization accuracy
+  snr: 3.0
+  lambda2: null
+  depth_weighting: 0.8
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: true
+  proximity_radius_mm: 2.0
+
+outputs:
+  dir: "outputs/ellipsoid_volumetric"
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
+
+# Configuration Notes:
+# --------------------
+# This configuration uses ellipsoid BEM with auto-regulated volumetric sources:
+# - Auto-fit ellipsoid using axis-aligned method (avoids PCA axis swaps)
+# - 1.23 expansion margin (23% margin for full brain coverage)
+# - 3-layer BEM (brain, skull, scalp)
+# - Auto-spacing targets 7 sources/channel (~210 sources for 30 channels)
+#
+# Auto-Spacing Benefits:
+# - Adapts to different channel counts (e.g., 64-channel array → more sources)
+# - Maintains optimal sources/channel ratio for inverse solution stability
+# - Reduces inter-ROI collinearity compared to fixed dense spacing
+#
+# Expected Results (30 channels):
+# - Sources: ~210 (vs. 532-783 with fixed 1.0mm spacing)
+# - Spacing: ~1.37mm
+# - Sources/channel: 7.0
+# - Collinearity: LOW (similar to roi_based preset)
+#
+# For Different Channel Counts:
+# - No manual tuning required
+# - Spacing auto-adjusts to maintain target_sources_per_channel ratio
+# - Override with fixed spacing_mm if needed for specific use case

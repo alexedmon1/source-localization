@@ -1,0 +1,103 @@
+# Shell-Based Sphere Source Localization Configuration
+# Combines spherical BEM geometry with concentric shell source placement
+# Fast analytical BEM with geometry-matched shell sources
+
+pipeline:
+  name: "Shell Sphere BEM"
+  bem_type: sphere
+  source_type: shell
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_mask: "data/atlas/Atlas_3DRois_brain.nii.gz"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null  # Specify via command line
+
+electrode:
+  projection_method: "intensity"
+  skull_offset_mm: 0.0
+  bregma_vox: [30, 149, 41]
+  lambda_vox: [30, 97, 41]
+  create_visualization: true
+
+bem:
+  sphere:
+    n_layers: 3  # Brain, skull, scalp
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]
+    use_cache: true
+
+source_space:
+  shell:
+    n_shells: 3  # Number of concentric shells (3 shells reduces depth ambiguity)
+    shell_scales: [0.5, 0.75, 0.95]  # Scale factors relative to brain radius (0.95 = near surface)
+    min_points_per_shell: 30
+    max_points_per_shell: 120  # ~200 total sources
+    scale_by_area: true  # Scale points with shell surface area
+    filter_dorsal: false  # Set true to keep only dorsal hemisphere
+    filter_above_electrodes: true  # Remove sources above electrode level (default: true)
+    electrode_margin_mm: 0.3  # Safety margin below electrode min Z
+    filter_exterior: true  # Remove sources outside brain mask (default: true)
+    distribution: fibonacci  # 'fibonacci' (default) or 'latlon' (onion pattern)
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA  # Recommended: sLORETA for best localization accuracy
+  snr: 3.0
+  lambda2: null  # Auto-computed from SNR
+  depth_weighting: 0.0  # Disable depth weighting for mouse brain
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: false  # Direct atlas lookup (no proximity expansion)
+  # Sources outside ROIs will have ROI=0 (background) - this is expected
+  # Shell-based has good coverage so proximity mapping is unnecessary
+
+outputs:
+  dir: null  # Specify via command line
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
+
+# Configuration Notes:
+# --------------------
+# Shell-based source placement with spherical BEM:
+# - Uses fast analytical BEM solution
+# - Sources on concentric spherical shells
+# - Odd shells are rotated/offset 30° to reduce radial alignment
+# - Sources are filtered to stay below electrode level (automatic)
+# - Good for prototyping and comparison studies
+#
+# 3-shell configuration (~200 sources after electrode filtering):
+# - Shell at 0.40: ~45 points (deep)
+# - Shell at 0.65: ~60 points (mid, offset 30°)
+# - Shell at 0.85: ~95 points before filtering (superficial)
+#
+# Electrode filtering (enabled by default):
+# - Removes any sources above (electrode_min_Z - margin)
+# - Ensures all sources are below electrode level for valid forward model
+# - Margin default: 0.3mm below electrode minimum Z
+#
+# Distribution options:
+# - 'fibonacci': Near-uniform spiral distribution (default)
+# - 'latlon': Latitude-longitude grid (onion pattern, more structured)
+#
+# Validated Performance (2026-01-28):
+# - Source spacing: ~1.4mm
+# - Sources constrained below electrode level (automatic filtering)
+# - Fast computation with good whole-brain coverage

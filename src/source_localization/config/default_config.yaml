@@ -1,0 +1,83 @@
+pipeline:
+  name: "Default Source Localization"
+  bem_type: sphere
+  source_type: volumetric
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_mask: "data/atlas/Atlas_3DRois_brain.nii"  # Binary brain mask for source space filtering
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null  # Must be specified at runtime
+
+electrode:
+  projection_method: "intensity"  # 'intensity', 'rbf', or 'none'
+  skull_offset_mm: 0.0  # Distance from skull surface (0.0 = at surface)
+  bregma_vox: [30, 149, 41]  # Bregma voxel coordinates (0-indexed) for validation
+  lambda_vox: [30, 97, 41]  # Lambda voxel coordinates (0-indexed) for validation
+  create_visualization: true  # Create electrode registration visualization
+
+bem:
+  sphere:
+    n_layers: 3
+    conductivities: [0.33, 0.0042, 0.33]  # brain, skull, scalp
+    radii_ratios: [0.87, 0.92, 1.0]  # brain, skull, scalp
+    compute_method: analytical
+    use_cache: true  # Enable BEM caching
+    force_recreate: false  # Force BEM recreation even if cached
+  ellipsoid:
+    n_layers: 3
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]  # brain, skull, scalp
+    fitting_method: axis_aligned  # 'axis_aligned' (default) or 'pca' - axis_aligned avoids PCA axis swaps
+    fitting_margin: 1.0  # Expansion factor: 1.0 = tight fit with 53% brain coverage in inner ellipsoid
+    use_cache: true  # Enable BEM caching
+    force_recreate: false  # Force BEM recreation even if cached
+  tissue:
+    tissues: ['brain', 'skull', 'scalp']
+    conductivities: [0.33, 0.0042, 0.33]
+    use_cache: true
+    force_recreate: false
+
+source_space:
+  volumetric:
+    spacing_mm: 1.0  # Grid spacing in mm (use 'auto' to calculate from electrode spacing)
+    auto_spacing_factor: 0.5  # When spacing_mm='auto', use this factor × median electrode distance
+    use_brain_mask: true  # Filter to brain mask regions first
+    apply_bem_constraint: true  # Then apply BEM geometry constraint (inner brain ellipsoid surface)
+    pos_mm: 0.0
+  surface:
+    spacing_mm: 1.5
+    smoothing_steps: 7
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: dSPM  # Options: MNE, dSPM, sLORETA (uses custom mouse-brain-optimized implementations)
+  snr: 3.0
+  lambda2: null  # If null, computed as 1/(snr^2)
+  # Note: depth_weighting removed - custom implementations bypass MNE-Python's human-brain assumptions
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: true
+  proximity_radius_mm: 2.0
+
+outputs:
+  dir: "outputs/default"
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100

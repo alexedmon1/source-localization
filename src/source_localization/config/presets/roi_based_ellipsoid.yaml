@@ -1,0 +1,85 @@
+# ROI-Based Ellipsoid Source Localization Configuration
+# Combines ellipsoid BEM geometry with ROI-centroid source placement
+# Achieves anatomically accurate geometry with reduced inter-ROI collinearity
+
+pipeline:
+  name: "ROI-Based Ellipsoidal BEM"
+  bem_type: ellipsoid
+  source_type: roi_based
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_mask: "data/atlas/Atlas_3DRois_brain.nii.gz"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null  # Specify via command line
+
+electrode:
+  projection_method: "intensity"
+  skull_offset_mm: 0.0
+  bregma_vox: [30, 149, 41]
+  lambda_vox: [30, 97, 41]
+  create_visualization: true
+
+bem:
+  ellipsoid:
+    n_layers: 3  # Brain, skull, scalp
+    conductivities: [0.33, 0.0042, 0.33]  # Brain (0.33 S/m), skull (0.0042 S/m), scalp (0.33 S/m)
+    radii_ratios: [0.87, 0.92, 1.0]  # Standard ratios
+    ellipsoid_method: 'axis_aligned'  # Use axis-aligned ellipsoid fitting
+    ellipsoid_margin: 1.23  # 23% margin for full brain coverage
+    use_cache: true
+    force_recreate: false
+
+source_space:
+  roi_based:
+    adaptive_sources: true  # Allocate sources proportionally to ROI volume
+    max_total_sources: 200  # Budget constraint (200/30 channels = 6.7 sources/ch)
+    placement_strategy: pca  # 'centroid', 'pca', or 'random'
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA  # Recommended: sLORETA for best localization accuracy (validated)
+  snr: 3.0
+  lambda2: null  # Auto-computed from SNR
+  depth_weighting: 0.0  # Disable depth weighting for mouse brain
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: false  # Use direct ROI assignment (not proximity-based)
+
+outputs:
+  dir: null  # Specify via command line
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
+
+# Configuration Notes:
+# --------------------
+# This configuration combines:
+# - Ellipsoidal BEM geometry (better anatomical fit for elongated mouse brain)
+# - ROI-based source placement (sources at ROI centroids)
+#
+# Expected Benefits:
+# - Low inter-ROI collinearity (similar to roi_based_sphere)
+# - High ROI coverage (44 ROIs)
+# - More anatomically accurate head model than sphere
+#
+# Key Features:
+# - Ellipsoid fitting adapts to mouse brain shape
+# - ROI-centroid sources eliminate inter-ROI crosstalk
+# - Adaptive source allocation balances coverage

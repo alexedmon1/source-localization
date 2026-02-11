@@ -1,0 +1,66 @@
+pipeline:
+  name: "Spherical BEM + Surface Sources"
+  bem_type: sphere
+  source_type: surface
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null
+
+electrode:
+  projection_method: "intensity"  # 'intensity', 'rbf', or 'none'
+  skull_offset_mm: 0.0  # Distance from skull surface (0.0 = at surface)
+  bregma_vox: [30, 149, 41]  # Bregma voxel coordinates (0-indexed) for validation
+  lambda_vox: [30, 97, 41]  # Lambda voxel coordinates (0-indexed) for validation
+  create_visualization: true  # Create electrode registration visualization
+
+bem:
+  sphere:
+    n_layers: 3
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]
+    electrode_centered: true  # Position sphere with top at brain surface, centered under electrodes
+    brain_radius_mm: null  # Auto-compute from brain extent
+    use_cache: true
+    force_recreate: false
+    compute_method: analytical
+
+source_space:
+  surface:
+    ico_level: 3  # Icosahedral subdivision level (3 = 642 vertices, ~290 after dorsal filtering)
+    inset_factor: 0.85  # Sources at 85% of brain radius (ensures interior placement)
+    filter_dorsal: true  # Filter to dorsal hemisphere only (Z > center) for better conditioning
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA  # Recommended: sLORETA for best localization accuracy
+  snr: 3.0
+  lambda2: null
+  depth_weighting: 0.8
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: true
+  proximity_radius_mm: 2.0
+
+outputs:
+  dir: "outputs/sphere_surface"
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
