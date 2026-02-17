@@ -103,7 +103,7 @@ class StudyConfig:
     @property
     def derivatives_dir(self) -> Path:
         """Directory for processed outputs."""
-        return self.root_dir / "derivatives" / "source_localization"
+        return self.root_dir / "derivatives"
 
     @property
     def group_dir(self) -> Path:
