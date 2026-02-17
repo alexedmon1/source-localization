@@ -52,6 +52,7 @@ from .analysis import (
     compute_group_connectivity,
     DEFAULT_BANDS,
 )
+from .qc import run_qc, QCResult
 
 __all__ = [
     # Configuration
@@ -70,4 +71,8 @@ __all__ = [
     'collect_connectivity_matrices',
     'compute_group_connectivity',
     'DEFAULT_BANDS',
+
+    # Quality control
+    'run_qc',
+    'QCResult',
 ]

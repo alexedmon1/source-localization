@@ -162,7 +162,10 @@ def _run_pipeline(args):
 
 def _create_validate_parser(subparsers):
     """Create parser for the 'validate' command."""
-    from .validation.cli import create_parser as create_validation_parser
+    try:
+        from .validation.cli import create_parser as create_validation_parser
+    except (ImportError, ModuleNotFoundError):
+        return  # validation module not available
 
     # Get the validation parser
     val_parser = create_validation_parser()
@@ -231,6 +234,8 @@ Examples:
     run_parser.add_argument('--force', action='store_true',
                             help='Re-process subjects even if output exists')
     run_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    run_parser.add_argument('--no-qc', action='store_true',
+                            help='Skip automatic QC after processing')
 
     # Collect subcommand
     collect_parser = study_subparsers.add_parser(
@@ -264,6 +269,17 @@ Examples:
     analyze_parser.add_argument('--force', action='store_true',
                                 help='Overwrite existing analysis')
     analyze_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+
+    # QC subcommand
+    qc_parser = study_subparsers.add_parser(
+        'qc',
+        help='Run quality control on processed subjects',
+    )
+    qc_parser.add_argument('config', help='Path to study_config.yaml')
+    qc_parser.add_argument('--threshold', type=float, default=2.0,
+                           help='Z-score threshold for outlier detection (default: 2.0)')
+    qc_parser.add_argument('--output', help='Override QC output directory')
+    qc_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
 
     return parser
 
@@ -322,6 +338,18 @@ def _run_study_command(args):
 
         print()
         print(result.summary())
+
+        # Auto-run QC unless --no-qc
+        if not args.no_qc:
+            from .study import run_qc
+            print("\nRunning QC...")
+            try:
+                qc_result = run_qc(config, study_result=result, verbose=args.verbose)
+                if qc_result.report_path:
+                    print(f"QC report: {qc_result.report_path}")
+            except Exception as e:
+                print(f"QC failed (non-fatal): {e}", file=sys.stderr)
+
         return 0 if result.n_failed == 0 else 1
 
     elif args.study_command == 'collect':
@@ -355,6 +383,28 @@ def _run_study_command(args):
         print(f"  Processed: {processed}")
         print(f"  Analyzed: {analyzed}")
         print(f"  Pending: {pending}")
+        return 0
+
+    elif args.study_command == 'qc':
+        # Run standalone QC
+        from .study import run_qc
+
+        config = StudyConfig.from_yaml(args.config)
+
+        if args.verbose:
+            logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+        else:
+            logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+        print(f"Running QC on {len(config.subjects)} subjects...")
+        qc_result = run_qc(
+            config,
+            outlier_threshold=args.threshold,
+            output_dir=args.output,
+            verbose=args.verbose,
+        )
+        if qc_result.report_path:
+            print(f"\nQC report: {qc_result.report_path}")
         return 0
 
     elif args.study_command == 'analyze':
