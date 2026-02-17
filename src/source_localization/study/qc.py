@@ -752,7 +752,7 @@ def run_qc(
     from .config import StudyConfig
 
     derivatives_dir = config.derivatives_dir
-    qc_dir = Path(output_dir) if output_dir else derivatives_dir / "qc"
+    qc_dir = Path(output_dir) if output_dir else config.root_dir / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
 
     # Build processing time lookup from log or study_result
