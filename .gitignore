@@ -93,6 +93,8 @@ Thumbs.db
 !src/source_localization/data/atlas/*.nii.gz
 !src/source_localization/data/atlas/coarse_parcellation/*.nii
 !src/source_localization/data/atlas/coarse_parcellation/*.nii.gz
+!src/source_localization/data/atlas/allen/*.nii
+!src/source_localization/data/atlas/allen/*.nii.gz
 
 # Pipeline outputs
 results/

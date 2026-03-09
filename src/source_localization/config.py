@@ -5,6 +5,27 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+# Atlas definitions: maps atlas name -> input path overrides
+# All paths are relative to the package data directory
+ATLAS_DEFINITIONS = {
+    'antwerp': {
+        'brain_labels': 'data/atlas/Atlas_3DRoisLeftRight.Labels.nii',
+        'roi_mapping': 'data/atlas/roi_mapping.json',
+        'brain_volume': 'data/atlas/Atlas_3DRois.nii',
+        'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
+    },
+    'allen': {
+        'brain_labels': 'data/atlas/allen/allen_labels.nii.gz',
+        'roi_mapping': 'data/atlas/allen/roi_mapping.json',
+        'brain_volume': 'data/atlas/Atlas_3DRois.nii',
+        'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
+    },
+}
+
+# Default atlas used by all presets
+DEFAULT_ATLAS = 'antwerp'
+
+
 class Config:
     """Pipeline configuration manager."""
 
@@ -91,6 +112,25 @@ class Config:
             d[keys[-1]] = value
 
         return cls(config)
+
+    def apply_atlas(self, atlas_name: str) -> None:
+        """Override atlas input paths for a named atlas.
+
+        Parameters
+        ----------
+        atlas_name : str
+            Atlas name (e.g., 'antwerp', 'allen').
+            See ATLAS_DEFINITIONS for available options.
+        """
+        if atlas_name not in ATLAS_DEFINITIONS:
+            available = ', '.join(ATLAS_DEFINITIONS.keys())
+            raise ValueError(f"Unknown atlas: {atlas_name}. Available: {available}")
+
+        atlas_paths = ATLAS_DEFINITIONS[atlas_name]
+        if 'inputs' not in self._config:
+            self._config['inputs'] = {}
+        for key, path in atlas_paths.items():
+            self._config['inputs'][key] = path
 
     def _validate(self):
         """Validate configuration."""

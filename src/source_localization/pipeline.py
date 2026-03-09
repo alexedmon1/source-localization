@@ -65,13 +65,16 @@ class Pipeline:
         self.step_outputs = {}
 
     @classmethod
-    def from_preset(cls, preset_name: str, **overrides) -> 'Pipeline':
+    def from_preset(cls, preset_name: str, atlas: str = None, **overrides) -> 'Pipeline':
         """Create pipeline from preset configuration.
 
         Parameters
         ----------
         preset_name : str
             Name of preset (e.g., 'sphere_volumetric')
+        atlas : str, optional
+            Atlas to use ('antwerp', 'allen'). If None, uses
+            the preset's default atlas paths.
         **overrides : dict
             Configuration overrides (use dot notation for nested keys)
 
@@ -81,6 +84,10 @@ class Pipeline:
             Configured pipeline instance
         """
         config = Config.from_preset(preset_name)
+
+        # Apply atlas override
+        if atlas is not None:
+            config.apply_atlas(atlas)
 
         # Apply overrides
         if overrides:

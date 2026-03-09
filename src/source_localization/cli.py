@@ -87,6 +87,12 @@ Examples:
     parser.add_argument('--visualize', action='store_true',
                         help='Include visualization (optional post-processing)')
 
+    # Atlas selection
+    parser.add_argument('--atlas',
+                        choices=['antwerp', 'allen'],
+                        default=None,
+                        help='Atlas to use: antwerp (47 ROIs, default) or allen (49 ROIs)')
+
     # Other flags
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
 
@@ -130,22 +136,29 @@ def _run_pipeline(args):
     include_spectral = getattr(args, 'spectral', False)
     include_visualization = getattr(args, 'visualize', False)
 
+    # Get atlas selection
+    atlas = getattr(args, 'atlas', None)
+
     # Create and run pipeline
     try:
         if args.preset:
-            pipeline = Pipeline.from_preset(args.preset, **overrides)
+            pipeline = Pipeline.from_preset(args.preset, atlas=atlas, **overrides)
             results = pipeline.run(eeg_file=args.eeg, output_dir=args.output,
                                    include_spectral=include_spectral,
                                    include_visualization=include_visualization)
 
         elif args.bem and args.source:
             pipeline = Pipeline.from_bem_source(args.bem, args.source, **overrides)
+            if atlas:
+                pipeline.config.apply_atlas(atlas)
             results = pipeline.run(eeg_file=args.eeg, output_dir=args.output,
                                    include_spectral=include_spectral,
                                    include_visualization=include_visualization)
 
         elif args.config:
             pipeline = Pipeline.from_file(args.config)
+            if atlas:
+                pipeline.config.apply_atlas(atlas)
             results = pipeline.run(eeg_file=args.eeg, output_dir=args.output,
                                    include_spectral=include_spectral,
                                    include_visualization=include_visualization)

@@ -1,11 +1,11 @@
 # Mouse EEG Source Localization Package
 
 **Created:** 2025-11-26
-**Last Updated:** 2026-01-30
-**Version:** 1.4.1
+**Last Updated:** 2026-03-09
+**Version:** 1.5.0
 **Status:** Production Ready
 
-A complete, validated Python package for mouse EEG source localization using the Antwerp Mouse Brain Atlas. Includes multi-subject batch processing, MNE-based spectral/connectivity analysis, and publication-quality visualizations.
+A complete, validated Python package for mouse EEG source localization with two bundled brain atlases (Antwerp 47-ROI and Allen CCFv3 49-ROI). Includes multi-subject batch processing, MNE-based spectral/connectivity analysis, and publication-quality visualizations.
 
 ---
 
@@ -55,7 +55,9 @@ Source localization solves the EEG inverse problem: given electrode measurements
   - **Cartesian**: 3D volumetric grid
   - **Shell**: Concentric geometry-matched shells (best conditioning)
 - **5 inverse methods**: MNE, dSPM, sLORETA, LCMV, DICS beamformers
-- **Packaged Antwerp Mouse Brain Atlas** (47 ROIs, plus 22-ROI coarse atlas)
+- **2 bundled brain atlases** selectable via `--atlas` flag:
+  - **Antwerp** (47 ROIs) — default, UAnterwerpen C57BL/6 MRI atlas
+  - **Allen** (49 ROIs) — Allen Mouse Brain CCFv3, depth-adaptive whole-brain parcellation
 - **32-channel electrode array** coordinates included
 
 ### Multi-Subject Study Processing (NEW in v1.3.0)
@@ -131,8 +133,11 @@ source-localization study --help
 ### Single Subject
 
 ```bash
-# Run source localization on one EEG file
+# Run source localization on one EEG file (default Antwerp atlas)
 source-localization run --preset roi_based_ellipsoid --eeg /path/to/data.set --output ./results
+
+# Use Allen atlas (49 whole-brain ROIs)
+source-localization run --preset roi_based_ellipsoid --atlas allen --eeg /path/to/data.set --output ./results
 
 # View results
 open results/pipeline_report.html
@@ -331,11 +336,26 @@ source-localization study analyze study_config.yaml \
 - **Fast iteration:** `sphere_surface` - Quick analytical BEM
 - **Dense coverage:** `ellipsoid_cartesian` - Maximum volumetric sources
 
-### Alternative Atlases
+### Atlas Selection
 
-The package includes two atlas versions that can be specified in custom configurations:
-- **47-ROI (default):** Full Antwerp Mouse Brain Atlas
-- **22-ROI coarse:** Bilateral ROIs merged for connectivity analysis with fewer regions
+The package bundles two brain atlases. Select with `--atlas` on the CLI or `atlas=` in the Python API:
+
+| Atlas | Flag | ROIs | Description |
+|-------|------|------|-------------|
+| **Antwerp** | `--atlas antwerp` (default) | 47 | UAnterwerpen C57BL/6 MRI atlas. Original atlas used in all prior validation. |
+| **Allen** | `--atlas allen` | 49 | Allen Mouse Brain CCFv3, registered to Antwerp coordinate space via ANTs. Depth-adaptive parcellation: 2mm resolution at surface (0-2mm), 3mm at mid-depth (2-4mm), 4mm deep (4+mm). Covers the entire brain volume including subcortical, cerebellar, and olfactory regions. |
+
+```bash
+# CLI
+source-localization run --preset shell_ellipsoid --atlas allen --eeg data.set --output results/
+
+# Python API
+pipeline = Pipeline.from_preset('shell_ellipsoid', atlas='allen')
+```
+
+Both atlases share the same coordinate space, BEM geometry, and electrode positions. Only the ROI label volume and mapping differ, so all presets work with either atlas.
+
+A 22-ROI coarse parcellation (bilateral ROIs merged) is also available for connectivity analysis with fewer regions via custom config.
 
 ---
 
@@ -346,6 +366,9 @@ The package includes two atlas versions that can be specified in custom configur
 ```bash
 # Run pipeline with preset
 source-localization run --preset roi_based_ellipsoid --eeg data.set --output ./results
+
+# Use Allen atlas
+source-localization run --preset roi_based_ellipsoid --atlas allen --eeg data.set --output ./results
 
 # Override parameters
 source-localization run --preset roi_based_ellipsoid --eeg data.set \
@@ -363,6 +386,10 @@ from source_localization import Pipeline
 
 # Create and run pipeline
 pipeline = Pipeline.from_preset('roi_based_ellipsoid')
+results = pipeline.run(eeg_file='data.set', output_dir='./results')
+
+# Use Allen atlas (49 whole-brain ROIs)
+pipeline = Pipeline.from_preset('roi_based_ellipsoid', atlas='allen')
 results = pipeline.run(eeg_file='data.set', output_dir='./results')
 
 # Access outputs
@@ -775,6 +802,28 @@ source_localization/
 ---
 
 ## Changelog
+
+### Version 1.5.0 (2026-03-09)
+
+**Allen Mouse Brain Atlas Integration**
+
+- **New atlas: Allen CCFv3** (`--atlas allen`)
+  - 49 depth-adaptive ROIs covering the entire brain volume
+  - Derived from Allen Mouse Brain Common Coordinate Framework v3
+  - Registered to Antwerp coordinate space via ANTs (rigid + affine + SyN)
+  - Depth-adaptive parcellation: 2mm at surface, 3mm mid-depth, 4mm deep
+  - Includes cortical, subcortical, cerebellar, hippocampal, and olfactory regions
+  - Full methods documentation in `data/atlas/allen/METHODS.md`
+
+- **Atlas selection flag** (`--atlas`)
+  - CLI: `source-localization run --preset shell_ellipsoid --atlas allen --eeg data.set`
+  - Python: `Pipeline.from_preset('shell_ellipsoid', atlas='allen')`
+  - Works with all presets — only ROI labels/mapping change, BEM geometry stays the same
+
+- **Validation module** added to package
+  - Dipole simulation validation without requiring EEG data
+  - Depth-stratified metrics (localization error and ROI accuracy by depth zone)
+  - Support for ROI centroid, uniform grid, and combined test modes
 
 ### Version 1.4.1 (2026-01-30)
 
