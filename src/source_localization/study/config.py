@@ -61,6 +61,7 @@ class StudyConfig:
     name: str
     root_dir: Path
     pipeline_preset: str = "roi_based_ellipsoid"
+    pipeline_atlas: Optional[str] = None
     pipeline_overrides: Dict[str, Any] = field(default_factory=dict)
     subjects: List[SubjectInfo] = field(default_factory=list)
     discovery_config: Optional[Dict[str, Any]] = None
@@ -161,12 +162,16 @@ class StudyConfig:
             else:
                 analysis_config_safe[key] = val
 
+        pipeline_dict = {
+            'preset': self.pipeline_preset,
+            'overrides': self.pipeline_overrides,
+        }
+        if self.pipeline_atlas:
+            pipeline_dict['atlas'] = self.pipeline_atlas
+
         result = {
             'name': self.name,
-            'pipeline': {
-                'preset': self.pipeline_preset,
-                'overrides': self.pipeline_overrides,
-            },
+            'pipeline': pipeline_dict,
             'analysis': analysis_config_safe,
             'output': self.output_config,
         }
@@ -348,6 +353,7 @@ class StudyConfig:
             name=data.get('name', 'unnamed_study'),
             root_dir=root_dir,
             pipeline_preset=pipeline_config.get('preset', 'roi_based_ellipsoid'),
+            pipeline_atlas=pipeline_config.get('atlas'),
             pipeline_overrides=pipeline_config.get('overrides', {}),
             subjects=subjects,
             discovery_config=discovery_config,
@@ -566,6 +572,7 @@ class StudyConfig:
             f"Study: {self.name}",
             f"Root directory: {self.root_dir}",
             f"Pipeline preset: {self.pipeline_preset}",
+            f"Atlas: {self.pipeline_atlas or 'antwerp (default)'}",
             f"Number of subjects: {len(self.subjects)}",
         ]
 

@@ -143,7 +143,7 @@ def process_subject(
         roi_dir.mkdir(exist_ok=True)
 
         # Run source localization pipeline
-        pipeline = Pipeline.from_preset(config.pipeline_preset, **config.pipeline_overrides)
+        pipeline = Pipeline.from_preset(config.pipeline_preset, atlas=config.pipeline_atlas, **config.pipeline_overrides)
         pipeline.run(
             eeg_file=str(subject_info.eeg_file),
             output_dir=str(output_dir / "pipeline"),
