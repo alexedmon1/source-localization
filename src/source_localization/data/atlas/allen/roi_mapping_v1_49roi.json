@@ -1,0 +1,2012 @@
+{
+  "atlas_name": "Allen Mouse Brain Full-Brain Atlas (depth-adaptive parcellation)",
+  "source_atlas": "Allen Mouse Brain Common Coordinate Framework v3 (CCFv3)",
+  "coordinate_space": "Antwerp (UAnterwerpen C57BL/6 MRI)",
+  "n_rois": 49,
+  "index_range": "0-49",
+  "depth_zones": {
+    "0-2mm": {
+      "resolution_mm": 2.0,
+      "description": "Superficial cortex, near electrodes"
+    },
+    "2-4mm": {
+      "resolution_mm": 3.0,
+      "description": "Mid-depth: thalamus, deep cortex, hippocampus"
+    },
+    "4+mm": {
+      "resolution_mm": 4.0,
+      "description": "Deep structures: hypothalamus, brainstem"
+    }
+  },
+  "citation": "Wang Q, Ding SL, Li Y, et al. (2020) The Allen Mouse Brain Common Coordinate Framework: A 3D Reference Atlas. Cell 181(4):936-953.e20",
+  "citation_url": "https://doi.org/10.1016/j.cell.2020.04.007",
+  "atlas_url": "https://atlas.brain-map.org/",
+  "categories": {
+    "cortical": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      11,
+      12,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      22,
+      24,
+      25,
+      27,
+      34
+    ],
+    "subcortical": [
+      30,
+      35,
+      38,
+      39,
+      40,
+      47
+    ],
+    "cerebellum": [
+      13,
+      14,
+      21,
+      28,
+      29,
+      36,
+      45,
+      46
+    ],
+    "olfactory": [
+      10,
+      26,
+      37,
+      43,
+      44
+    ],
+    "hippocampal": [
+      23,
+      31,
+      32,
+      33,
+      41,
+      42
+    ],
+    "deep": [
+      48,
+      49
+    ]
+  },
+  "rois": {
+    "0": {
+      "id": 0,
+      "name": "Background",
+      "abbreviation": "BG",
+      "color_hex": "000000",
+      "color_rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    "1": {
+      "id": 1,
+      "name": "Isocortex / Hippocampal formation_L_sup_1",
+      "abbreviation": "Isocortex+HPF_L_sup",
+      "color_hex": "ff3232",
+      "color_rgb": [
+        255,
+        50,
+        50
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.1,
+      "volume_mm3": 6.27,
+      "extent_mm": [
+        2.84,
+        4.96,
+        3.4
+      ],
+      "n_allen_structures": 32,
+      "allen_structure_ids": [
+        97,
+        1121,
+        1041,
+        526,
+        289,
+        836,
+        1127,
+        312782656,
+        750,
+        543,
+        20,
+        843,
+        540,
+        664,
+        902,
+        729,
+        727,
+        52,
+        269,
+        139
+      ]
+    },
+    "2": {
+      "id": 2,
+      "name": "Isocortex / Inferior colliculus_L_sup",
+      "abbreviation": "Isocortex+IC_L_sup",
+      "color_hex": "0a42cc",
+      "color_rgb": [
+        10,
+        66,
+        204
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 10.24,
+      "extent_mm": [
+        3.86,
+        3.76,
+        2.8
+      ],
+      "n_allen_structures": 20,
+      "allen_structure_ids": [
+        593,
+        828,
+        821,
+        778,
+        971,
+        820,
+        33,
+        795,
+        1037,
+        17,
+        811,
+        721,
+        443,
+        502,
+        984,
+        26,
+        313,
+        484682464,
+        42,
+        976
+      ]
+    },
+    "3": {
+      "id": 3,
+      "name": "Isocortex_L_sup_5",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "b9ff59",
+      "color_rgb": [
+        185,
+        255,
+        89
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.0,
+      "volume_mm3": 3.71,
+      "extent_mm": [
+        2.23,
+        2.16,
+        3.0
+      ],
+      "n_allen_structures": 9,
+      "allen_structure_ids": [
+        878,
+        657,
+        1102,
+        974,
+        950,
+        36,
+        180,
+        187,
+        148
+      ]
+    },
+    "4": {
+      "id": 4,
+      "name": "Isocortex_L_sup_2",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "cc28b7",
+      "color_rgb": [
+        204,
+        40,
+        183
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.4,
+      "volume_mm3": 5.14,
+      "extent_mm": [
+        2.64,
+        4.56,
+        2.2
+      ],
+      "n_allen_structures": 17,
+      "allen_structure_ids": [
+        442,
+        312782560,
+        671,
+        434,
+        774,
+        805,
+        965,
+        906,
+        281,
+        565,
+        41,
+        433,
+        1066,
+        257,
+        1046,
+        501,
+        401
+      ]
+    },
+    "5": {
+      "id": 5,
+      "name": "Isocortex_L_sup_1",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "0cffd6",
+      "color_rgb": [
+        12,
+        255,
+        214
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.7,
+      "volume_mm3": 6.22,
+      "extent_mm": [
+        2.84,
+        3.6,
+        2.6
+      ],
+      "n_allen_structures": 32,
+      "allen_structure_ids": [
+        312782624,
+        312782592,
+        735,
+        959,
+        421,
+        1023,
+        847,
+        527,
+        1074,
+        251,
+        252,
+        696,
+        613,
+        755,
+        600,
+        954,
+        973,
+        74,
+        156,
+        816
+      ]
+    },
+    "6": {
+      "id": 6,
+      "name": "Isocortex / Superior colliculus, sensory related_L_sup",
+      "abbreviation": "Isocortex+SCs_L_sup",
+      "color_hex": "cc8f47",
+      "color_rgb": [
+        204,
+        143,
+        71
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.0,
+      "volume_mm3": 5.15,
+      "extent_mm": [
+        2.03,
+        4.4,
+        1.8
+      ],
+      "n_allen_structures": 11,
+      "allen_structure_ids": [
+        687,
+        430,
+        842,
+        610,
+        10,
+        274,
+        542,
+        590,
+        851,
+        834,
+        997
+      ]
+    },
+    "7": {
+      "id": 7,
+      "name": "Isocortex_L_sup_4",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "6532ff",
+      "color_rgb": [
+        101,
+        50,
+        255
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 10.45,
+      "extent_mm": [
+        3.05,
+        4.32,
+        3.2
+      ],
+      "n_allen_structures": 15,
+      "allen_structure_ids": [
+        320,
+        943,
+        648,
+        844,
+        1021,
+        450,
+        945,
+        854,
+        182305696,
+        625,
+        182305712,
+        577,
+        1108,
+        672,
+        956
+      ]
+    },
+    "8": {
+      "id": 8,
+      "name": "Isocortex_L_sup_7",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "12cc0a",
+      "color_rgb": [
+        18,
+        204,
+        10
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.6,
+      "volume_mm3": 0.4,
+      "extent_mm": [
+        2.23,
+        2.0,
+        1.4
+      ],
+      "n_allen_structures": 4,
+      "allen_structure_ids": [
+        996,
+        328,
+        1101,
+        783
+      ]
+    },
+    "9": {
+      "id": 9,
+      "name": "Isocortex / Hippocampal formation_L_sup_2",
+      "abbreviation": "Isocortex+HPF_L_sup",
+      "color_hex": "ff5990",
+      "color_rgb": [
+        255,
+        89,
+        144
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.1,
+      "volume_mm3": 12.11,
+      "extent_mm": [
+        4.06,
+        6.57,
+        3.2
+      ],
+      "n_allen_structures": 24,
+      "allen_structure_ids": [
+        382,
+        484682528,
+        981,
+        1038,
+        1047,
+        201,
+        940,
+        1070,
+        1030,
+        862,
+        484682496,
+        986,
+        113,
+        1006,
+        1128,
+        478,
+        670,
+        1111,
+        10703,
+        463
+      ]
+    },
+    "10": {
+      "id": 10,
+      "name": "Olfactory areas_L_sup",
+      "abbreviation": "OLF_L_sup",
+      "color_hex": "288ecc",
+      "color_rgb": [
+        40,
+        142,
+        204
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 7.81,
+      "extent_mm": [
+        2.03,
+        3.04,
+        2.2
+      ],
+      "n_allen_structures": 2,
+      "allen_structure_ids": [
+        507,
+        698
+      ]
+    },
+    "11": {
+      "id": 11,
+      "name": "Isocortex_L_sup_3",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "ebff0c",
+      "color_rgb": [
+        235,
+        255,
+        12
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 6.6,
+      "extent_mm": [
+        2.44,
+        4.0,
+        3.2
+      ],
+      "n_allen_structures": 14,
+      "allen_structure_ids": [
+        873,
+        806,
+        1090,
+        897,
+        1035,
+        558,
+        889,
+        654,
+        838,
+        702,
+        1106,
+        120,
+        1058,
+        1010
+      ]
+    },
+    "12": {
+      "id": 12,
+      "name": "Isocortex_L_sup_6",
+      "abbreviation": "Isocortex_L_sup",
+      "color_hex": "b047cc",
+      "color_rgb": [
+        176,
+        71,
+        204
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.8,
+      "volume_mm3": 12.38,
+      "extent_mm": [
+        2.64,
+        4.96,
+        2.6
+      ],
+      "n_allen_structures": 37,
+      "allen_structure_ids": [
+        656,
+        767,
+        962,
+        1015,
+        363,
+        211,
+        919,
+        772,
+        68,
+        171,
+        296,
+        304,
+        526157184,
+        84,
+        1125,
+        484,
+        620,
+        630,
+        204,
+        810
+      ]
+    },
+    "13": {
+      "id": 13,
+      "name": "Culmen / Declive (VI)_L_sup",
+      "abbreviation": "CUL+DEC_L_sup",
+      "color_hex": "32ff98",
+      "color_rgb": [
+        50,
+        255,
+        152
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.0,
+      "volume_mm3": 9.06,
+      "extent_mm": [
+        3.66,
+        3.04,
+        3.8
+      ],
+      "n_allen_structures": 9,
+      "allen_structure_ids": [
+        1091,
+        936,
+        1025,
+        951,
+        728,
+        944,
+        1033,
+        957,
+        354
+      ]
+    },
+    "14": {
+      "id": 14,
+      "name": "Ansiform lobule / Simple lobule_L_sup",
+      "abbreviation": "AN+SIM_L_sup",
+      "color_hex": "cc320a",
+      "color_rgb": [
+        204,
+        50,
+        10
+      ],
+      "hemisphere": "L",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.7,
+      "volume_mm3": 9.56,
+      "extent_mm": [
+        2.84,
+        2.96,
+        2.8
+      ],
+      "n_allen_structures": 3,
+      "allen_structure_ids": [
+        1056,
+        1007,
+        1064
+      ]
+    },
+    "15": {
+      "id": 15,
+      "name": "Isocortex_R_sup_1",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "5967ff",
+      "color_rgb": [
+        89,
+        103,
+        255
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.8,
+      "volume_mm3": 6.98,
+      "extent_mm": [
+        3.86,
+        3.04,
+        2.8
+      ],
+      "n_allen_structures": 10,
+      "allen_structure_ids": [
+        593,
+        821,
+        778,
+        971,
+        33,
+        1037,
+        721,
+        502,
+        443,
+        484682464
+      ]
+    },
+    "16": {
+      "id": 16,
+      "name": "Isocortex_R_sup_2",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "66cc28",
+      "color_rgb": [
+        102,
+        204,
+        40
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.4,
+      "volume_mm3": 6.63,
+      "extent_mm": [
+        2.84,
+        4.64,
+        2.4
+      ],
+      "n_allen_structures": 19,
+      "allen_structure_ids": [
+        442,
+        312782560,
+        610,
+        671,
+        274,
+        434,
+        774,
+        965,
+        805,
+        906,
+        281,
+        41,
+        565,
+        1066,
+        433,
+        257,
+        1046,
+        501,
+        401
+      ]
+    },
+    "17": {
+      "id": 17,
+      "name": "Isocortex_R_sup_7",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "ff0cae",
+      "color_rgb": [
+        255,
+        12,
+        174
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.7,
+      "volume_mm3": 10.14,
+      "extent_mm": [
+        2.84,
+        4.96,
+        2.4
+      ],
+      "n_allen_structures": 13,
+      "allen_structure_ids": [
+        656,
+        767,
+        962,
+        1015,
+        935,
+        772,
+        211,
+        919,
+        588,
+        68,
+        296,
+        667,
+        810
+      ]
+    },
+    "18": {
+      "id": 18,
+      "name": "Isocortex / Hippocampal formation_R_sup",
+      "abbreviation": "Isocortex+HPF_R_sup",
+      "color_hex": "47c6cc",
+      "color_rgb": [
+        71,
+        198,
+        204
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 12.78,
+      "extent_mm": [
+        2.84,
+        3.92,
+        4.0
+      ],
+      "n_allen_structures": 63,
+      "allen_structure_ids": [
+        312782624,
+        97,
+        312782592,
+        1121,
+        735,
+        526,
+        959,
+        836,
+        312782656,
+        289,
+        847,
+        1127,
+        421,
+        1023,
+        527,
+        543,
+        251,
+        750,
+        20,
+        843
+      ]
+    },
+    "19": {
+      "id": 19,
+      "name": "Isocortex_R_sup_8",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "ffcb32",
+      "color_rgb": [
+        255,
+        203,
+        50
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.3,
+      "volume_mm3": 3.5,
+      "extent_mm": [
+        3.66,
+        2.8,
+        2.8
+      ],
+      "n_allen_structures": 27,
+      "allen_structure_ids": [
+        171,
+        363,
+        996,
+        484,
+        526157184,
+        84,
+        304,
+        1125,
+        620,
+        204,
+        630,
+        196,
+        969,
+        288,
+        1101,
+        328,
+        412,
+        440,
+        188,
+        448
+      ]
+    },
+    "20": {
+      "id": 20,
+      "name": "Isocortex_R_sup_3",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "620acc",
+      "color_rgb": [
+        98,
+        10,
+        204
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.6,
+      "volume_mm3": 6.02,
+      "extent_mm": [
+        3.05,
+        2.96,
+        2.2
+      ],
+      "n_allen_structures": 15,
+      "allen_structure_ids": [
+        981,
+        201,
+        1038,
+        1047,
+        1070,
+        1030,
+        1006,
+        113,
+        1128,
+        478,
+        670,
+        1111,
+        9,
+        1094,
+        1086
+      ]
+    },
+    "21": {
+      "id": 21,
+      "name": "Culmen / Declive (VI)_R_sup",
+      "abbreviation": "CUL+DEC_R_sup",
+      "color_hex": "59ff74",
+      "color_rgb": [
+        89,
+        255,
+        116
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.0,
+      "volume_mm3": 11.75,
+      "extent_mm": [
+        2.03,
+        4.88,
+        2.4
+      ],
+      "n_allen_structures": 16,
+      "allen_structure_ids": [
+        1091,
+        936,
+        828,
+        842,
+        820,
+        10,
+        795,
+        984,
+        17,
+        811,
+        834,
+        313,
+        26,
+        851,
+        976,
+        42
+      ]
+    },
+    "22": {
+      "id": 22,
+      "name": "Isocortex_R_sup_6",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "cc283d",
+      "color_rgb": [
+        204,
+        40,
+        61
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 7.31,
+      "extent_mm": [
+        2.84,
+        3.92,
+        3.0
+      ],
+      "n_allen_structures": 7,
+      "allen_structure_ids": [
+        943,
+        320,
+        648,
+        844,
+        1021,
+        1108,
+        956
+      ]
+    },
+    "23": {
+      "id": 23,
+      "name": "Hippocampal formation / commissural branch of stria terminalis_R_sup",
+      "abbreviation": "HPF+stc_R_sup",
+      "color_hex": "0c72ff",
+      "color_rgb": [
+        12,
+        114,
+        255
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.6,
+      "volume_mm3": 4.95,
+      "extent_mm": [
+        4.06,
+        6.57,
+        2.0
+      ],
+      "n_allen_structures": 6,
+      "allen_structure_ids": [
+        382,
+        484682528,
+        484682496,
+        463,
+        10703,
+        423
+      ]
+    },
+    "24": {
+      "id": 24,
+      "name": "Isocortex / cingulum bundle_R_sup",
+      "abbreviation": "Isocortex+cing_R_sup",
+      "color_hex": "a5cc47",
+      "color_rgb": [
+        165,
+        204,
+        71
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.1,
+      "volume_mm3": 4.11,
+      "extent_mm": [
+        3.45,
+        5.77,
+        2.4
+      ],
+      "n_allen_structures": 7,
+      "allen_structure_ids": [
+        542,
+        687,
+        940,
+        430,
+        986,
+        590,
+        997
+      ]
+    },
+    "25": {
+      "id": 25,
+      "name": "Isocortex_R_sup_5",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "fe32ff",
+      "color_rgb": [
+        254,
+        50,
+        255
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 6.54,
+      "extent_mm": [
+        2.84,
+        3.52,
+        3.8
+      ],
+      "n_allen_structures": 17,
+      "allen_structure_ids": [
+        878,
+        657,
+        1102,
+        974,
+        450,
+        854,
+        945,
+        182305696,
+        950,
+        625,
+        182305712,
+        577,
+        36,
+        672,
+        180,
+        187,
+        148
+      ]
+    },
+    "26": {
+      "id": 26,
+      "name": "Olfactory areas_R_sup",
+      "abbreviation": "OLF_R_sup",
+      "color_hex": "0acc92",
+      "color_rgb": [
+        10,
+        204,
+        146
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.9,
+      "volume_mm3": 8.38,
+      "extent_mm": [
+        2.23,
+        3.12,
+        2.2
+      ],
+      "n_allen_structures": 2,
+      "allen_structure_ids": [
+        507,
+        698
+      ]
+    },
+    "27": {
+      "id": 27,
+      "name": "Isocortex_R_sup_4",
+      "abbreviation": "Isocortex_R_sup",
+      "color_hex": "ff9d59",
+      "color_rgb": [
+        255,
+        157,
+        89
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.0,
+      "volume_mm3": 6.8,
+      "extent_mm": [
+        2.44,
+        4.0,
+        3.2
+      ],
+      "n_allen_structures": 14,
+      "allen_structure_ids": [
+        873,
+        806,
+        1090,
+        897,
+        558,
+        1035,
+        889,
+        862,
+        838,
+        702,
+        654,
+        1106,
+        120,
+        1010
+      ]
+    },
+    "28": {
+      "id": 28,
+      "name": "Ansiform lobule / Simple lobule_R_sup",
+      "abbreviation": "AN+SIM_R_sup",
+      "color_hex": "3c28cc",
+      "color_rgb": [
+        60,
+        40,
+        204
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 0.8,
+      "volume_mm3": 10.2,
+      "extent_mm": [
+        4.27,
+        2.88,
+        3.8
+      ],
+      "n_allen_structures": 5,
+      "allen_structure_ids": [
+        1056,
+        1007,
+        1064,
+        1041,
+        728
+      ]
+    },
+    "29": {
+      "id": 29,
+      "name": "Paramedian lobule / Pyramus (VIII)_R_sup",
+      "abbreviation": "PRM+PYR_R_sup",
+      "color_hex": "36ff0c",
+      "color_rgb": [
+        54,
+        255,
+        12
+      ],
+      "hemisphere": "R",
+      "depth_zone": "0-2mm",
+      "resolution_mm": 2.0,
+      "mean_depth_mm": 1.2,
+      "volume_mm3": 3.55,
+      "extent_mm": [
+        3.86,
+        2.32,
+        2.2
+      ],
+      "n_allen_structures": 5,
+      "allen_structure_ids": [
+        1025,
+        951,
+        944,
+        957,
+        1033
+      ]
+    },
+    "30": {
+      "id": 30,
+      "name": "Striatum dorsal region_L_mid",
+      "abbreviation": "STRd_L_mid",
+      "color_hex": "cc4784",
+      "color_rgb": [
+        204,
+        71,
+        132
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 3.0,
+      "volume_mm3": 17.45,
+      "extent_mm": [
+        3.86,
+        4.8,
+        2.4
+      ],
+      "n_allen_structures": 35,
+      "allen_structure_ids": [
+        672,
+        484682528,
+        603,
+        262,
+        258,
+        6,
+        362,
+        1022,
+        155,
+        718,
+        477,
+        629,
+        250,
+        255,
+        266,
+        351,
+        1096,
+        301,
+        310,
+        15
+      ]
+    },
+    "31": {
+      "id": 31,
+      "name": "Hippocampal formation_L_mid_1",
+      "abbreviation": "HPF_L_mid",
+      "color_hex": "32ccff",
+      "color_rgb": [
+        50,
+        204,
+        255
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 5.09,
+      "extent_mm": [
+        4.27,
+        7.37,
+        3.6
+      ],
+      "n_allen_structures": 18,
+      "allen_structure_ids": [
+        502,
+        997,
+        526,
+        843,
+        1007,
+        1084,
+        484682464,
+        1052,
+        727,
+        543,
+        743,
+        664,
+        78,
+        123,
+        612,
+        7,
+        271,
+        1056
+      ]
+    },
+    "32": {
+      "id": 32,
+      "name": "Hippocampal formation / Isocortex_L_mid",
+      "abbreviation": "HPF+Isocortex_L_mid",
+      "color_hex": "ccc30a",
+      "color_rgb": [
+        204,
+        195,
+        10
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.7,
+      "volume_mm3": 4.96,
+      "extent_mm": [
+        3.25,
+        6.49,
+        2.4
+      ],
+      "n_allen_structures": 20,
+      "allen_structure_ids": [
+        1121,
+        139,
+        20,
+        52,
+        28,
+        131,
+        988,
+        977,
+        729,
+        289,
+        566,
+        888,
+        427,
+        579,
+        540,
+        520,
+        692,
+        335,
+        954,
+        971
+      ]
+    },
+    "33": {
+      "id": 33,
+      "name": "Hippocampal formation_L_mid_2",
+      "abbreviation": "HPF_L_mid",
+      "color_hex": "c759ff",
+      "color_rgb": [
+        199,
+        89,
+        255
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 18.27,
+      "extent_mm": [
+        3.86,
+        7.05,
+        2.8
+      ],
+      "n_allen_structures": 74,
+      "allen_structure_ids": [
+        463,
+        382,
+        10703,
+        128,
+        795,
+        313,
+        733,
+        17,
+        215,
+        218,
+        10,
+        1020,
+        632,
+        496345664,
+        26,
+        616,
+        828,
+        1009,
+        178,
+        10704
+      ]
+    },
+    "34": {
+      "id": 34,
+      "name": "Isocortex / Olfactory areas_L_mid",
+      "abbreviation": "Isocortex+OLF_L_mid",
+      "color_hex": "28cc65",
+      "color_rgb": [
+        40,
+        204,
+        101
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 3.0,
+      "volume_mm3": 8.81,
+      "extent_mm": [
+        3.66,
+        5.61,
+        3.0
+      ],
+      "n_allen_structures": 22,
+      "allen_structure_ids": [
+        961,
+        952,
+        862,
+        120,
+        1058,
+        163,
+        344,
+        187,
+        1090,
+        857,
+        638,
+        1102,
+        314,
+        180,
+        1106,
+        36,
+        1035,
+        148,
+        974,
+        1010
+      ]
+    },
+    "35": {
+      "id": 35,
+      "name": "cerebellum related fiber tracts_L_mid",
+      "abbreviation": "cbf_L_mid",
+      "color_hex": "ff1f0c",
+      "color_rgb": [
+        255,
+        31,
+        12
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.9,
+      "volume_mm3": 11.86,
+      "extent_mm": [
+        3.66,
+        3.92,
+        3.4
+      ],
+      "n_allen_structures": 53,
+      "allen_structure_ids": [
+        728,
+        957,
+        354,
+        1091,
+        429,
+        968,
+        202,
+        984,
+        91,
+        976,
+        867,
+        225,
+        437,
+        1098,
+        651,
+        989,
+        951,
+        711,
+        771,
+        898
+      ]
+    },
+    "36": {
+      "id": 36,
+      "name": "Paraflocculus / Paramedian lobule_L_mid",
+      "abbreviation": "PFL+PRM_L_mid",
+      "color_hex": "4763cc",
+      "color_rgb": [
+        71,
+        99,
+        204
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 6.37,
+      "extent_mm": [
+        3.45,
+        3.44,
+        2.4
+      ],
+      "n_allen_structures": 9,
+      "allen_structure_ids": [
+        1041,
+        1025,
+        1033,
+        1049,
+        96,
+        512,
+        1123,
+        101,
+        846
+      ]
+    },
+    "37": {
+      "id": 37,
+      "name": "Olfactory areas / Isocortex_L_mid",
+      "abbreviation": "OLF+Isocortex_L_mid",
+      "color_hex": "99ff32",
+      "color_rgb": [
+        153,
+        255,
+        50
+      ],
+      "hemisphere": "L",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.7,
+      "volume_mm3": 12.36,
+      "extent_mm": [
+        3.66,
+        6.17,
+        2.6
+      ],
+      "n_allen_structures": 48,
+      "allen_structure_ids": [
+        507,
+        159,
+        698,
+        1101,
+        630,
+        996,
+        956,
+        56,
+        597,
+        328,
+        783,
+        800,
+        583,
+        1108,
+        704,
+        694,
+        814,
+        412,
+        440,
+        1125
+      ]
+    },
+    "38": {
+      "id": 38,
+      "name": "Thalamus, polymodal association cortex related / Thalamus, sensory-motor cortex related_R_mid",
+      "abbreviation": "DORpm+DORsm_R_mid",
+      "color_hex": "cc0aa4",
+      "color_rgb": [
+        204,
+        10,
+        164
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 3.1,
+      "volume_mm3": 7.52,
+      "extent_mm": [
+        4.06,
+        3.6,
+        2.2
+      ],
+      "n_allen_structures": 27,
+      "allen_structure_ids": [
+        484682528,
+        603,
+        733,
+        262,
+        6,
+        362,
+        1022,
+        155,
+        1020,
+        718,
+        629,
+        149,
+        255,
+        575,
+        59,
+        802,
+        301,
+        1096,
+        15,
+        599
+      ]
+    },
+    "39": {
+      "id": 39,
+      "name": "cerebellum related fiber tracts / Medulla, motor related_R_mid",
+      "abbreviation": "cbf+MY-mot_R_mid",
+      "color_hex": "59fff0",
+      "color_rgb": [
+        89,
+        255,
+        240
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 3.0,
+      "volume_mm3": 6.73,
+      "extent_mm": [
+        3.66,
+        3.52,
+        2.2
+      ],
+      "n_allen_structures": 33,
+      "allen_structure_ids": [
+        728,
+        968,
+        202,
+        976,
+        91,
+        867,
+        225,
+        1052,
+        989,
+        771,
+        326,
+        217,
+        78,
+        589508480,
+        162,
+        209,
+        612,
+        123,
+        912,
+        7
+      ]
+    },
+    "40": {
+      "id": 40,
+      "name": "Isocortex / Lateral septal complex_R_mid",
+      "abbreviation": "Isocortex+LSX_R_mid",
+      "color_hex": "cc8d28",
+      "color_rgb": [
+        204,
+        141,
+        40
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.7,
+      "volume_mm3": 4.29,
+      "extent_mm": [
+        3.25,
+        4.96,
+        2.2
+      ],
+      "n_allen_structures": 31,
+      "allen_structure_ids": [
+        258,
+        477,
+        630,
+        956,
+        1108,
+        250,
+        772,
+        266,
+        827,
+        351,
+        440,
+        564,
+        310,
+        581,
+        707,
+        19,
+        1054,
+        608,
+        84,
+        588
+      ]
+    },
+    "41": {
+      "id": 41,
+      "name": "Hippocampal formation / Isocortex_R_mid",
+      "abbreviation": "HPF+Isocortex_R_mid",
+      "color_hex": "5c0cff",
+      "color_rgb": [
+        92,
+        12,
+        255
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.7,
+      "volume_mm3": 5.7,
+      "extent_mm": [
+        4.06,
+        4.24,
+        3.4
+      ],
+      "n_allen_structures": 23,
+      "allen_structure_ids": [
+        1121,
+        139,
+        20,
+        52,
+        28,
+        484682464,
+        131,
+        988,
+        977,
+        729,
+        289,
+        566,
+        540,
+        888,
+        427,
+        692,
+        579,
+        520,
+        335,
+        836
+      ]
+    },
+    "42": {
+      "id": 42,
+      "name": "Hippocampal formation_R_mid",
+      "abbreviation": "HPF_R_mid",
+      "color_hex": "47cc4c",
+      "color_rgb": [
+        71,
+        204,
+        76
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 19.12,
+      "extent_mm": [
+        4.06,
+        7.21,
+        2.8
+      ],
+      "n_allen_structures": 75,
+      "allen_structure_ids": [
+        463,
+        382,
+        10703,
+        795,
+        128,
+        313,
+        502,
+        10,
+        215,
+        218,
+        17,
+        632,
+        496345664,
+        26,
+        178,
+        898,
+        1009,
+        10704,
+        560581568,
+        872
+      ]
+    },
+    "43": {
+      "id": 43,
+      "name": "Olfactory areas / Isocortex_R_mid",
+      "abbreviation": "OLF+Isocortex_R_mid",
+      "color_hex": "ff3267",
+      "color_rgb": [
+        255,
+        50,
+        103
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 3.0,
+      "volume_mm3": 7.64,
+      "extent_mm": [
+        3.66,
+        5.53,
+        2.6
+      ],
+      "n_allen_structures": 18,
+      "allen_structure_ids": [
+        961,
+        952,
+        862,
+        120,
+        1058,
+        163,
+        344,
+        857,
+        1090,
+        180,
+        314,
+        1106,
+        36,
+        148,
+        1035,
+        1010,
+        897,
+        806
+      ]
+    },
+    "44": {
+      "id": 44,
+      "name": "Olfactory areas_R_mid",
+      "abbreviation": "OLF_R_mid",
+      "color_hex": "0a74cc",
+      "color_rgb": [
+        10,
+        116,
+        204
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 8.14,
+      "extent_mm": [
+        3.25,
+        5.12,
+        2.2
+      ],
+      "n_allen_structures": 15,
+      "allen_structure_ids": [
+        507,
+        159,
+        698,
+        597,
+        56,
+        814,
+        412,
+        1125,
+        288,
+        448,
+        620,
+        484,
+        969,
+        582,
+        605
+      ]
+    },
+    "45": {
+      "id": 45,
+      "name": "Hippocampal formation / Paraflocculus_R_mid",
+      "abbreviation": "HPF+PFL_R_mid",
+      "color_hex": "e4ff59",
+      "color_rgb": [
+        228,
+        255,
+        89
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.7,
+      "volume_mm3": 9.12,
+      "extent_mm": [
+        4.27,
+        7.69,
+        3.6
+      ],
+      "n_allen_structures": 24,
+      "allen_structure_ids": [
+        1041,
+        1091,
+        1049,
+        997,
+        526,
+        843,
+        984,
+        1084,
+        1007,
+        727,
+        828,
+        616,
+        543,
+        743,
+        664,
+        1037,
+        101,
+        811,
+        580,
+        1056
+      ]
+    },
+    "46": {
+      "id": 46,
+      "name": "Medulla, sensory related / Uvula (IX)_R_mid",
+      "abbreviation": "MY-sen+UVU_R_mid",
+      "color_hex": "b628cc",
+      "color_rgb": [
+        182,
+        40,
+        204
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.9,
+      "volume_mm3": 7.73,
+      "extent_mm": [
+        3.45,
+        3.52,
+        3.2
+      ],
+      "n_allen_structures": 25,
+      "allen_structure_ids": [
+        957,
+        1025,
+        1033,
+        354,
+        429,
+        651,
+        96,
+        1098,
+        951,
+        512,
+        711,
+        437,
+        1123,
+        936,
+        846,
+        903,
+        839,
+        773,
+        207,
+        136
+      ]
+    },
+    "47": {
+      "id": 47,
+      "name": "Striatum dorsal region / Isocortex_R_mid",
+      "abbreviation": "STRd+Isocortex_R_mid",
+      "color_hex": "0cff98",
+      "color_rgb": [
+        12,
+        255,
+        152
+      ],
+      "hemisphere": "R",
+      "depth_zone": "2-4mm",
+      "resolution_mm": 3.0,
+      "mean_depth_mm": 2.8,
+      "volume_mm3": 12.51,
+      "extent_mm": [
+        3.25,
+        5.45,
+        2.2
+      ],
+      "n_allen_structures": 16,
+      "allen_structure_ids": [
+        672,
+        1101,
+        996,
+        800,
+        783,
+        328,
+        704,
+        694,
+        187,
+        583,
+        638,
+        844,
+        1102,
+        648,
+        675,
+        974
+      ]
+    },
+    "48": {
+      "id": 48,
+      "name": "Olfactory areas_L_deep",
+      "abbreviation": "OLF_L_deep",
+      "color_hex": "cc6d47",
+      "color_rgb": [
+        204,
+        109,
+        71
+      ],
+      "hemisphere": "L",
+      "depth_zone": "4+mm",
+      "resolution_mm": 4.0,
+      "mean_depth_mm": 4.9,
+      "volume_mm3": 58.26,
+      "extent_mm": [
+        4.27,
+        11.05,
+        2.8
+      ],
+      "n_allen_structures": 217,
+      "allen_structure_ids": [
+        961,
+        754,
+        354,
+        56,
+        771,
+        997,
+        342,
+        403,
+        136,
+        194,
+        663,
+        1097,
+        313,
+        852,
+        788,
+        1048,
+        672,
+        1093,
+        655,
+        146
+      ]
+    },
+    "49": {
+      "id": 49,
+      "name": "Olfactory areas_R_deep",
+      "abbreviation": "OLF_R_deep",
+      "color_hex": "3234ff",
+      "color_rgb": [
+        50,
+        52,
+        255
+      ],
+      "hemisphere": "R",
+      "depth_zone": "4+mm",
+      "resolution_mm": 4.0,
+      "mean_depth_mm": 4.9,
+      "volume_mm3": 61.87,
+      "extent_mm": [
+        4.47,
+        10.97,
+        2.8
+      ],
+      "n_allen_structures": 225,
+      "allen_structure_ids": [
+        961,
+        754,
+        354,
+        771,
+        56,
+        997,
+        342,
+        403,
+        663,
+        1048,
+        136,
+        194,
+        1097,
+        313,
+        788,
+        852,
+        655,
+        566,
+        1093,
+        1009
+      ]
+    }
+  }
+}

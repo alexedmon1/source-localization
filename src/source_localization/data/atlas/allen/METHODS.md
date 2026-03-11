@@ -2,9 +2,9 @@
 
 ## Overview
 
-This atlas provides a depth-adaptive whole-brain parcellation derived from the Allen Mouse Brain Common Coordinate Framework v3 (CCFv3), registered into the Antwerp (UAnterwerpen C57BL/6 MRI) coordinate space. It is designed for mouse EEG source localization with a 32-channel electrode array, where spatial resolution degrades with depth from the cortical surface.
+This atlas provides an **anatomically constrained, depth-adaptive** whole-brain parcellation derived from the Allen Mouse Brain Common Coordinate Framework v3 (CCFv3), registered into the Antwerp (UAnterwerpen C57BL/6 MRI) coordinate space. It is designed for mouse EEG source localization with a 32-channel electrode array, where spatial resolution degrades with depth from the cortical surface.
 
-**49 parcels** cover the entire brain volume, with finer parcellation near the electrodes (cortical surface) and coarser parcellation at depth, reflecting the physical limits of EEG spatial resolution.
+**61 parcels** cover the grey matter brain volume, with finer parcellation near the electrodes (cortical surface) and coarser parcellation at depth, reflecting the physical limits of EEG spatial resolution. Parcellation respects major anatomical division boundaries (e.g., thalamus, hippocampus, cortex) — structures are never merged across divisions.
 
 ## Source Data
 
@@ -65,63 +65,103 @@ To reduce aliasing artifacts from the large resolution mismatch (25 µm → ~200
 
 This produces smoother boundaries than direct nearest-neighbor resampling, at the cost of losing the smallest structures (553 labels retained from 672).
 
-## Depth-Adaptive Parcellation
+## Anatomically Constrained, Depth-Adaptive Parcellation
 
 ### Rationale
 
 With 32 electrodes on a ~6.4 mm radius mouse head, EEG spatial resolution is approximately 2 mm near the cortical surface but degrades with depth. A uniform parcellation would either over-resolve deep structures or under-resolve cortical ones.
 
+The previous v1 parcellation (49 ROIs) used purely spatial clustering without anatomical constraints, which caused structures like the left thalamus to be absorbed into neighboring parcels (striatum, hippocampus). The v2 parcellation enforces anatomical division boundaries.
+
+### Anatomical Divisions
+
+Each Allen structure is assigned to one of 11 major anatomical divisions based on the Allen ontology hierarchy. Clustering is performed **within** divisions — structures never merge across division boundaries.
+
+| Division | Allen Root ID(s) | Structures | Parcels |
+|----------|-----------------|------------|---------|
+| Isocortex | 315 | 238 | 21 |
+| Hippocampal formation | 1089 | 26 | 6 |
+| Olfactory areas | 698 | 18 | 6 |
+| Cerebellum | 512 | 21 | 5 |
+| Midbrain | 313 | 58 | 5 |
+| Cortical subplate (amygdala) | 567 | 11 | 4 |
+| Medulla | 354 | 47 | 4 |
+| Pons | 771 | 28 | 4 |
+| Thalamus | 549 | 51 | 3 |
+| Hypothalamus | 1097 | 50 | 3 |
+| Cerebral nuclei (striatum) | 623 | 27 | 4 (L=2, R=2) |
+
+**Excluded divisions** (no neural signal expected):
+- Fiber tracts (967, 1009): ~77 structures → background (label 0)
+- Ventricular systems (73): ~7 structures → background (label 0)
+
 ### Depth Zones
 
 Depth from the dorsal brain surface was computed for each voxel by finding the highest brain voxel in each (R, A) column and measuring the distance along the S axis:
 
-| Zone | Depth | Resolution | Brain volume |
-|------|-------|-----------|-------------|
-| Superficial | 0–2 mm | 2 mm | 41.5% |
-| Mid-depth | 2–4 mm | 3 mm | 34.6% |
-| Deep | 4+ mm | 4 mm | 24.0% |
+| Zone | Depth | Cluster threshold | Parcels |
+|------|-------|-------------------|---------|
+| Superficial | 0–2 mm | 2 mm | 27 |
+| Mid-depth | 2–4 mm | 3 mm | 20 |
+| Deep | 4+ mm | 4 mm | 14 |
+
+Each Allen structure is assigned to a depth zone based on the **median depth** of its voxels.
 
 ### Hemisphere Split
 
-The brain midline was determined at R = 30.0 voxels (0.203 mm/voxel), derived from the mean of 23 left/right ROI pair centroids in the Antwerp atlas (range: 29.82–30.21, all within ±0.2 voxels).
+The brain midline was determined at voxel X = 32 (0.203 mm/voxel). Each structure is assigned to the hemisphere containing the majority of its voxels.
 
 ### Spatial Clustering
 
-Within each zone-hemisphere combination, Allen structures (excluding white matter/fiber tracts) were clustered by centroid distance using **complete linkage** hierarchical clustering, with the distance threshold set to the zone's resolution:
-
-- Zone 1: 2 mm threshold → ~25–28 clusters per hemisphere
-- Zone 2: 3 mm threshold → ~8–15 clusters per hemisphere
-- Zone 3: 4 mm threshold → ~4–7 clusters per hemisphere
+Within each (division × hemisphere × depth zone) group, Allen structures were clustered by centroid distance (in mm) using **complete-linkage hierarchical clustering**, with the distance threshold set to the zone's resolution.
 
 ### Size-Based Merging
 
-Clusters failing the minimum-extent criterion — `min(R_extent, A_extent) < zone_resolution` — were iteratively merged into their nearest valid neighbor (by centroid distance, same zone and hemisphere). The S (dorsal-ventral) extent was excluded from this check because the mouse brain is anatomically flat (~10 mm total height), making it impossible for deep-zone clusters to reach 4 mm in S. One iteration of merging eliminated all undersized clusters.
+Clusters failing the minimum-extent criterion — `min(R_extent, A_extent) < zone_resolution` — were iteratively merged into their nearest valid neighbor (by centroid distance, within the same group). If all clusters in a group are undersized, the largest is kept as-is.
 
 ### Result
 
 | Zone | Left | Right | Total |
 |------|------|-------|-------|
-| Superficial (0–2 mm) | 14 | 15 | 29 |
-| Mid-depth (2–4 mm) | 8 | 10 | 18 |
-| Deep (4+ mm) | 1 | 1 | 2 |
-| **Total** | **23** | **26** | **49** |
+| Superficial (0–2 mm) | 15 | 12 | 27 |
+| Mid-depth (2–4 mm) | 10 | 10 | 20 |
+| Deep (4+ mm) | 8 | 6 | 14 |
+| **Total** | **33** | **28** | **61** |
+
+### ROI Categories
+
+| Category | Parcels | Description |
+|----------|---------|-------------|
+| cortical | 21 | Isocortex (primary/secondary motor, somatosensory, visual, auditory, retrosplenial, insular) |
+| brainstem | 13 | Midbrain + Pons + Medulla |
+| hippocampal | 6 | CA1, CA3, dentate, entorhinal, subiculum |
+| olfactory | 6 | Main/accessory olfactory bulb, piriform, olfactory areas |
+| cerebellum | 5 | Lobules, vermis, paraflocculus |
+| subcortical | 4 | Striatum (caudoputamen, nucleus accumbens), globus pallidus, amygdala |
+| thalamic | 3 | Reticular, ventral medial, ventral posteromedial thalamus |
+| hypothalamic | 3 | Zona incerta, hypothalamic nuclei |
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `allen_labels.nii.gz` | Parcellation label volume (49 labels, 1-indexed, in Antwerp coordinate space) |
-| `roi_mapping.json` | ROI metadata: names, abbreviations, colors, hemisphere, depth zone, resolution, Allen structure composition |
+| `allen_labels.nii.gz` | Parcellation label volume (61 labels, 1-indexed, in Antwerp coordinate space) |
+| `roi_mapping.json` | ROI metadata: names, abbreviations, colors, division, hemisphere, depth zone, Allen structure composition |
 | `allen_annotation_in_antwerp.nii.gz` | Full Allen CCFv3 annotation (553 structures) warped to Antwerp space, for reference |
 | `METHODS.md` | This file |
 
 ## Known Limitations
 
-- **Pixelated boundaries**: Some label boundaries show single-voxel holes and staircase artifacts due to the ~8× resolution mismatch between Allen (25 µm) and Antwerp (200 µm) grids. A gap-filling post-processing step would improve this.
+- **Pixelated boundaries**: Some label boundaries show single-voxel holes and staircase artifacts due to the ~8× resolution mismatch between Allen (25 µm) and Antwerp (200 µm) grids.
 - **Registration quality**: The cross-modality registration (r = 0.572) is reasonable but not perfect. Boundary regions, particularly at the edges of the brain and in the olfactory bulb, show the largest misalignment.
-- **Bregma-lambda compression**: The transformed bregma-lambda distance is 3.35 mm vs the expected ~4.2 mm, suggesting ~20% AP compression in the warp. This may reflect genuine size differences between the CCFv3 reference brain and the Antwerp atlas brain.
-- **Asymmetric L/R cluster counts**: The Allen atlas is not perfectly symmetric after warping, resulting in slight L/R differences (e.g., 14 vs 15 superficial clusters).
-- **Deep zone resolution**: The deep zone (4+ mm) collapses to a single parcel per hemisphere (~220 Allen structures each), providing no spatial differentiation at depth. This is physically appropriate for EEG but limits anatomical specificity.
+- **Bregma-lambda compression**: The transformed bregma-lambda distance is 3.35 mm vs the expected ~4.2 mm, suggesting ~20% AP compression in the warp.
+- **Asymmetric L/R cluster counts**: The Allen atlas is not perfectly symmetric after warping, resulting in slight L/R differences (33 left vs 28 right parcels).
+- **Excluded white matter**: Fiber tract and ventricular voxels are unlabeled (background), creating gaps in the label volume. This is intentional — EEG does not detect signals from these tissues.
+
+## Version History
+
+- **v2 (2026-03-11)**: Anatomically constrained parcellation (61 ROIs). Added division boundaries (thalamus, hippocampus, cortex, etc. never merge). Excluded fiber tracts and ventricles. 11 anatomical divisions × hemisphere × depth zone clustering.
+- **v1 (2026-03-06)**: Initial depth-adaptive parcellation (49 ROIs). Purely spatial clustering without anatomical constraints.
 
 ## Citations
 
