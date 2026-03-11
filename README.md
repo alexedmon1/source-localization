@@ -5,7 +5,7 @@
 **Version:** 1.6.0
 **Status:** Production Ready
 
-A complete, validated Python package for mouse EEG source localization with two bundled brain atlases (Antwerp 47-ROI and Allen CCFv3 61-ROI). Includes multi-subject batch processing, MNE-based spectral/connectivity analysis, and publication-quality visualizations.
+A complete, validated Python package for mouse EEG source localization with two bundled brain atlases (Antwerp 47-ROI and Allen CCFv3 64-ROI). Includes multi-subject batch processing, MNE-based spectral/connectivity analysis, and publication-quality visualizations.
 
 ---
 
@@ -57,7 +57,7 @@ Source localization solves the EEG inverse problem: given electrode measurements
 - **5 inverse methods**: MNE, dSPM, sLORETA, LCMV, DICS beamformers
 - **2 bundled brain atlases** selectable via `--atlas` flag:
   - **Antwerp** (47 ROIs) — default, UAnterwerpen C57BL/6 MRI atlas
-  - **Allen** (61 ROIs) — Allen Mouse Brain CCFv3, anatomically constrained depth-adaptive parcellation
+  - **Allen** (64 ROIs) — Allen Mouse Brain CCFv3, anatomically constrained depth-adaptive parcellation
 - **32-channel electrode array** coordinates included
 
 ### Multi-Subject Study Processing (NEW in v1.3.0)
@@ -343,7 +343,7 @@ The package bundles two brain atlases. Select with `--atlas` on the CLI or `atla
 | Atlas | Flag | ROIs | Description |
 |-------|------|------|-------------|
 | **Antwerp** | `--atlas antwerp` (default) | 47 | UAnterwerpen C57BL/6 MRI atlas. Original atlas used in all prior validation. |
-| **Allen** | `--atlas allen` | 61 | Allen Mouse Brain CCFv3, registered to Antwerp coordinate space via ANTs. Anatomically constrained, depth-adaptive parcellation: 2mm resolution at surface (0-2mm), 3mm at mid-depth (2-4mm), 4mm deep (4+mm). 11 anatomical divisions (isocortex, thalamus, hippocampus, cerebellum, etc.) ensure structures never merge across division boundaries. Excludes white matter and ventricles. |
+| **Allen** | `--atlas allen` | 64 | Allen Mouse Brain CCFv3, registered to Antwerp coordinate space via ANTs. Anatomically constrained, depth-adaptive parcellation with hemispheric symmetry (32 L + 32 R): 2mm resolution at surface (0-2mm), 3mm at mid-depth (2-4mm), 4mm deep (4+mm). 11 anatomical divisions (isocortex, thalamus, hippocampus, cerebellum, etc.) ensure structures never merge across division boundaries. Excludes white matter and ventricles. |
 
 ```bash
 # CLI
@@ -808,7 +808,7 @@ source_localization/
 **Allen Atlas v2: Anatomically Constrained Parcellation**
 
 - **Updated Allen CCFv3 atlas** (`--atlas allen`)
-  - 61 anatomically constrained, depth-adaptive parcels (up from 49)
+  - 64 anatomically constrained, depth-adaptive parcels (up from 49)
   - 11 anatomical divisions enforce boundaries (thalamus, hippocampus, cortex, etc. never merge)
   - Bilateral thalamus now properly separated (3 parcels: L_mid, L_deep, R_mid)
   - Fiber tracts and ventricles excluded (no neural signal)
