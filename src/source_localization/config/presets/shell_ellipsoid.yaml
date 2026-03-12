@@ -34,10 +34,10 @@ bem:
 
 source_space:
   shell:
-    n_shells: 3  # Number of concentric shells (3 shells reduces depth ambiguity)
-    shell_scales: [0.5, 0.75, 0.95]  # Scale factors relative to brain radius (0.95 = near surface)
+    n_shells: 4  # Number of concentric shells (4 shells for full depth coverage)
+    shell_scales: [0.25, 0.5, 0.75, 0.95]  # Scale factors relative to brain radius
     min_points_per_shell: 30
-    max_points_per_shell: 120  # ~243 total sources
+    max_points_per_shell: 140  # ~300 total before filtering, ~200 after brain mask
     scale_by_area: true  # Scale points with shell surface area
     filter_dorsal: false  # Set true to keep only dorsal hemisphere
     filter_above_electrodes: true  # Remove sources above electrode level (default: true)

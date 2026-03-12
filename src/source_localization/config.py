@@ -13,12 +13,14 @@ ATLAS_DEFINITIONS = {
         'roi_mapping': 'data/atlas/roi_mapping.json',
         'brain_volume': 'data/atlas/Atlas_3DRois.nii',
         'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
+        'full_brain_coverage': False,  # Cortical surface only
     },
     'allen': {
         'brain_labels': 'data/atlas/allen/allen_labels.nii.gz',
         'roi_mapping': 'data/atlas/allen/roi_mapping.json',
         'brain_volume': 'data/atlas/Atlas_3DRois.nii',
         'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
+        'full_brain_coverage': True,  # Full brain volumetric labels
     },
 }
 

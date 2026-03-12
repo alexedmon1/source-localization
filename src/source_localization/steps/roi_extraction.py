@@ -61,13 +61,26 @@ def run(config, previous_outputs):
     # Check if we have roi_assignments from ROI-based source space
     has_roi_assignments = False
     roi_assignments = None
+    full_brain_coverage = config['inputs'].get('full_brain_coverage', False)
+
     if src is not None and len(src) > 0 and 'roi_assignments' in src[0]:
         roi_assignments = src[0]['roi_assignments']
         has_roi_assignments = True
         print(f"    Using direct ROI assignment (sources pre-assigned to ROIs)")
         use_proximity = False  # Override: use direct assignment
+    elif not full_brain_coverage:
+        print(f"    ⚠️  Skipping ROI extraction: atlas does not have full brain coverage")
+        print(f"    Non-ROI source spaces (shell, cartesian) require a full-brain atlas for reliable ROI mapping.")
+        print(f"    Use an ROI-based source space, or switch to an atlas with full_brain_coverage=True (e.g., Allen).")
+        return {
+            'roi_stcs': {},
+            'roi_stcs_magnitude': {},
+            'roi_stcs_signed': {},
+            'roi_labels': [],
+            'roi_source_mapping': {}
+        }
     else:
-        print(f"    Proximity mapping: {use_proximity}")
+        print(f"    Proximity mapping: {use_proximity} (atlas has full brain coverage)")
         if use_proximity:
             print(f"    Proximity radius: {proximity_radius_mm} mm")
 
@@ -95,10 +108,11 @@ def run(config, previous_outputs):
     nii_labels = nib.load(brain_labels_file)
     label_data = nii_labels.get_fdata()
 
-    # Apply 10× voxel size correction (see CLAUDE.md critical note)
-    # Use atlas utils to get properly corrected affine
-    from ..utils.atlas import get_true_affine
-    affine = get_true_affine(nii_labels)
+    # Use the ORIGINAL NIfTI affine (not the 10× corrected one).
+    # The pipeline's source coordinates are computed in the same coordinate
+    # frame as the original atlas headers, so applying the 10× voxel size
+    # correction here would create a 10× coordinate mismatch.
+    affine = nii_labels.affine
 
     # Load ROI mapping JSON
     with open(roi_mapping_file, 'r') as f:
@@ -122,13 +136,18 @@ def run(config, previous_outputs):
 
     # Create label -> ROI name mapping
     # In the UAnterwerpen atlas, the label ID in the NIfTI matches the ROI ID in JSON
+    # Skip label 0 (Background) — it represents unlabeled tissue, not a brain ROI
+    SKIP_LABEL_NAMES = {"Background", "Exterior"}
     label_to_roi = {}
     for roi_id_str, roi_info in roi_mapping.items():
         label_id = int(roi_id_str) if isinstance(roi_id_str, str) else roi_id_str
+        roi_name = roi_info.get('name', roi_info.get('abbreviation', f'ROI_{label_id}'))
+        # Skip non-brain labels
+        if roi_name in SKIP_LABEL_NAMES:
+            continue
         # Skip if filtering and this ROI is not in included categories
         if included_roi_ids is not None and label_id not in included_roi_ids:
             continue
-        roi_name = roi_info.get('name', roi_info.get('abbreviation', f'ROI_{label_id}'))
         label_to_roi[label_id] = roi_name
 
     # Get unique ROI names
@@ -167,17 +186,12 @@ def run(config, previous_outputs):
     # Extract ROI time courses by averaging sources within each ROI
     # Do this for both magnitude and signed time series
     # ONLY include ROIs that have sources assigned - skip untested ROIs
-    # IMPORTANT: Exclude "Exterior" from output - it's not a meaningful brain region for analysis
-    EXTERIOR_ROI_NAME = "Exterior"
     roi_stcs_magnitude = {}
     roi_stcs_signed = {}
     rois_with_sources = []
     rois_without_sources = []
 
     for roi_name in roi_labels:
-        # Skip Exterior - sources there are valid but shouldn't be reported as an ROI
-        if roi_name == EXTERIOR_ROI_NAME:
-            continue
         source_indices = roi_source_mapping.get(roi_name, [])
         if len(source_indices) > 0:
             # Average source activity within ROI
@@ -279,9 +293,11 @@ def run(config, previous_outputs):
 
 def map_sources_to_rois_nearest(source_coords_mm, label_data, affine, label_to_roi):
     """
-    Map sources to ROIs using nearest neighbor assignment.
+    Map sources to ROIs using nearest labeled voxel assignment.
 
-    Each source is assigned to exactly one ROI based on the nearest atlas voxel.
+    Each source is assigned to exactly one ROI. First checks the voxel at the
+    source coordinate; if that voxel is unlabeled (e.g., inter-parcel gap),
+    finds the nearest labeled voxel using a KD-tree.
     """
     roi_source_mapping = {}
 
@@ -295,16 +311,39 @@ def map_sources_to_rois_nearest(source_coords_mm, label_data, affine, label_to_r
     for i in range(3):
         source_voxels[:, i] = np.clip(source_voxels[:, i], 0, label_data.shape[i] - 1)
 
+    # Build KD-tree of labeled voxel coordinates for fallback lookup
+    labeled_voxel_indices = np.argwhere(label_data > 0)
+    labeled_voxel_coords = np.column_stack([
+        labeled_voxel_indices, np.ones(len(labeled_voxel_indices))
+    ])
+    labeled_mm = (affine @ labeled_voxel_coords.T).T[:, :3]
+    labeled_labels = label_data[
+        labeled_voxel_indices[:, 0],
+        labeled_voxel_indices[:, 1],
+        labeled_voxel_indices[:, 2]
+    ].astype(int)
+    tree = cKDTree(labeled_mm)
+
+    n_fallback = 0
     # Assign each source to ROI based on label at that voxel
     for source_idx in range(len(source_coords_mm)):
         voxel = source_voxels[source_idx]
         label_id = int(label_data[voxel[0], voxel[1], voxel[2]])
+
+        # If unlabeled, find nearest labeled voxel
+        if label_id not in label_to_roi:
+            _, nearest_idx = tree.query(source_coords_mm[source_idx])
+            label_id = int(labeled_labels[nearest_idx])
+            n_fallback += 1
 
         if label_id in label_to_roi:
             roi_name = label_to_roi[label_id]
             if roi_name not in roi_source_mapping:
                 roi_source_mapping[roi_name] = []
             roi_source_mapping[roi_name].append(source_idx)
+
+    if n_fallback > 0:
+        print(f"    Nearest-labeled fallback used for {n_fallback}/{len(source_coords_mm)} sources")
 
     return roi_source_mapping
 
