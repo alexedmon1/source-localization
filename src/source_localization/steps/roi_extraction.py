@@ -61,26 +61,16 @@ def run(config, previous_outputs):
     # Check if we have roi_assignments from ROI-based source space
     has_roi_assignments = False
     roi_assignments = None
-    full_brain_coverage = config['inputs'].get('full_brain_coverage', False)
 
     if src is not None and len(src) > 0 and 'roi_assignments' in src[0]:
         roi_assignments = src[0]['roi_assignments']
         has_roi_assignments = True
         print(f"    Using direct ROI assignment (sources pre-assigned to ROIs)")
         use_proximity = False  # Override: use direct assignment
-    elif not full_brain_coverage:
-        print(f"    ⚠️  Skipping ROI extraction: atlas does not have full brain coverage")
-        print(f"    Non-ROI source spaces (shell, cartesian) require a full-brain atlas for reliable ROI mapping.")
-        print(f"    Use an ROI-based source space, or switch to an atlas with full_brain_coverage=True (e.g., Allen).")
-        return {
-            'roi_stcs': {},
-            'roi_stcs_magnitude': {},
-            'roi_stcs_signed': {},
-            'roi_labels': [],
-            'roi_source_mapping': {}
-        }
     else:
-        print(f"    Proximity mapping: {use_proximity} (atlas has full brain coverage)")
+        # Atlas-based mapping: works with any source model as long as the
+        # atlas label volume covers the source coordinate space.
+        print(f"    Atlas-based mapping: method={'proximity' if use_proximity else 'nearest'}")
         if use_proximity:
             print(f"    Proximity radius: {proximity_radius_mm} mm")
 

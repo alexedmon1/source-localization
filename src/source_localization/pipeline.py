@@ -140,7 +140,8 @@ class Pipeline:
         return cls(config)
 
     def run(self, eeg_file: Optional[str] = None, output_dir: Optional[str] = None,
-            include_spectral: bool = False, include_visualization: bool = False) -> Dict[str, Any]:
+            include_spectral: bool = False, include_visualization: bool = False,
+            skip_roi_extraction: bool = False) -> Dict[str, Any]:
         """
         Run the core source localization pipeline.
 
@@ -157,6 +158,10 @@ class Pipeline:
             If True, also run spectral analysis after core pipeline
         include_visualization : bool, default=False
             If True, also run visualization after core pipeline
+        skip_roi_extraction : bool, default=False
+            If True, stop after step 6 (inverse solution) and skip ROI
+            extraction.  ROI extraction can then be performed on-the-fly
+            by source-analytics.
 
         Returns
         -------
@@ -185,12 +190,20 @@ class Pipeline:
         print(f"Output: {output_path}")
         print("="*80)
 
+        # Determine which steps to run
+        steps_to_run = self.STEPS
+        if skip_roi_extraction:
+            steps_to_run = [
+                (name, mod) for name, mod in self.STEPS
+                if name != 'roi_extraction'
+            ]
+
         # Run core pipeline steps
         previous_outputs = {}
 
-        for i, (step_name, step_module) in enumerate(self.STEPS, 1):
+        for i, (step_name, step_module) in enumerate(steps_to_run, 1):
             print(f"\n{'='*80}")
-            print(f"STEP {i}/{len(self.STEPS)}: {step_name.replace('_', ' ').title()}")
+            print(f"STEP {i}/{len(steps_to_run)}: {step_name.replace('_', ' ').title()}")
             print(f"{'='*80}")
 
             step_outputs = step_module.run(self.config, previous_outputs)

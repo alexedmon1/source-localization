@@ -249,6 +249,8 @@ Examples:
     run_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     run_parser.add_argument('--no-qc', action='store_true',
                             help='Skip automatic QC after processing')
+    run_parser.add_argument('--skip-roi-extraction', action='store_true',
+                            help='Stop after inverse solution (step 6), skip ROI extraction')
 
     # Collect subcommand
     collect_parser = study_subparsers.add_parser(
@@ -347,6 +349,7 @@ def _run_study_command(args):
             skip_existing=not args.force,
             subjects=args.subjects,
             progress_callback=progress_callback,
+            skip_roi_extraction=getattr(args, 'skip_roi_extraction', False),
         )
 
         print()

@@ -88,6 +88,7 @@ def process_subject(
     config: StudyConfig,
     subject: Union[str, SubjectInfo],
     skip_existing: bool = True,
+    skip_roi_extraction: bool = False,
 ) -> SubjectResult:
     """
     Process a single subject with source localization.
@@ -99,6 +100,7 @@ def process_subject(
         config: Study configuration
         subject: Subject ID or SubjectInfo object
         skip_existing: Skip if output already exists
+        skip_roi_extraction: If True, skip ROI extraction step
 
     Returns:
         SubjectResult with processing outcome
@@ -149,6 +151,7 @@ def process_subject(
             output_dir=str(output_dir / "pipeline"),
             include_spectral=False,
             include_visualization=False,
+            skip_roi_extraction=skip_roi_extraction,
         )
 
         # Copy ROI timeseries to standard location
@@ -207,6 +210,7 @@ def process_study(
     skip_existing: bool = True,
     subjects: Optional[List[str]] = None,
     progress_callback: Optional[callable] = None,
+    skip_roi_extraction: bool = False,
 ) -> StudyResult:
     """
     Process all subjects in a study.
@@ -217,6 +221,7 @@ def process_study(
         skip_existing: Skip subjects with existing outputs
         subjects: Optional list of subject IDs to process (default: all)
         progress_callback: Optional callback function(completed, total, subject_id, success)
+        skip_roi_extraction: If True, skip ROI extraction step for all subjects
 
     Returns:
         StudyResult with all processing outcomes
@@ -250,7 +255,7 @@ def process_study(
     if n_jobs == 1:
         # Sequential processing
         for i, subject in enumerate(subjects_to_process):
-            result = process_subject(config, subject, skip_existing)
+            result = process_subject(config, subject, skip_existing, skip_roi_extraction)
             results.append(result)
 
             if progress_callback:
@@ -259,7 +264,7 @@ def process_study(
         # Parallel processing
         with ProcessPoolExecutor(max_workers=n_jobs) as executor:
             future_to_subject = {
-                executor.submit(process_subject, config, subject, skip_existing): subject
+                executor.submit(process_subject, config, subject, skip_existing, skip_roi_extraction): subject
                 for subject in subjects_to_process
             }
 

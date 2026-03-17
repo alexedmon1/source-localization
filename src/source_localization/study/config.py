@@ -228,9 +228,11 @@ class StudyConfig:
         """
         Create configuration from dictionary.
 
-        Supports two modes:
+        Supports three modes:
         1. Explicit subjects list: subjects defined inline
         2. Discovery mode: auto-discover subjects from folder structure
+        3. Unified format: ``subjects`` as list of dicts with ``eeg_file``,
+           ``paths`` section, and ``pipeline`` section.
 
         Discovery config example:
             discovery:
@@ -238,6 +240,18 @@ class StudyConfig:
               eeg_pattern: "**/*.set"               # Glob pattern for EEG files
               group_from_folder: true               # Use parent folder as group
         """
+        # Detect unified format: subjects list with eeg_file keys
+        subjects_raw = data.get('subjects', [])
+        is_unified = (
+            isinstance(subjects_raw, list)
+            and len(subjects_raw) > 0
+            and isinstance(subjects_raw[0], dict)
+            and 'eeg_file' in subjects_raw[0]
+        )
+
+        if is_unified:
+            return cls._from_unified_dict(data, root_dir)
+
         subjects = []
 
         # Check for discovery mode
@@ -459,6 +473,79 @@ class StudyConfig:
             name=name,
             root_dir=folder,
             subjects=subjects,
+        )
+
+    @classmethod
+    def _from_unified_dict(cls, data: Dict[str, Any], root_dir: Path) -> 'StudyConfig':
+        """Create configuration from unified study.yaml format.
+
+        The unified format has:
+        - ``subjects``: list of dicts with ``id``, ``eeg_file``, ``group``
+        - ``paths``: ``localization``, ``analytics``, ``results``
+        - ``pipeline``: ``preset``, ``atlas``, ``overrides``
+        - ``bands``: frequency band definitions (used for analysis)
+        - Ignores analytics-only keys: groups, contrasts, roi_categories, analyses
+        """
+        paths = data.get('paths', {})
+
+        # Resolve paths relative to root_dir
+        def _resolve(p: str, default: str) -> Path:
+            raw = p or default
+            pp = Path(raw)
+            return pp if pp.is_absolute() else (root_dir / pp).resolve()
+
+        loc_dir = _resolve(paths.get('localization'), './localization')
+
+        # Build subjects from unified list
+        subjects = []
+        for s in data.get('subjects', []):
+            eeg_file = Path(s['eeg_file'])
+            if not eeg_file.is_absolute():
+                eeg_file = root_dir / eeg_file
+            subjects.append(SubjectInfo(
+                subject_id=str(s['id']),
+                eeg_file=eeg_file,
+                group=s.get('group'),
+            ))
+
+        pipeline_config = data.get('pipeline', {})
+
+        # Convert bands to analysis frequency_bands format
+        analysis_config: Dict[str, Any] = {}
+        bands_raw = data.get('bands', {})
+        if bands_raw:
+            analysis_config['frequency_bands'] = {
+                name: tuple(limits) if isinstance(limits, list) else limits
+                for name, limits in bands_raw.items()
+            }
+
+        # Merge with defaults
+        default_analysis = {
+            'frequency_bands': {
+                'delta': (1, 4),
+                'theta': (4, 10),
+                'alpha': (10, 13),
+                'beta': (13, 30),
+                'low_gamma': (30, 55),
+                'high_gamma': (65, 100),
+            },
+            'connectivity_methods': ['correlation', 'coherence'],
+            'depth_weighting': True,
+            'max_depth_mm': 3.0,
+        }
+        for key, val in default_analysis.items():
+            if key not in analysis_config:
+                analysis_config[key] = val
+
+        return cls(
+            name=data.get('name', 'unnamed_study'),
+            root_dir=loc_dir,
+            pipeline_preset=pipeline_config.get('preset', 'roi_based_ellipsoid'),
+            pipeline_atlas=pipeline_config.get('atlas'),
+            pipeline_overrides=pipeline_config.get('overrides', {}),
+            subjects=subjects,
+            analysis_config=analysis_config,
+            output_config=data.get('output', {}),
         )
 
     @staticmethod
