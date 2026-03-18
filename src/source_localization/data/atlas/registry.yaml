@@ -1,0 +1,27 @@
+antwerp:
+  brain_labels: data/atlas/Atlas_3DRoisLeftRight.Labels.nii
+  roi_mapping: data/atlas/roi_mapping.json
+  brain_volume: data/atlas/Atlas_3DRois.nii
+  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  full_brain_coverage: false
+
+allen:
+  brain_labels: data/atlas/allen/allen_labels.nii.gz
+  roi_mapping: data/atlas/allen/roi_mapping.json
+  brain_volume: data/atlas/Atlas_3DRois.nii
+  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  full_brain_coverage: true
+
+allen32:
+  brain_labels: data/atlas/allen/allen_labels.nii.gz
+  roi_mapping: data/atlas/allen/roi_mapping.json
+  brain_volume: data/atlas/Atlas_3DRois.nii
+  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  full_brain_coverage: true
+
+allen64:
+  brain_labels: data/atlas/allen/allen_labels_allen64.nii.gz
+  roi_mapping: data/atlas/allen/roi_mapping_allen64.json
+  brain_volume: data/atlas/Atlas_3DRois.nii
+  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  full_brain_coverage: true

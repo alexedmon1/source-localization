@@ -5,24 +5,16 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+def _load_atlas_registry() -> Dict[str, Any]:
+    registry_file = Path(__file__).parent / 'data' / 'atlas' / 'registry.yaml'
+    with open(registry_file) as f:
+        return yaml.safe_load(f)
+
+
 # Atlas definitions: maps atlas name -> input path overrides
 # All paths are relative to the package data directory
-ATLAS_DEFINITIONS = {
-    'antwerp': {
-        'brain_labels': 'data/atlas/Atlas_3DRoisLeftRight.Labels.nii',
-        'roi_mapping': 'data/atlas/roi_mapping.json',
-        'brain_volume': 'data/atlas/Atlas_3DRois.nii',
-        'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
-        'full_brain_coverage': False,  # Cortical surface only
-    },
-    'allen': {
-        'brain_labels': 'data/atlas/allen/allen_labels.nii.gz',
-        'roi_mapping': 'data/atlas/allen/roi_mapping.json',
-        'brain_volume': 'data/atlas/Atlas_3DRois.nii',
-        'brain_mask': 'data/atlas/Atlas_3DRois_brain.nii.gz',
-        'full_brain_coverage': True,  # Full brain volumetric labels
-    },
-}
+# To add a new atlas, edit data/atlas/registry.yaml
+ATLAS_DEFINITIONS = _load_atlas_registry()
 
 # Default atlas used by all presets
 DEFAULT_ATLAS = 'antwerp'

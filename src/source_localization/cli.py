@@ -251,6 +251,10 @@ Examples:
                             help='Skip automatic QC after processing')
     run_parser.add_argument('--skip-roi-extraction', action='store_true',
                             help='Stop after inverse solution (step 6), skip ROI extraction')
+    run_parser.add_argument('--preset', choices=_get_available_presets(),
+                            help='Override pipeline preset from config')
+    run_parser.add_argument('--output-dir',
+                            help='Override output directory (localization root)')
 
     # Collect subcommand
     collect_parser = study_subparsers.add_parser(
@@ -319,6 +323,13 @@ def _run_study_command(args):
     elif args.study_command == 'run':
         # Load configuration
         config = StudyConfig.from_yaml(args.config)
+
+        # Apply CLI overrides
+        if getattr(args, 'preset', None):
+            config.pipeline_preset = args.preset
+        if getattr(args, 'output_dir', None):
+            from pathlib import Path
+            config.root_dir = Path(args.output_dir).resolve()
 
         # Validate
         errors = config.validate()
