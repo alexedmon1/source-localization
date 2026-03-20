@@ -1,6 +1,7 @@
 antwerp:
   brain_labels: data/atlas/Atlas_3DRoisLeftRight.Labels.nii
   roi_mapping: data/atlas/roi_mapping.json
+  roi_categories: data/atlas/roi_categories.yaml
   brain_volume: data/atlas/Atlas_3DRois.nii
   brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
   full_brain_coverage: false
@@ -8,6 +9,7 @@ antwerp:
 allen:
   brain_labels: data/atlas/allen/allen_labels.nii.gz
   roi_mapping: data/atlas/allen/roi_mapping.json
+  roi_categories: data/atlas/allen/roi_categories.yaml
   brain_volume: data/atlas/Atlas_3DRois.nii
   brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
   full_brain_coverage: true
@@ -15,6 +17,7 @@ allen:
 allen32:
   brain_labels: data/atlas/allen/allen_labels.nii.gz
   roi_mapping: data/atlas/allen/roi_mapping.json
+  roi_categories: data/atlas/allen/roi_categories.yaml
   brain_volume: data/atlas/Atlas_3DRois.nii
   brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
   full_brain_coverage: true

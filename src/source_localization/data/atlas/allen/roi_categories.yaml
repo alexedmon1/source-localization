@@ -1,0 +1,46 @@
+# Canonical ROI categories for the Allen32 atlas
+# 32 ROIs (16 bilateral pairs) grouped into named anatomical categories
+# Used by source-analytics when roi_categories is not specified in study config
+
+Prefrontal:
+  - Prefrontal_mPFC_L
+  - Prefrontal_mPFC_R
+Motor:
+  - Motor_L
+  - Motor_R
+Somatosensory:
+  - Somatosensory_L
+  - Somatosensory_R
+Auditory:
+  - Auditory_L
+  - Auditory_R
+Visual/Parietal:
+  - Visual_Parietal_L
+  - Visual_Parietal_R
+Lateral Cortex:
+  - Lateral_Cortex_L
+  - Lateral_Cortex_R
+Retrosplenial:
+  - Retrosplenial_L
+  - Retrosplenial_R
+Olfactory:
+  - Olfactory_Bulb_L
+  - Olfactory_Bulb_R
+Hippocampal:
+  - Hippocampus_Ant_L
+  - Hippocampus_Ant_R
+  - Hippocampus_Post_L
+  - Hippocampus_Post_R
+Deep Subcortical:
+  - Thalamus_L
+  - Thalamus_R
+  - Hypothalamus_L
+  - Hypothalamus_R
+  - Amygdala_L
+  - Amygdala_R
+  - Striatum_L
+  - Striatum_R
+  - Brainstem_L
+  - Brainstem_R
+  - Cerebellum_L
+  - Cerebellum_R

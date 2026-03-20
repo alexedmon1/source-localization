@@ -1,0 +1,59 @@
+# Canonical ROI categories for the Antwerp atlas
+# Grouped into named anatomical categories
+
+Prefrontal:
+  - Cortex_Frontal_Association_L
+  - Cortex_Frontal_Association_R
+  - Cortex_Orbital_L
+  - Cortex_Orbital_R
+  - Cortex_Cingulate_L
+  - Cortex_Cingulate_R
+  - Cortex_Prelimbic_L
+  - Cortex_Prelimbic_R
+Motor:
+  - Cortex_Motor_L
+  - Cortex_Motor_R
+Somatosensory:
+  - Cortex_Somatosensory_1_L
+  - Cortex_Somatosensory_1_R
+Auditory:
+  - Cortex_Auditory_L
+  - Cortex_Auditory_R
+Visual/Parietal:
+  - Cortex_Visual_L
+  - Cortex_Visual_R
+  - Cortex_Parietal_Association_L
+  - Cortex_Parietal_Association_R
+Retrosplenial:
+  - Cortex_Retrosplenial_L
+  - Cortex_Retrosplenial_R
+Olfactory:
+  - Olfactory_Bulb_L
+  - Olfactory_Bulb_R
+  - Cortex_Piriform_L
+  - Cortex_Piriform_R
+  - Cortex_Rhinal_L
+  - Cortex_Rhinal_R
+Hippocampal:
+  - Hippocampus_L
+  - Hippocampus_R
+Deep Subcortical:
+  - Thalamus_L
+  - Thalamus_R
+  - Hypothalamus_L
+  - Hypothalamus_R
+  - Amygdala_L
+  - Amygdala_R
+  - Striatum_L
+  - Striatum_R
+  - Septal_Nucleus_L
+  - Septal_Nucleus_R
+  - Cerebellum_L
+  - Cerebellum_R
+White Matter:
+  - Corpus_Callosum_Genu_L
+  - Corpus_Callosum_Genu_R
+  - Corpus_Callosum_Body_L
+  - Corpus_Callosum_Body_R
+  - Corpus_Callosum_Splenium_L
+  - Corpus_Callosum_Splenium_R
