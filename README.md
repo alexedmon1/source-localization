@@ -96,6 +96,10 @@ Source localization solves the EEG inverse problem: given electrode measurements
 
 ---
 
+## AI-Assisted Workflow (IRL)
+
+This repo ships an [IRL](https://github.com/drpedapati/irl-template) plan template for running source localization inside an Idempotent Research Loop: [`irl-template.md`](irl-template.md) (study init → batch `study run` → `study analyze` spectral/connectivity → QC + exclusions). Initialize a study with `irl init -t source-localization "<study>"` after dropping the template into `~/research/_templates/`.
+
 ## Installation
 
 ### Prerequisites
