@@ -145,6 +145,21 @@ Clusters failing the minimum-extent criterion — `min(R_extent, A_extent) < zon
 | thalamic | 4 | Reticular nucleus, ventral medial thalamus |
 | hypothalamic | 2 | Hypothalamus |
 
+### Composite ROI Naming (v0.2.0)
+
+Four 32-ROI composites in the Allen32 parcellation carry display labels chosen to reflect the structures they actually bundle. Earlier identifiers (`Prefrontal_mPFC`, `Striatum`, `Amygdala`, `Brainstem`) named only the most prominent constituent and were misleading about the breadth of each composite.
+
+| Identifier (v0.2.0) | Legacy alias | Bundled Allen structures | Naming rationale |
+|---|---|---|---|
+| `Frontal_Anterior_{L,R}` | `Prefrontal_mPFC_{L,R}` | Anterior cingulate (ACA), Prelimbic (PL), Infralimbic (ILA), Orbital (ORB), Frontal pole (FRP) — 38 sub-structures per hemisphere | ORB and FRP are lateral / ventral, not medial — the "mPFC" qualifier was inaccurate for the composite. |
+| `Basal_Ganglia_{L,R}` | `Striatum_{L,R}` | Caudoputamen (CP), Nucleus accumbens (ACB), Olfactory tubercle (OT), **Pallidum (PAL)** | Pallidum (globus pallidus) is anatomically distinct from striatum; the broader basal-ganglia label is more accurate. |
+| `Amygdalar_Complex_{L,R}` | `Amygdala_{L,R}` | Basolateral (BLA), Central (CEA), and Cortical (COA) amygdalar nuclei + **Claustrum (CLA)** + **Endopiriform nucleus (EP)** | CLA and EP are adjacent to but anatomically distinct from amygdala. |
+| `Brainstem_Tectum_{L,R}` | `Brainstem_{L,R}` | Midbrain (MB: PAG, SN, VTA, RN, MRN, **superior + inferior colliculus**), Pons (P), Medulla (MY) | Superior / inferior colliculi are tectum (dorsal midbrain), not brainstem proper. |
+
+The 10-region category `Prefrontal` was renamed to `Frontal-Anterior` for the same reason; the other 10-region categories are unchanged. `Striatum`, `Amygdala`, and `Brainstem` are inside the `Deep Subcortical` umbrella at the 10-region tier, which is unchanged.
+
+**Backward compatibility.** The legacy identifiers are preserved in the `deprecated_aliases:` block at the bottom of `roi_categories.yaml`. Loaders can consult that block to resolve historical CSVs / configs that reference the pre-v0.2.0 labels. Region membership and label IDs (1--32) are unchanged — these are nomenclature clarifications only and have no effect on numerical results.
+
 ## Files
 
 | File | Description |
@@ -152,6 +167,7 @@ Clusters failing the minimum-extent criterion — `min(R_extent, A_extent) < zon
 | `allen_labels.nii.gz` | Parcellation label volume (64 labels, 1-indexed, in Antwerp coordinate space) |
 | `roi_mapping.json` | ROI metadata: names, abbreviations, colors, division, hemisphere, depth zone, Allen structure composition |
 | `allen_annotation_in_antwerp.nii.gz` | Full Allen CCFv3 annotation (553 structures) warped to Antwerp space, for reference |
+| `roi_categories.yaml` | 10-region grouping for the 32-ROI tier; `deprecated_aliases:` block resolves pre-v0.2.0 labels |
 | `METHODS.md` | This file |
 
 ## Known Limitations
@@ -164,6 +180,7 @@ Clusters failing the minimum-extent criterion — `min(R_extent, A_extent) < zon
 
 ## Version History
 
+- **v0.2.0 (2026-04-25)**: Renamed four composite ROI labels for nomenclature accuracy: `Prefrontal_mPFC` → `Frontal_Anterior`, `Striatum` → `Basal_Ganglia` (composite includes pallidum), `Amygdala` → `Amygdalar_Complex` (composite includes claustrum and endopiriform nucleus), `Brainstem` → `Brainstem_Tectum` (composite includes superior and inferior colliculi). 10-region category `Prefrontal` → `Frontal-Anterior`. Region membership and label IDs (1--32) unchanged. Legacy identifiers retained as deprecated aliases in `roi_categories.yaml`. See "Composite ROI Naming" section above.
 - **v3 (2026-03-11)**: Hemispheric symmetry enforcement (64 ROIs, 32 per hemisphere). Fixed midline from volume center (X=32) to brain center-of-mass (X=30). Cluster left hemisphere, mirror to right. Absorb right-only orphan structures into nearest same-division parcel.
 - **v2 (2026-03-11)**: Anatomically constrained parcellation (61 ROIs). Added division boundaries (thalamus, hippocampus, cortex, etc. never merge). Excluded fiber tracts and ventricles. 11 anatomical divisions × hemisphere × depth zone clustering. Had L/R asymmetry (33L vs 28R) due to wrong midline.
 - **v1 (2026-03-06)**: Initial depth-adaptive parcellation (49 ROIs). Purely spatial clustering without anatomical constraints.
