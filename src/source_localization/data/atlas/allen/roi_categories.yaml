@@ -1,10 +1,15 @@
 # Canonical ROI categories for the Allen32 atlas
 # 32 ROIs (16 bilateral pairs) grouped into named anatomical categories
 # Used by source-analytics when roi_categories is not specified in study config
+#
+# v0.2.0 (2026-04-25): four composite labels renamed for nomenclature accuracy.
+# Historical identifiers (Prefrontal_mPFC, Striatum, Amygdala, Brainstem) are
+# preserved in the deprecated_aliases block so derivatives generated before
+# this rename remain readable. No region membership changes.
 
-Prefrontal:
-  - Prefrontal_mPFC_L
-  - Prefrontal_mPFC_R
+Frontal-Anterior:
+  - Frontal_Anterior_L
+  - Frontal_Anterior_R
 Motor:
   - Motor_L
   - Motor_R
@@ -36,11 +41,27 @@ Deep Subcortical:
   - Thalamus_R
   - Hypothalamus_L
   - Hypothalamus_R
-  - Amygdala_L
-  - Amygdala_R
-  - Striatum_L
-  - Striatum_R
-  - Brainstem_L
-  - Brainstem_R
+  - Amygdalar_Complex_L
+  - Amygdalar_Complex_R
+  - Basal_Ganglia_L
+  - Basal_Ganglia_R
+  - Brainstem_Tectum_L
+  - Brainstem_Tectum_R
   - Cerebellum_L
   - Cerebellum_R
+
+# Backward compatibility — map old identifiers to new canonical names.
+# Loader-side code may consult this block to resolve historical CSVs / configs
+# that reference the pre-v0.2.0 labels.
+deprecated_aliases:
+  # 32-ROI identifiers
+  Prefrontal_mPFC_L: Frontal_Anterior_L
+  Prefrontal_mPFC_R: Frontal_Anterior_R
+  Striatum_L: Basal_Ganglia_L
+  Striatum_R: Basal_Ganglia_R
+  Amygdala_L: Amygdalar_Complex_L
+  Amygdala_R: Amygdalar_Complex_R
+  Brainstem_L: Brainstem_Tectum_L
+  Brainstem_R: Brainstem_Tectum_R
+  # 10-region category
+  Prefrontal: Frontal-Anterior
