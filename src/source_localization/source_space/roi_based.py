@@ -25,8 +25,114 @@ import json
 import mne
 import nibabel as nib
 import numpy as np
+from pathlib import Path
 from scipy.ndimage import center_of_mass
 from sklearn.decomposition import PCA
+
+
+def _resolve_roi_mapping_path(config):
+    """Resolve roi_mapping path (relative to package data dir if not absolute)."""
+    package_dir = Path(__file__).parent.parent
+    p = config['inputs'].get('roi_mapping')
+    if p is None:
+        return None
+    p = Path(p)
+    if not p.is_absolute():
+        p = package_dir / p
+    return p if p.exists() else None
+
+
+def _get_lr_pairs(unique_rois, roi_mapping_path):
+    """Return (pairs, unpaired) from a roi_mapping.json declaring `n_rois_per_hemisphere`.
+
+    A "pair" is (L_id, R_id) where R_id == L_id + n_rois_per_hemisphere.
+    Atlases without `n_rois_per_hemisphere` (or with no L/R structure) return
+    ([], list(unique_rois)) and the caller falls back to per-ROI placement.
+    """
+    if roi_mapping_path is None:
+        return [], [int(x) for x in unique_rois]
+    try:
+        with open(roi_mapping_path) as f:
+            mapping = json.load(f)
+    except Exception:
+        return [], [int(x) for x in unique_rois]
+    n_per_hemi = mapping.get('n_rois_per_hemisphere')
+    if not n_per_hemi:
+        return [], [int(x) for x in unique_rois]
+    ids = set(int(x) for x in unique_rois)
+    pairs = []
+    paired = set()
+    for left_id in range(1, n_per_hemi + 1):
+        right_id = left_id + n_per_hemi
+        if left_id in ids and right_id in ids:
+            pairs.append((left_id, right_id))
+            paired.add(left_id)
+            paired.add(right_id)
+    unpaired = sorted(int(x) for x in ids if int(x) not in paired)
+    return pairs, unpaired
+
+
+def _place_pca(roi_voxels, n_sources, spread_factor=0.8):
+    """Compute PCA-based source placements for one ROI's voxel set.
+
+    Returns list of voxel coordinates (np.ndarray, shape (3,)).
+    Mirrors the original `pca` branch of `create_source_space` exactly so
+    L-side placements are bitwise identical to the legacy code path.
+    """
+    if n_sources == 1 or len(roi_voxels) < 3:
+        centroid_vox = roi_voxels.mean(axis=0)
+        return [centroid_vox] * max(1, n_sources)
+
+    pca = PCA(n_components=min(3, len(roi_voxels)))
+    pca.fit(roi_voxels)
+    centroid_vox = roi_voxels.mean(axis=0)
+    roi_extents = np.std(pca.transform(roi_voxels), axis=0)
+
+    if n_sources == 2:
+        offset = spread_factor * roi_extents[0]
+        return [
+            centroid_vox - offset * pca.components_[0],
+            centroid_vox + offset * pca.components_[0],
+        ]
+    if n_sources <= 4:
+        n_per_axis = int(np.ceil(np.sqrt(n_sources)))
+        out = []
+        for i in range(n_per_axis):
+            for j in range(n_per_axis):
+                if len(out) >= n_sources:
+                    break
+                offset_1 = spread_factor * roi_extents[0] * (2 * i / (n_per_axis - 1) - 1) if n_per_axis > 1 else 0
+                offset_2 = spread_factor * roi_extents[1] * (2 * j / (n_per_axis - 1) - 1) if n_per_axis > 1 else 0
+                out.append(centroid_vox + offset_1 * pca.components_[0] + offset_2 * pca.components_[1])
+        return out
+    n_per_axis = int(np.ceil(n_sources ** (1 / 3)))
+    out = []
+    for i in range(n_per_axis):
+        for j in range(n_per_axis):
+            for k in range(n_per_axis):
+                if len(out) >= n_sources:
+                    break
+                offset_1 = spread_factor * roi_extents[0] * (2 * i / (n_per_axis - 1) - 1) if n_per_axis > 1 else 0
+                offset_2 = spread_factor * roi_extents[1] * (2 * j / (n_per_axis - 1) - 1) if n_per_axis > 1 else 0
+                offset_3 = spread_factor * roi_extents[2] * (2 * k / (n_per_axis - 1) - 1) if n_per_axis > 1 and len(pca.components_) > 2 else 0
+                v = centroid_vox + offset_1 * pca.components_[0] + offset_2 * pca.components_[1]
+                if len(pca.components_) > 2:
+                    v = v + offset_3 * pca.components_[2]
+                out.append(v)
+    return out
+
+
+def _mirror_voxel_x(vox_coord, affine):
+    """Mirror a voxel coordinate across the world X=0 plane.
+
+    Converts voxel→mm via `affine`, negates X, converts back. Used to derive
+    R-side dipole positions from L-side placements so L/R coords are exact
+    mirrors regardless of small voxel-mask asymmetries.
+    """
+    mm = nib.affines.apply_affine(affine, np.asarray(vox_coord))
+    mm_mirror = mm.copy()
+    mm_mirror[0] = -mm_mirror[0]
+    return nib.affines.apply_affine(np.linalg.inv(affine), mm_mirror)
 
 
 def load_roi_categories(config):
@@ -221,8 +327,74 @@ def create_source_space(config, previous_outputs):
     source_coords_voxel = []
     roi_assignments = []
 
-    # Place sources in each ROI
+    # ------------------------------------------------------------------
+    # L/R symmetry enforcement (post-regfix bug discovered 2026-04-29):
+    # Without this, the per-ROI PCA placement can produce L-vs-R dipole
+    # counts that differ by 1-2 (rounding of proportional allocation when
+    # L and R voxel masks are not bit-identical) and dipole positions
+    # that are not mirror-symmetric (PCA axis sign ambiguity per side).
+    # That bakes a hemispheric asymmetry into the source space and was
+    # producing spurious KO-vs-WT lateralization signals at small
+    # midline ROIs (e.g. Retrosplenial, Hippocampus_Ant).
+    #
+    # Fix: if the atlas roi_mapping declares `n_rois_per_hemisphere`
+    # (Allen32 = 16), pair L (id 1..N) with R (id+N). For each pair,
+    # equalize source counts (max of L,R) and compute the L-side
+    # placement, then mirror across world X=0 to derive R-side coords.
+    # Unpaired ROIs and atlases without this metadata fall back to the
+    # original per-ROI logic.
+    # ------------------------------------------------------------------
+    enforce_lr_symmetry = config['source_space']['roi_based'].get(
+        'enforce_lr_symmetry', True
+    )
+    if enforce_lr_symmetry:
+        roi_mapping_path = _resolve_roi_mapping_path(config)
+        lr_pairs, unpaired_ids = _get_lr_pairs(unique_rois, roi_mapping_path)
+    else:
+        lr_pairs, unpaired_ids = [], [int(x) for x in unique_rois]
+
+    if lr_pairs:
+        # Equalize per-pair source counts to max(n_L, n_R) so neither side
+        # is undersampled relative to the other.
+        for left_id, right_id in lr_pairs:
+            n_pair = max(roi_source_counts[left_id], roi_source_counts[right_id])
+            roi_source_counts[left_id] = n_pair
+            roi_source_counts[right_id] = n_pair
+
+        # PCA-mirror placement: compute L, mirror to R.
+        if placement_strategy == 'pca':
+            for left_id, right_id in lr_pairs:
+                left_voxels = np.argwhere(roi_labels_data == left_id)
+                if len(left_voxels) == 0:
+                    print(f"    Warning: ROI {left_id} has no voxels, skipping pair ({left_id}, {right_id})")
+                    continue
+                n = roi_source_counts[left_id]
+                left_placements = _place_pca(left_voxels, n)
+                for vox_l in left_placements:
+                    source_coords_voxel.append(vox_l)
+                    roi_assignments.append(left_id)
+                    source_coords_voxel.append(_mirror_voxel_x(vox_l, affine))
+                    roi_assignments.append(right_id)
+        elif placement_strategy == 'centroid':
+            for left_id, right_id in lr_pairs:
+                left_voxels = np.argwhere(roi_labels_data == left_id)
+                if len(left_voxels) == 0:
+                    continue
+                centroid = left_voxels.mean(axis=0)
+                source_coords_voxel.append(centroid)
+                roi_assignments.append(left_id)
+                source_coords_voxel.append(_mirror_voxel_x(centroid, affine))
+                roi_assignments.append(right_id)
+        else:
+            print(f"    Note: enforce_lr_symmetry not implemented for placement_strategy='{placement_strategy}'; falling back to per-ROI logic")
+            unpaired_ids = sorted(set(unpaired_ids) | {i for p in lr_pairs for i in p})
+            lr_pairs = []
+
+    # Place sources in each (remaining / unpaired) ROI using legacy logic
+    paired_ids = {i for p in lr_pairs for i in p}
     for roi_id in unique_rois:
+        if int(roi_id) in paired_ids:
+            continue
         # Get voxel coordinates for this ROI
         roi_mask = roi_labels_data == roi_id
         roi_voxels = np.argwhere(roi_mask)
