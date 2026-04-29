@@ -246,6 +246,9 @@ Examples:
                             help='Number of parallel jobs (default: 1)')
     run_parser.add_argument('--force', action='store_true',
                             help='Re-process subjects even if output exists')
+    run_parser.add_argument('--strict-output', action='store_true',
+                            help='Error (rather than silently skip) if any subject\'s '
+                                 'output directory already exists; --force overrides')
     run_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     run_parser.add_argument('--no-qc', action='store_true',
                             help='Skip automatic QC after processing')
@@ -352,6 +355,30 @@ def _run_study_command(args):
         def progress_callback(completed, total, subject_id, success):
             status = "OK" if success else "FAILED"
             print(f"[{completed}/{total}] {subject_id}: {status}")
+
+        # --strict-output: error if any subject's output dir already exists
+        # (--force overrides; if --force is set, we re-process and ignore strict-output)
+        if getattr(args, 'strict_output', False) and not args.force:
+            from pathlib import Path
+            subjects_to_check = args.subjects if args.subjects else [s.subject_id for s in config.subjects]
+            existing = []
+            for sid in subjects_to_check:
+                sinfo = config.get_subject_by_id(sid)
+                if sinfo is None:
+                    continue
+                out_dir = config.get_subject_output_dir(sinfo)
+                if (out_dir / "roi_timeseries" / "roi_timeseries_signed.set").exists() or \
+                   (out_dir / "pipeline" / "data" / "step6_roi_timeseries.pkl").exists():
+                    existing.append(str(out_dir))
+            if existing:
+                print(f"Error: --strict-output set and {len(existing)} subject output director"
+                      f"{'ies' if len(existing) > 1 else 'y'} already exist", file=sys.stderr)
+                for p in existing[:5]:
+                    print(f"  {p}", file=sys.stderr)
+                if len(existing) > 5:
+                    print(f"  ... and {len(existing) - 5} more", file=sys.stderr)
+                print("Pass --force to re-process, or remove the directories first.", file=sys.stderr)
+                return 1
 
         # Run processing
         result = process_study(
