@@ -220,57 +220,56 @@ def run(config, previous_outputs):
 
     # Save intermediate data and create visualizations
     if config['outputs'].get('save_intermediate', True):
-        from ..utils.io_utils import save_pickle, get_data_dir, get_figures_dir
+        from ..utils.io_utils import save_pickle, get_data_dir, get_figures_dir, get_output_variants
         from ..utils.step_visualizations import visualize_step6_roi_extraction
 
         data_dir = get_data_dir(config)
         figures_dir = get_figures_dir(config)
 
-        # Save both magnitude and signed ROI timeseries (pickle format)
-        save_pickle(roi_stcs_magnitude, data_dir / 'step6_roi_timeseries_magnitude.pkl')
-        save_pickle(roi_stcs_signed, data_dir / 'step6_roi_timeseries_signed.pkl')
-        # Backward compatibility: also save as step6_roi_timeseries.pkl (magnitude)
-        save_pickle(roi_stcs_magnitude, data_dir / 'step6_roi_timeseries.pkl')
-        print(f"    Saved: {data_dir / 'step6_roi_timeseries_magnitude.pkl'}")
-        print(f"    Saved: {data_dir / 'step6_roi_timeseries_signed.pkl'}")
-        print(f"    Saved: {data_dir / 'step6_roi_timeseries.pkl'} (backward compat, same as magnitude)")
+        variants = get_output_variants(config)
+
+        if 'magnitude' in variants:
+            save_pickle(roi_stcs_magnitude, data_dir / 'step6_roi_timeseries_magnitude.pkl')
+            print(f"    Saved: {data_dir / 'step6_roi_timeseries_magnitude.pkl'}")
+        if 'signed' in variants:
+            save_pickle(roi_stcs_signed, data_dir / 'step6_roi_timeseries_signed.pkl')
+            print(f"    Saved: {data_dir / 'step6_roi_timeseries_signed.pkl'}")
 
         # Export to EEGLAB .set format (MNE-compatible)
         from ..utils.export_set import export_roi_to_set
         sfreq = stc.sfreq if hasattr(stc, 'sfreq') else previous_outputs.get('sfreq', 500.0)
 
-        # Export magnitude ROI time series
-        export_roi_to_set(
-            roi_stcs_magnitude,
-            sfreq=sfreq,
-            output_path=data_dir / 'roi_timeseries_magnitude.set',
-            subject_id='source_localized_magnitude'
-        )
+        if 'magnitude' in variants:
+            export_roi_to_set(
+                roi_stcs_magnitude,
+                sfreq=sfreq,
+                output_path=data_dir / 'roi_timeseries_magnitude.set',
+                subject_id='source_localized_magnitude'
+            )
+        if 'signed' in variants:
+            export_roi_to_set(
+                roi_stcs_signed,
+                sfreq=sfreq,
+                output_path=data_dir / 'roi_timeseries_signed.set',
+                subject_id='source_localized_signed'
+            )
 
-        # Export signed ROI time series
-        export_roi_to_set(
-            roi_stcs_signed,
-            sfreq=sfreq,
-            output_path=data_dir / 'roi_timeseries_signed.set',
-            subject_id='source_localized_signed'
-        )
-
-        # Create ROI extraction visualizations for both magnitude and signed time series
+        # ROI extraction QC visualizations
         import matplotlib.pyplot as plt
 
-        # Magnitude visualization
-        fig = visualize_step6_roi_extraction(roi_stcs_magnitude, roi_labels, stc, roi_source_mapping_filtered,
-                                             figures_dir / 'step6_roi_extraction_magnitude.png',
-                                             title_suffix=' (Magnitude)')
-        print(f"    Saved: {figures_dir / 'step6_roi_extraction_magnitude.png'}")
-        plt.close(fig)
+        if 'magnitude' in variants:
+            fig = visualize_step6_roi_extraction(roi_stcs_magnitude, roi_labels, stc, roi_source_mapping_filtered,
+                                                 figures_dir / 'step6_roi_extraction_magnitude.png',
+                                                 title_suffix=' (Magnitude)')
+            print(f"    Saved: {figures_dir / 'step6_roi_extraction_magnitude.png'}")
+            plt.close(fig)
 
-        # Signed visualization
-        fig = visualize_step6_roi_extraction(roi_stcs_signed, roi_labels, stc, roi_source_mapping_filtered,
-                                             figures_dir / 'step6_roi_extraction_signed.png',
-                                             title_suffix=' (Signed)')
-        print(f"    Saved: {figures_dir / 'step6_roi_extraction_signed.png'}")
-        plt.close(fig)
+        if 'signed' in variants:
+            fig = visualize_step6_roi_extraction(roi_stcs_signed, roi_labels, stc, roi_source_mapping_filtered,
+                                                 figures_dir / 'step6_roi_extraction_signed.png',
+                                                 title_suffix=' (Signed)')
+            print(f"    Saved: {figures_dir / 'step6_roi_extraction_signed.png'}")
+            plt.close(fig)
 
     return {
         'roi_stcs': roi_stcs_magnitude,  # Backward compatibility

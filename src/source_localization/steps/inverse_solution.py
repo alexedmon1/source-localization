@@ -915,20 +915,20 @@ def run(config, previous_outputs):
 
     # Save intermediate data and create visualizations
     if config['outputs'].get('save_intermediate', True):
-        from ..utils.io_utils import save_pickle, get_data_dir, get_figures_dir
+        from ..utils.io_utils import save_pickle, get_data_dir, get_figures_dir, get_output_variants
         from ..utils.step_visualizations import visualize_step5_inverse
 
         data_dir = get_data_dir(config)
         figures_dir = get_figures_dir(config)
 
-        # Save both magnitude and signed source estimates
-        save_pickle(stc_magnitude, data_dir / 'step5_stc_magnitude.pkl')
-        save_pickle(stc_signed, data_dir / 'step5_stc_signed.pkl')
-        # Backward compatibility: also save as step5_stc.pkl (magnitude)
-        save_pickle(stc_magnitude, data_dir / 'step5_stc.pkl')
-        print(f"    Saved: {data_dir / 'step5_stc_magnitude.pkl'}")
-        print(f"    Saved: {data_dir / 'step5_stc_signed.pkl'}")
-        print(f"    Saved: {data_dir / 'step5_stc.pkl'} (backward compat, same as magnitude)")
+        variants = get_output_variants(config)
+
+        if 'magnitude' in variants:
+            save_pickle(stc_magnitude, data_dir / 'step5_stc_magnitude.pkl')
+            print(f"    Saved: {data_dir / 'step5_stc_magnitude.pkl'}")
+        if 'signed' in variants:
+            save_pickle(stc_signed, data_dir / 'step5_stc_signed.pkl')
+            print(f"    Saved: {data_dir / 'step5_stc_signed.pkl'}")
 
         # Export source-level .set files for parametric mapping
         # Each source becomes a "channel" with its 3D coordinates
@@ -942,33 +942,35 @@ def run(config, previous_outputs):
         from ..utils.export_set import export_source_to_set
         sfreq = stc_magnitude.sfreq if hasattr(stc_magnitude, 'sfreq') else previous_outputs.get('sfreq', 500.0)
 
-        export_source_to_set(
-            stc_magnitude.data, source_coords_mm_export, sfreq,
-            data_dir / 'source_timeseries_magnitude.set',
-            subject_id='source_magnitude'
-        )
-        export_source_to_set(
-            stc_signed.data, source_coords_mm_export, sfreq,
-            data_dir / 'source_timeseries_signed.set',
-            subject_id='source_signed'
-        )
+        if 'magnitude' in variants:
+            export_source_to_set(
+                stc_magnitude.data, source_coords_mm_export, sfreq,
+                data_dir / 'source_timeseries_magnitude.set',
+                subject_id='source_magnitude'
+            )
+        if 'signed' in variants:
+            export_source_to_set(
+                stc_signed.data, source_coords_mm_export, sfreq,
+                data_dir / 'source_timeseries_signed.set',
+                subject_id='source_signed'
+            )
 
-        # Create inverse solution visualizations for both magnitude and signed
+        # Inverse solution QC visualizations
         import matplotlib.pyplot as plt
 
-        # Magnitude visualization (use source_coords_mm_export which is already truncated if needed)
-        fig = visualize_step5_inverse(stc_magnitude, source_coords_mm_export, method,
-                                      figures_dir / 'step5_inverse_magnitude.png',
-                                      title_suffix=' (Magnitude)')
-        print(f"    Saved: {figures_dir / 'step5_inverse_magnitude.png'}")
-        plt.close(fig)
+        if 'magnitude' in variants:
+            fig = visualize_step5_inverse(stc_magnitude, source_coords_mm_export, method,
+                                          figures_dir / 'step5_inverse_magnitude.png',
+                                          title_suffix=' (Magnitude)')
+            print(f"    Saved: {figures_dir / 'step5_inverse_magnitude.png'}")
+            plt.close(fig)
 
-        # Signed visualization
-        fig = visualize_step5_inverse(stc_signed, source_coords_mm_export, method,
-                                      figures_dir / 'step5_inverse_signed.png',
-                                      title_suffix=' (Signed)')
-        print(f"    Saved: {figures_dir / 'step5_inverse_signed.png'}")
-        plt.close(fig)
+        if 'signed' in variants:
+            fig = visualize_step5_inverse(stc_signed, source_coords_mm_export, method,
+                                          figures_dir / 'step5_inverse_signed.png',
+                                          title_suffix=' (Signed)')
+            print(f"    Saved: {figures_dir / 'step5_inverse_signed.png'}")
+            plt.close(fig)
 
     return {
         'stc': stc_magnitude,  # Backward compatibility

@@ -35,3 +35,32 @@ def get_data_dir(config):
 def get_figures_dir(config):
     """Get figures directory path from config."""
     return Path(config['outputs']['dir']) / 'figures'
+
+
+def get_output_variants(config):
+    """Normalize ``outputs.output_variants`` to a list of variant names.
+
+    Accepts the string forms ``"signed"``, ``"magnitude"``, ``"both"`` or
+    an explicit list. Returns a list containing one or both of
+    ``"signed"`` and ``"magnitude"``.
+    """
+    raw = config.get('outputs', {}).get('output_variants', 'both')
+    if isinstance(raw, str):
+        if raw == 'both':
+            return ['signed', 'magnitude']
+        if raw in ('signed', 'magnitude'):
+            return [raw]
+        raise ValueError(
+            f"outputs.output_variants={raw!r} not recognized. "
+            f"Use 'signed', 'magnitude', 'both', or a list."
+        )
+    variants = list(raw)
+    bad = [v for v in variants if v not in ('signed', 'magnitude')]
+    if bad:
+        raise ValueError(
+            f"outputs.output_variants contains unknown variant(s) {bad}; "
+            f"allowed values: 'signed', 'magnitude'."
+        )
+    if not variants:
+        raise ValueError("outputs.output_variants must not be empty.")
+    return variants

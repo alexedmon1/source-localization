@@ -149,11 +149,20 @@ def extract_subject_metrics(
     except Exception as e:
         logger.debug("step4_forward.pkl failed for %s: %s", subject_id, e)
 
-    # --- Step 5: STC magnitude ---
+    # --- Step 5: STC amplitude metrics ---
+    # Prefer magnitude file; fall back to signed (np.abs gives same metrics).
     try:
-        with open(data_dir / "step5_stc_magnitude.pkl", "rb") as f:
-            stc = pickle.load(f)
-        data = stc.data
+        stc, used_signed = None, False
+        for fname in ("step5_stc_magnitude.pkl", "step5_stc_signed.pkl", "step5_stc.pkl"):
+            path = data_dir / fname
+            if path.exists():
+                with open(path, "rb") as f:
+                    stc = pickle.load(f)
+                used_signed = "signed" in fname
+                break
+        if stc is None:
+            raise FileNotFoundError("no step5_stc_{magnitude,signed,}.pkl found")
+        data = np.abs(stc.data) if used_signed else stc.data
         metrics.stc_n_sources = data.shape[0]
         metrics.stc_n_times = data.shape[1]
         metrics.stc_amp_min = float(np.min(data))
@@ -163,17 +172,27 @@ def extract_subject_metrics(
         metrics.stc_amp_median = float(np.median(data))
         del stc, data
     except Exception as e:
-        logger.debug("step5_stc_magnitude.pkl failed for %s: %s", subject_id, e)
+        logger.debug("step5 STC load failed for %s: %s", subject_id, e)
 
-    # --- Step 6: ROI timeseries magnitude ---
+    # --- Step 6: ROI timeseries amplitude metrics ---
     try:
-        with open(data_dir / "step6_roi_timeseries_magnitude.pkl", "rb") as f:
-            roi_dict = pickle.load(f)
+        roi_dict, used_signed = None, False
+        for fname in ("step6_roi_timeseries_magnitude.pkl", "step6_roi_timeseries_signed.pkl", "step6_roi_timeseries.pkl"):
+            path = data_dir / fname
+            if path.exists():
+                with open(path, "rb") as f:
+                    roi_dict = pickle.load(f)
+                used_signed = "signed" in fname
+                break
+        if roi_dict is None:
+            raise FileNotFoundError("no step6_roi_timeseries_{magnitude,signed,}.pkl found")
 
         metrics.n_rois = len(roi_dict)
 
         # Each value is a 1-D numpy array (timeseries for that ROI)
         all_vals = np.concatenate(list(roi_dict.values()))
+        if used_signed:
+            all_vals = np.abs(all_vals)
         metrics.roi_amp_mean = float(np.mean(all_vals))
         metrics.roi_amp_std = float(np.std(all_vals))
         del all_vals

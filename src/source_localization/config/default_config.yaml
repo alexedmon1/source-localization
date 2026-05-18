@@ -81,3 +81,20 @@ outputs:
   save_intermediate: true
   figure_format: png
   figure_dpi: 100
+  # Which source-time-course variants to write to disk for steps 5 (inverse
+  # solution) and 6 (ROI extraction). Each variant adds ~1 GB per subject on
+  # full-length recordings, so pruning saves substantial disk.
+  #
+  # Accepts a string ("signed", "magnitude", "both") or an explicit list
+  # (e.g. ["signed"], ["signed", "magnitude"]).
+  #
+  #   - "signed":    step5_stc_signed.pkl, source_timeseries_signed.set,
+  #                  step6_roi_timeseries_signed.pkl, roi_timeseries_signed.set
+  #                  — required for phase-based analyses (PSD, coherence, PAC)
+  #   - "magnitude": same files with _magnitude suffix — rectified amplitudes
+  #   - "both":      writes signed + magnitude variants
+  #
+  # Default "both" preserves backward compatibility. The legacy unsuffixed
+  # files (step5_stc.pkl, step6_roi_timeseries.pkl) are no longer written —
+  # source-analytics looks up the suffixed variants directly.
+  output_variants: "both"
