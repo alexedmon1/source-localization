@@ -339,6 +339,10 @@ def generate_qc_plots(
     fig_dir.mkdir(parents=True, exist_ok=True)
     paths: List[Path] = []
 
+    # Order subjects by treatment group so every plot shows group structure.
+    if "group" in df.columns:
+        df = df.sort_values(["group", "subject_id"]).reset_index(drop=True)
+
     # Colour map for groups
     groups = df["group"].unique() if "group" in df.columns else []
     palette = {}
@@ -457,7 +461,7 @@ def generate_qc_plots(
         paths.append(p)
         plt.close(fig)
 
-    # --- Plot 6: Z-scored metrics heatmap ---
+    # --- Plot 6: Z-scored metrics heatmap (landscape: metrics × subjects) ---
     z_cols = [
         "forward_condition_number", "stc_amp_mean", "stc_amp_max",
         "stc_amp_std", "stc_n_times", "roi_amp_mean",
@@ -467,18 +471,41 @@ def generate_qc_plots(
         z_df = df[available].apply(pd.to_numeric, errors="coerce")
         z_df = (z_df - z_df.mean()) / z_df.std()
         z_df = z_df.fillna(0)
+        Z = z_df.values.T  # metrics (rows) × subjects (cols) → landscape
+        n_metrics, n_sub = Z.shape
 
-        fig, ax = plt.subplots(figsize=(max(8, len(available) * 1.2),
-                                         max(6, len(x_labels) * 0.3)))
-        vmax = max(3.0, z_df.abs().max().max())
-        im = ax.imshow(z_df.values, aspect="auto", cmap="RdBu_r",
-                        vmin=-vmax, vmax=vmax)
-        ax.set_xticks(np.arange(len(available)))
-        ax.set_xticklabels(available, rotation=45, ha="right", fontsize=8)
-        ax.set_yticks(np.arange(len(x_labels)))
-        ax.set_yticklabels(x_labels, fontsize=7)
-        ax.set_title("Z-Scored Metrics Heatmap")
-        fig.colorbar(im, ax=ax, label="Z-score")
+        fig, ax = plt.subplots(
+            figsize=(max(12, n_sub * 0.22), max(3.6, n_metrics * 0.55 + 2.4))
+        )
+        vmax = max(3.0, float(np.abs(Z).max()))
+        im = ax.imshow(Z, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+
+        ax.set_yticks(np.arange(n_metrics))
+        ax.set_yticklabels(available, fontsize=9)
+        ax.set_xticks(np.arange(n_sub))
+        ax.set_xticklabels(x_labels, rotation=90, fontsize=6)
+
+        # Label the cells that exceed |z| > 2 so outliers are legible.
+        for i in range(n_metrics):
+            for j in range(n_sub):
+                if abs(Z[i, j]) > 2.0:
+                    ax.text(j, i, f"{Z[i, j]:.1f}", ha="center", va="center",
+                            fontsize=5, color="white" if abs(Z[i, j]) > 0.6 * vmax else "black")
+
+        # Divide and label treatment groups along the x-axis.
+        if "group" in df.columns:
+            glist = df["group"].tolist()
+            start = 0
+            for k in range(1, n_sub + 1):
+                if k == n_sub or glist[k] != glist[start]:
+                    if start > 0:
+                        ax.axvline(start - 0.5, color="black", lw=0.8)
+                    ax.text((start + k - 1) / 2.0, -0.62, str(glist[start]),
+                            ha="center", va="bottom", fontsize=8, fontweight="bold")
+                    start = k
+
+        ax.set_title("Z-Scored Metrics Heatmap  (cells with |z| > 2 labeled)", pad=30)
+        fig.colorbar(im, ax=ax, label="Z-score", fraction=0.015, pad=0.01)
         fig.tight_layout()
         p = fig_dir / "06_zscore_heatmap.png"
         fig.savefig(p, dpi=150)
