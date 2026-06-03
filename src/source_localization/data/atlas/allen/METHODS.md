@@ -156,9 +156,7 @@ Four 32-ROI composites in the Allen32 parcellation carry display labels chosen t
 | `Amygdalar_Complex_{L,R}` | `Amygdala_{L,R}` | Basolateral (BLA), Central (CEA), and Cortical (COA) amygdalar nuclei + **Claustrum (CLA)** + **Endopiriform nucleus (EP)** | CLA and EP are adjacent to but anatomically distinct from amygdala. |
 | `Brainstem_Tectum_{L,R}` | `Brainstem_{L,R}` | Midbrain (MB: PAG, SN, VTA, RN, MRN, **superior + inferior colliculus**), Pons (P), Medulla (MY) | Superior / inferior colliculi are tectum (dorsal midbrain), not brainstem proper. |
 
-The 10-region category `Prefrontal` was renamed to `Frontal-Anterior` for the same reason; the other 10-region categories are unchanged. `Striatum`, `Amygdala`, and `Brainstem` are inside the `Deep Subcortical` umbrella at the 10-region tier, which is unchanged.
-
-**Backward compatibility.** The legacy identifiers are preserved in the `deprecated_aliases:` block at the bottom of `roi_categories.yaml`. Loaders can consult that block to resolve historical CSVs / configs that reference the pre-v0.2.0 labels. Region membership and label IDs (1--32) are unchanged — these are nomenclature clarifications only and have no effect on numerical results.
+The 10-region category `Prefrontal` was renamed to `Frontal-Anterior` for the same reason; the other 10-region categories are unchanged. `Striatum`, `Amygdala`, and `Brainstem` are inside the `Deep Subcortical` umbrella at the 10-region tier, which is unchanged. Region membership and label IDs (1--32) are unchanged — these are nomenclature clarifications only and have no effect on numerical results. Pre-v0.2.0 derivatives use the legacy names; downstream consumers should update their CSVs / configs accordingly.
 
 ## Files
 
@@ -167,7 +165,7 @@ The 10-region category `Prefrontal` was renamed to `Frontal-Anterior` for the sa
 | `allen_labels.nii.gz` | Parcellation label volume (64 labels, 1-indexed, in Antwerp coordinate space) |
 | `roi_mapping.json` | ROI metadata: names, abbreviations, colors, division, hemisphere, depth zone, Allen structure composition |
 | `allen_annotation_in_antwerp.nii.gz` | Full Allen CCFv3 annotation (553 structures) warped to Antwerp space, for reference |
-| `roi_categories.yaml` | 10-region grouping for the 32-ROI tier; `deprecated_aliases:` block resolves pre-v0.2.0 labels |
+| `roi_categories.yaml` | 10-region grouping for the 32-ROI tier |
 | `METHODS.md` | This file |
 
 ## Known Limitations

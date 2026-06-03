@@ -300,6 +300,10 @@ Examples:
     qc_parser.add_argument('config', help='Path to study_config.yaml')
     qc_parser.add_argument('--threshold', type=float, default=2.0,
                            help='Z-score threshold for outlier detection (default: 2.0)')
+    qc_parser.add_argument('--output-dir',
+                           help='Override study output/derivatives directory (e.g. the '
+                                '--output-dir used at run time); QC reads from <dir>/derivatives '
+                                'and writes to <dir>/qc.')
     qc_parser.add_argument('--output', help='Override QC output directory')
     qc_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
 
@@ -444,6 +448,11 @@ def _run_study_command(args):
         from .study import run_qc
 
         config = StudyConfig.from_yaml(args.config)
+
+        # Point QC at the derivatives produced by `study run --output-dir ...`.
+        if getattr(args, 'output_dir', None):
+            from pathlib import Path
+            config.root_dir = Path(args.output_dir).resolve()
 
         if args.verbose:
             logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
