@@ -205,3 +205,5 @@ __all__ = [
     'create_localization_error_figure',
     'create_error_colormap'
 ]
+
+from .atlas_bundle import AtlasBundle, load_bundle, verify_bundle, BundleConsistencyError
