@@ -99,7 +99,8 @@ Thumbs.db
 # Pipeline outputs
 results/
 output/
-validation/
+/validation/          # root-level validation OUTPUT dir only — NOT the src module
+                      # (bare `validation/` previously excluded src/source_localization/validation/)
 
 # Logs and temp files
 *.log
