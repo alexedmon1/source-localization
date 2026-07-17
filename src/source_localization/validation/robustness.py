@@ -455,6 +455,93 @@ class RobustnessTest:
         _, idx = tree.query(pts)
         return float(values[idx].min())
 
+    def _detect_two_lobes(
+        self,
+        source_activity: np.ndarray,
+        neighbor_radius_mm: Optional[float] = None,
+        exclude_radius_mm: Optional[float] = None,
+        saddle_ratio: float = 0.8,
+        prominence_frac: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Detect whether a reconstruction contains two-lobe structure.
+
+        Correspondence-free: reports only whether there are two prominent maxima
+        with a saddle between them, WITHOUT reference to any true source location.
+        This is the common scoring event for the null-corrected resolvability
+        metric — it can be applied identically to a one-source reconstruction
+        (the null) and a two-source one (the signal), which a correspondence rule
+        cannot (that needs two true positions). :meth:`_resolve_two_sources`
+        layers correspondence on top of this for the stricter "resolved" measure.
+
+        Parameters
+        ----------
+        source_activity : ndarray
+            Inverse-solution source activity.
+        neighbor_radius_mm, exclude_radius_mm : float, optional
+            Local-maximum neighbor radius and minimum peak separation. Default to
+            1.5x the median grid spacing.
+        saddle_ratio : float, default=0.8
+            Trough-to-weaker-peak ratio below which a dip counts as a saddle.
+        prominence_frac : float, default=0.5
+            The second peak must be >= this fraction of the global peak's height.
+
+        Returns
+        -------
+        dict
+            ``detected`` (bool) plus ``n_candidate_peaks``, ``peak2_prominence``,
+            ``saddle_ratio_observed``, ``saddle_ok``, ``peak1_idx``,
+            ``peak2_idx``, ``peak1_mm``, ``peak2_mm``.
+        """
+        sa = self._source_activity_norm(source_activity)
+        spacing = self._median_grid_spacing()
+        if neighbor_radius_mm is None:
+            neighbor_radius_mm = 1.5 * spacing
+        if exclude_radius_mm is None:
+            exclude_radius_mm = 1.5 * spacing
+
+        peak1_idx = int(np.argmax(sa))
+        val1 = float(sa[peak1_idx])
+        pos1 = self.source_pos_mm[peak1_idx]
+
+        out = {
+            'detected': False,
+            'n_candidate_peaks': 0,
+            'peak2_prominence': None,
+            'saddle_ratio_observed': None,
+            'saddle_ok': False,
+            'peak1_idx': peak1_idx,
+            'peak2_idx': None,
+            'peak1_mm': pos1.tolist(),
+            'peak2_mm': None,
+        }
+
+        maxima = self._local_maxima(sa, neighbor_radius_mm)
+        dist_from_peak1 = np.linalg.norm(self.source_pos_mm[maxima] - pos1, axis=1)
+        # A second peak must be far enough from the first AND prominent enough
+        # (a real lobe, not a noise ripple).
+        far_enough = dist_from_peak1 > exclude_radius_mm
+        prominent = sa[maxima] >= prominence_frac * val1
+        candidates = maxima[far_enough & prominent]
+        out['n_candidate_peaks'] = int(candidates.size)
+        if candidates.size == 0:
+            return out  # no prominent second lobe
+
+        peak2_idx = int(candidates[np.argmax(sa[candidates])])
+        val2 = float(sa[peak2_idx])
+        pos2 = self.source_pos_mm[peak2_idx]
+        out['peak2_idx'] = peak2_idx
+        out['peak2_mm'] = pos2.tolist()
+        out['peak2_prominence'] = float(val2 / val1) if val1 > 0 else None
+
+        trough = self._segment_trough(pos1, pos2, sa)
+        weaker = min(val1, val2)
+        observed_ratio = trough / weaker if weaker > 0 else np.inf
+        out['saddle_ratio_observed'] = float(observed_ratio)
+        out['saddle_ok'] = bool(observed_ratio <= saddle_ratio)
+        out['detected'] = bool(observed_ratio <= saddle_ratio)
+        return out
+
     def _resolve_two_sources(
         self,
         source_activity: np.ndarray,
@@ -521,53 +608,32 @@ class RobustnessTest:
             ``distinct_sources``, ``match_max_mm``, ``match_ok``, ``peak1_mm``,
             ``peak2_mm``.
         """
-        sa = self._source_activity_norm(source_activity)
-        spacing = self._median_grid_spacing()
-        if neighbor_radius_mm is None:
-            neighbor_radius_mm = 1.5 * spacing
-        if exclude_radius_mm is None:
-            exclude_radius_mm = 1.5 * spacing
-
-        peak1_idx = int(np.argmax(sa))
-        val1 = float(sa[peak1_idx])
-        pos1 = self.source_pos_mm[peak1_idx]
+        lobes = self._detect_two_lobes(
+            source_activity,
+            neighbor_radius_mm=neighbor_radius_mm,
+            exclude_radius_mm=exclude_radius_mm,
+            saddle_ratio=saddle_ratio,
+            prominence_frac=prominence_frac
+        )
 
         result = {
             'resolved': False,
-            'n_candidate_peaks': 0,
-            'peak2_prominence': None,
-            'saddle_ratio_observed': None,
-            'saddle_ok': False,
+            'n_candidate_peaks': lobes['n_candidate_peaks'],
+            'peak2_prominence': lobes['peak2_prominence'],
+            'saddle_ratio_observed': lobes['saddle_ratio_observed'],
+            'saddle_ok': lobes['saddle_ok'],
             'distinct_sources': False,
             'match_max_mm': None,
             'match_ok': False,
-            'peak1_mm': pos1.tolist(),
-            'peak2_mm': None,
+            'peak1_mm': lobes['peak1_mm'],
+            'peak2_mm': lobes['peak2_mm'],
         }
 
-        maxima = self._local_maxima(sa, neighbor_radius_mm)
-        dist_from_peak1 = np.linalg.norm(self.source_pos_mm[maxima] - pos1, axis=1)
-        # A second peak must be far enough from the first AND prominent enough
-        # (a real lobe, not a noise ripple).
-        far_enough = dist_from_peak1 > exclude_radius_mm
-        prominent = sa[maxima] >= prominence_frac * val1
-        candidates = maxima[far_enough & prominent]
-        result['n_candidate_peaks'] = int(candidates.size)
-        if candidates.size == 0:
-            return result  # no prominent second lobe — one source, not resolved
+        if not lobes['detected'] or lobes['peak2_idx'] is None:
+            return result  # no two-lobe structure — not resolved
 
-        peak2_idx = int(candidates[np.argmax(sa[candidates])])
-        val2 = float(sa[peak2_idx])
-        pos2 = self.source_pos_mm[peak2_idx]
-        result['peak2_mm'] = pos2.tolist()
-        result['peak2_prominence'] = float(val2 / val1) if val1 > 0 else None
-
-        trough = self._segment_trough(pos1, pos2, sa)
-        weaker = min(val1, val2)
-        observed_ratio = trough / weaker if weaker > 0 else np.inf
-        result['saddle_ratio_observed'] = float(observed_ratio)
-        saddle_ok = observed_ratio <= saddle_ratio
-        result['saddle_ok'] = bool(saddle_ok)
+        pos1 = np.asarray(lobes['peak1_mm'])
+        pos2 = np.asarray(lobes['peak2_mm'])
 
         # Correspondence (parameter-free): each peak nearest a DIFFERENT true
         # source — one lobe per source. Distances kept only as diagnostics /
@@ -584,7 +650,7 @@ class RobustnessTest:
         within_cap = (max_match_mm is None) or (match_max <= max_match_mm)
         result['match_ok'] = bool(distinct_sources and within_cap)
 
-        result['resolved'] = bool(saddle_ok and distinct_sources and within_cap)
+        result['resolved'] = bool(distinct_sources and within_cap)
         return result
 
     def _select_dipole_pairs(

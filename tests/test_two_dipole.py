@@ -221,7 +221,7 @@ def line_grid():
     stub = _StubTest(pos)
     # borrow the resolvability methods onto the stub instance's class chain
     for name in ('_get_source_kdtree', '_median_grid_spacing', '_local_maxima',
-                 '_segment_trough', '_resolve_two_sources'):
+                 '_segment_trough', '_detect_two_lobes', '_resolve_two_sources'):
         setattr(_StubTest, name, getattr(RobustnessTest, name))
     return stub
 
@@ -337,6 +337,33 @@ def test_saddle_ratio_threshold_is_respected(line_grid):
         activity, true, saddle_ratio=observed - 0.02)
     assert lenient['resolved'] is True
     assert strict['resolved'] is False
+
+
+def test_detect_two_lobes_is_correspondence_free(line_grid):
+    """The null-scoring event: two-lobe detection needs no true positions.
+
+    Both the one-source null and two-source signal are scored by this identical
+    event, which is what makes the excess-over-null comparison apples-to-apples.
+    """
+    two = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)
+    one = _gaussian_activity(line_grid, [5.0], sigma=1.0)
+    assert line_grid._detect_two_lobes(two)['detected'] is True
+    assert line_grid._detect_two_lobes(one)['detected'] is False
+    # A tiny second bump must not trip it (prominence gate).
+    ripple = _gaussian_activity(line_grid, [3.0, 7.0], sigma=0.4, amps=[1.0, 0.2])
+    assert line_grid._detect_two_lobes(ripple, prominence_frac=0.5)['detected'] is False
+
+
+def test_resolve_builds_on_detect(line_grid):
+    """resolved must imply detected: correspondence only ever removes, never adds."""
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)
+    true = np.array([[2.0, 0, 0], [6.0, 0, 0]])
+    lobes = line_grid._detect_two_lobes(activity)
+    res = line_grid._resolve_two_sources(activity, true)
+    assert lobes['detected'] is True
+    assert res['resolved'] is True
+    # Same peaks surfaced by both.
+    assert res['peak2_mm'] == lobes['peak2_mm']
 
 
 def test_local_maxima_and_spacing(line_grid):
