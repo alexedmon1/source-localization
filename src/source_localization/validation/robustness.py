@@ -42,6 +42,7 @@ import warnings
 
 import mne
 
+from .noise import NOISE_TYPES
 from .simulation import DipoleSimulator
 from ..inverse.methods import apply_inverse_sLORETA, apply_inverse_MNE, apply_inverse_dSPM
 
@@ -53,9 +54,9 @@ __all__ = ['RobustnessTest', 'RobustnessResults']
 class RobustnessResults:
     """Container for robustness test results."""
 
-    test_type: str  # 'snr', 'noise', 'amplitude'
-    parameter_values: List[float]
-    errors: Dict[float, List[float]]  # parameter -> list of errors
+    test_type: str  # 'snr', 'noise', 'amplitude', 'noise_type'
+    parameter_values: List[Union[float, str]]
+    errors: Dict[Union[float, str], List[float]]  # parameter -> list of errors
     n_sources: int
     n_trials_per_position: int
     n_positions: int
@@ -77,8 +78,20 @@ class RobustnessResults:
         return {k: np.median(v) for k, v in self.errors.items()}
 
     @property
+    def is_categorical(self) -> bool:
+        """True when the swept parameter is a label (e.g. noise_type), not a number."""
+        return any(isinstance(p, str) for p in self.parameter_values)
+
+    @property
     def correlation(self) -> float:
-        """Correlation between parameter and mean error."""
+        """Correlation between parameter and mean error.
+
+        Undefined (NaN) for categorical sweeps such as noise_type, where the
+        parameter has no ordering to correlate against.
+        """
+        if self.is_categorical:
+            return np.nan
+
         params = sorted(self.errors.keys())
         means = [np.mean(self.errors[p]) for p in params]
 
@@ -104,7 +117,9 @@ class RobustnessResults:
 
         return {
             'test_type': self.test_type,
-            'parameter_values': [float(p) for p in self.parameter_values],
+            'parameter_values': [
+                p if isinstance(p, str) else float(p) for p in self.parameter_values
+            ],
             'errors': {str(k): to_native(v) for k, v in self.errors.items()},
             'means': {str(k): float(v) for k, v in self.means.items()},
             'stds': {str(k): float(v) for k, v in self.stds.items()},
@@ -500,6 +515,131 @@ class RobustnessTest:
         self.results['noise'] = result
         return result
 
+    def run_noise_type_test(
+        self,
+        noise_types: Optional[List[str]] = None,
+        snr_db: float = 10.0,
+        n_positions: int = 4,
+        n_trials: int = 10,
+        amplitude_nAm: float = 50.0,
+        spatial_scale_mm: float = 3.0,
+        temporal_exponent: float = 1.0
+    ) -> RobustnessResults:
+        """
+        Test localization error across noise *structures* at a fixed SNR.
+
+        This is the sweep that produces a range of expectations rather than a
+        single best-case number. ``run_noise_test`` varies noise *level*, which
+        leaves the channel covariance proportional to identity at every level —
+        exactly the assumption the scaled-identity inverse makes, so it cannot
+        probe that assumption. This sweep instead holds the level fixed and
+        varies the structure: 'white' satisfies C = I and gives the optimistic
+        bound; 'colored' (spatially correlated + 1/f) violates it and gives the
+        realistic bound.
+
+        All noise types are tested at the same positions with the same seeds,
+        so the comparison is paired — differences reflect noise structure, not
+        which trials happened to be drawn.
+
+        Parameters
+        ----------
+        noise_types : list of str, optional
+            Noise types to sweep. Defaults to all of
+            :data:`~source_localization.validation.noise.NOISE_TYPES`.
+        snr_db : float, default=10.0
+            Fixed SNR for every type, so only structure varies.
+        n_positions : int, default=4
+            Number of source positions to test.
+        n_trials : int, default=10
+            Number of trials per position per noise type.
+        amplitude_nAm : float, default=50.0
+            Fixed dipole amplitude in nAm.
+        spatial_scale_mm : float, default=3.0
+            Correlation length for spatially-correlated types.
+        temporal_exponent : float, default=1.0
+            Spectral exponent for 1/f-shaped types (1.0 = pink).
+
+        Returns
+        -------
+        RobustnessResults
+            Errors for each noise type. ``test_type='noise_type'``; the result
+            is categorical, so ``correlation`` is NaN by design.
+
+        Examples
+        --------
+        >>> test = RobustnessTest(fwd, src, info)
+        >>> results = test.run_noise_type_test(n_trials=20)
+        >>> means = results.means
+        >>> print(f"white {means['white']:.2f} mm -> colored {means['colored']:.2f} mm")
+        """
+        if noise_types is None:
+            noise_types = list(NOISE_TYPES)
+
+        unknown = set(noise_types) - set(NOISE_TYPES)
+        if unknown:
+            raise ValueError(
+                f"Unknown noise types {sorted(unknown)}. Expected {NOISE_TYPES}."
+            )
+
+        test_indices = self._select_test_positions(n_positions)
+
+        if self.verbose:
+            print(f"Running noise-type test: {len(noise_types)} types, "
+                  f"{n_positions} positions, {n_trials} trials each, "
+                  f"SNR = {snr_db} dB")
+
+        results = {nt: [] for nt in noise_types}
+
+        for noise_type in noise_types:
+            if self.verbose:
+                print(f"  Noise type = {noise_type:9s}: ", end="", flush=True)
+
+            for pos_i, test_idx in enumerate(test_indices):
+                test_pos = self.source_pos_mm[test_idx]
+
+                for trial in range(n_trials):
+                    try:
+                        # Seed depends on position/trial but NOT on noise_type,
+                        # so every type sees the same underlying draw.
+                        eeg_data, metadata = self.simulator.simulate_dipole(
+                            position_mm=test_pos,
+                            amplitude_nAm=amplitude_nAm,
+                            snr_db=snr_db,
+                            noise_mode="snr",
+                            noise_seed=trial * 1000 + pos_i,
+                            noise_type=noise_type,
+                            noise_spatial_scale_mm=spatial_scale_mm,
+                            noise_temporal_exponent=temporal_exponent,
+                            duration_s=0.5,
+                            sfreq=256.0
+                        )
+
+                        source_activity = self._apply_inverse(eeg_data)
+
+                        true_pos = metadata['actual_position_mm']
+                        error = self._find_peak_and_error(source_activity, true_pos)
+                        results[noise_type].append(error)
+
+                    except Exception as e:
+                        if self.verbose:
+                            warnings.warn(f"Trial failed: {e}")
+
+            if self.verbose:
+                mean_err = np.mean(results[noise_type]) if results[noise_type] else np.nan
+                print(f"mean = {mean_err:.2f} mm")
+
+        result = RobustnessResults(
+            test_type='noise_type',
+            parameter_values=list(noise_types),
+            errors=results,
+            n_sources=self.n_sources,
+            n_trials_per_position=n_trials,
+            n_positions=n_positions
+        )
+
+        self.results['noise_type'] = result
+        return result
+
     def run_amplitude_test(
         self,
         amplitude_range: Tuple[float, float] = (5, 500),
@@ -653,6 +793,25 @@ class RobustnessTest:
         for test_name, result in self.results.items():
             params = sorted(result.errors.keys())
             means = [float(np.mean(result.errors[p])) for p in params]
+            n_trials_total = int(sum(len(v) for v in result.errors.values()))
+
+            if result.is_categorical:
+                # A categorical sweep (noise_type) has no parameter ordering, so
+                # correlation and the correlation-based physics check are both
+                # undefined. The per-label errors ARE the result: they bound the
+                # range of expectations from best case (white) to realistic
+                # (colored).
+                summary['tests'][test_name] = {
+                    'correlation': None,
+                    'parameter_range': None,
+                    'error_by_parameter': {
+                        str(p): float(np.mean(result.errors[p])) for p in params
+                    },
+                    'error_range': (float(min(means)), float(max(means))),
+                    'n_trials_total': n_trials_total,
+                    'physics_valid': None
+                }
+                continue
 
             corr = result.correlation
             corr_float = float(corr) if not np.isnan(corr) else 0.0
@@ -661,7 +820,7 @@ class RobustnessTest:
                 'correlation': corr_float,
                 'parameter_range': (float(min(params)), float(max(params))),
                 'error_range': (float(min(means)), float(max(means))),
-                'n_trials_total': int(sum(len(v) for v in result.errors.values())),
+                'n_trials_total': n_trials_total,
                 'physics_valid': bool(
                     corr_float < -0.5 if test_name == 'snr'
                     else corr_float > 0.5 if test_name == 'noise'
