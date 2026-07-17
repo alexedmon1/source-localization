@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Overview
 
-This is the **Mouse EEG Source Localization** package - a production-ready Python pipeline for solving the EEG inverse problem on mouse brain data. It estimates neural source activity from 32-channel scalp EEG recordings using the Antwerp Mouse Brain Atlas (47 ROIs).
+This is the **Mouse EEG Source Localization** package - a production-ready Python pipeline for solving the EEG inverse problem on mouse brain data. It estimates neural source activity from 30-channel scalp EEG recordings using the Antwerp Mouse Brain Atlas (47 ROIs).
 
 ## Development Commands
 
@@ -142,7 +142,7 @@ roi_power = pipeline.step_outputs['spectral_analysis']['roi_band_power']['gamma'
 Bundled with package in `src/source_localization/data/`:
 - `atlas/Atlas_3DRois.nii` - Brain volume with 47 ROI labels
 - `atlas/roi_mapping.json` - ROI names and metadata
-- `electrodes/mouse_array_coords.csv` - 32-channel NeuroNexus array positions
+- `electrodes/mouse_array_coords.csv` - 30-channel NeuroNexus array positions (E1–E30, plus a Bregma fiducial)
 
 ## Output Structure
 

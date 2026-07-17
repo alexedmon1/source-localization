@@ -61,7 +61,7 @@ def spatial_covariance(
         Electrode positions in mm.
     spatial_scale_mm : float, default=3.0
         Correlation length. Electrodes this far apart have correlation 1/e.
-        Larger values mean more broadly shared noise. For the 32-channel mouse
+        Larger values mean more broadly shared noise. For the 30-channel mouse
         array (~1-2 mm spacing) 3.0 mm gives strong neighbor correlation.
     jitter : float, default=1e-6
         Added to the diagonal to keep the matrix positive-definite for the
