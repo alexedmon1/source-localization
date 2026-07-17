@@ -32,7 +32,7 @@ Examples
 import numpy as np
 import pickle
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from scipy import stats
 from scipy.spatial.distance import cdist
@@ -433,10 +433,87 @@ class RobustnessTest:
 
         return pairs
 
+    def _select_depth_matched_pairs(
+        self,
+        separations_mm: List[float],
+        depth_bins: List[Tuple[str, float, float]],
+        n_pairs: int,
+        separation_tolerance_mm: float = 1.0,
+        depth_tolerance_mm: float = 1.0
+    ) -> Dict[Tuple[str, float], List[Tuple[int, int]]]:
+        """
+        Find source pairs at each (depth bin, separation), both sources at matched depth.
+
+        Localization resolution degrades with depth (distance to the nearest
+        electrode): a deep source produces a broad, low-amplitude scalp pattern,
+        so the inverse smears it and two close deep sources blur into one. To
+        make "the pair's depth" a well-defined axis, both dipoles are required to
+        sit in the same depth bin (their depths within ``depth_tolerance_mm``),
+        rather than pairing a shallow source with a deep one.
+
+        Parameters
+        ----------
+        separations_mm : list of float
+            Target inter-dipole separations.
+        depth_bins : list of (label, lo_pct, hi_pct)
+            Depth bins as percentile ranges of the source-depth distribution.
+        n_pairs : int
+            Max base positions per (bin, separation) cell.
+        separation_tolerance_mm : float, default=1.0
+            Allowed deviation of a grid pair from the target separation.
+        depth_tolerance_mm : float, default=1.0
+            Allowed depth difference between the two sources of a pair.
+
+        Returns
+        -------
+        dict of (depth_label, separation) -> list of (idx1, idx2)
+            Cells with no realizable pair map to an empty list.
+        """
+        depth = self.source_depths
+        pairs: Dict[Tuple[str, float], List[Tuple[int, int]]] = {
+            (label, sep): [] for (label, _, _) in depth_bins for sep in separations_mm
+        }
+
+        for label, lo_pct, hi_pct in depth_bins:
+            lo, hi = np.percentile(depth, lo_pct), np.percentile(depth, hi_pct)
+            bin_indices = np.where((depth >= lo) & (depth <= hi))[0]
+
+            for sep in separations_mm:
+                count = 0
+                for base_idx in bin_indices:
+                    if count >= n_pairs:
+                        break
+                    dists = np.linalg.norm(
+                        self.source_pos_mm - self.source_pos_mm[base_idx], axis=1
+                    )
+                    # Candidate partners: right separation AND matched depth.
+                    near_sep = np.abs(dists - sep) <= separation_tolerance_mm
+                    near_depth = np.abs(depth - depth[base_idx]) <= depth_tolerance_mm
+                    candidates = np.where(near_sep & near_depth)[0]
+                    candidates = candidates[candidates != base_idx]
+                    if candidates.size == 0:
+                        continue
+                    partner_idx = int(candidates[np.argmin(np.abs(dists[candidates] - sep))])
+                    pairs[(label, sep)].append((int(base_idx), partner_idx))
+                    count += 1
+
+        return pairs
+
+    #: Default depth bins (label, lo_percentile, hi_percentile). A dedicated
+    #: very-shallow bin isolates the sources closest to the electrodes, where
+    #: even two-dipole resolution approaches the single-dipole floor (~1 mm).
+    DEFAULT_DEPTH_BINS = [
+        ('very_shallow', 0, 15),
+        ('shallow', 15, 40),
+        ('mid', 40, 70),
+        ('deep', 70, 100),
+    ]
+
     def run_two_dipole_test(
         self,
         separations_mm: Optional[List[float]] = None,
         noise_types: Optional[List[str]] = None,
+        depth_bins: Optional[List[Tuple[str, float, float]]] = None,
         snr_db: float = 10.0,
         n_pairs: int = 4,
         n_trials: int = 10,
@@ -444,55 +521,67 @@ class RobustnessTest:
         spatial_scale_mm: float = 3.0,
         temporal_exponent: float = 1.0,
         suppression_mm: Optional[float] = None,
-        separation_tolerance_mm: float = 1.0
-    ) -> Dict[str, RobustnessResults]:
+        separation_tolerance_mm: float = 1.0,
+        depth_tolerance_mm: float = 1.0
+    ) -> Dict[str, Any]:
         """
         Test per-dipole localization error for two simultaneous sources.
 
         A single DC dipole is the friendliest case for a min-norm inverse; under
         superposition the smooth solution smears the two sources together, and
-        that smearing worsens as they get closer. Crossing this with noise
-        structure gives the realistic lower bound of the expectation range: two
-        correlated sources observed through colored noise.
+        that smearing worsens both as they get closer AND as they get deeper
+        (further from the electrodes). This sweep crosses three axes — depth,
+        separation, and noise structure — so the realistic bound is reported as a
+        grid rather than a single pooled number that hides the depth dependence.
 
-        Returns one RobustnessResults per noise type, each a sweep of per-dipole
-        error over separation (so a caller can read both "how does two-source
-        error grow as sources approach" and "how much does noise color add").
+        Both dipoles of a pair are placed at matched depth (see
+        :meth:`_select_depth_matched_pairs`), so each pair has a well-defined
+        depth. All noise types share positions and seeds within a cell, so the
+        white-vs-colored comparison is paired.
 
         Parameters
         ----------
         separations_mm : list of float, optional
             Target inter-dipole separations. Default: [2, 4, 6, 8].
         noise_types : list of str, optional
-            Noise structures to cross with separation. Default: all of
+            Noise structures. Default: all of
             :data:`~source_localization.validation.noise.NOISE_TYPES`.
+        depth_bins : list of (label, lo_pct, hi_pct), optional
+            Depth bins as percentile ranges of source depth. Default:
+            :data:`DEFAULT_DEPTH_BINS` (very_shallow / shallow / mid / deep).
         snr_db : float, default=10.0
             Fixed combined-signal SNR.
         n_pairs : int, default=4
-            Number of base positions (depth-spread) per separation.
+            Max base positions per (depth bin, separation) cell.
         n_trials : int, default=10
-            Trials per pair per separation per noise type.
+            Trials per pair.
         amplitude_nAm : float, default=50.0
-            Amplitude of each dipole (equal, correlated DC sources).
+            Amplitude of each dipole (equal DC sources).
         spatial_scale_mm, temporal_exponent : float
             Noise-shaping parameters, as in :meth:`run_noise_type_test`.
         suppression_mm : float, optional
             Radius for masking the first peak before finding the second. Defaults
-            to half the smallest separation, so two sources at the closest tested
-            distance can still be resolved as distinct peaks.
+            to half the smallest separation.
         separation_tolerance_mm : float, default=1.0
-            How far a grid pair may be from the target separation and still count.
+            Allowed deviation of a grid pair from the target separation.
+        depth_tolerance_mm : float, default=1.0
+            Allowed depth difference between the two sources of a pair.
 
         Returns
         -------
-        dict of str -> RobustnessResults
-            Keyed by noise type; each result's parameter is separation_mm and
-            errors are pooled per-dipole localization errors.
+        dict
+            ``{'records': [...], 'depth_bins': [...], 'separations_mm': [...],
+            'noise_types': [...], 'depth_bin_edges_mm': {...}}``. Each record is
+            ``{noise_type, depth_bin, mean_depth_mm, separation_mm, error_mm}``
+            for one recovered dipole, so callers can pivot freely over the three
+            axes.
         """
         if separations_mm is None:
             separations_mm = [2.0, 4.0, 6.0, 8.0]
         if noise_types is None:
             noise_types = list(NOISE_TYPES)
+        if depth_bins is None:
+            depth_bins = self.DEFAULT_DEPTH_BINS
 
         unknown = set(noise_types) - set(NOISE_TYPES)
         if unknown:
@@ -503,82 +592,94 @@ class RobustnessTest:
         if suppression_mm is None:
             suppression_mm = 0.5 * min(separations_mm)
 
-        pairs_by_sep = self._select_dipole_pairs(
-            separations_mm, n_pairs, tolerance_mm=separation_tolerance_mm
+        pairs_by_cell = self._select_depth_matched_pairs(
+            separations_mm, depth_bins, n_pairs,
+            separation_tolerance_mm=separation_tolerance_mm,
+            depth_tolerance_mm=depth_tolerance_mm
         )
+
+        depth = self.source_depths
+        depth_bin_edges = {
+            label: (float(np.percentile(depth, lo)), float(np.percentile(depth, hi)))
+            for (label, lo, hi) in depth_bins
+        }
 
         if self.verbose:
             print(f"Running two-dipole test: {len(noise_types)} noise types x "
-                  f"{len(separations_mm)} separations, {n_pairs} pairs, "
-                  f"{n_trials} trials each, SNR = {snr_db} dB")
-            for sep in separations_mm:
-                if not pairs_by_sep[sep]:
-                    print(f"  WARNING: no grid pair within "
-                          f"{separation_tolerance_mm} mm of {sep} mm separation "
-                          f"— skipping this separation.")
+                  f"{len(depth_bins)} depth bins x {len(separations_mm)} separations, "
+                  f"{n_pairs} pairs, {n_trials} trials each, SNR = {snr_db} dB")
+            for (label, sep), plist in pairs_by_cell.items():
+                if not plist:
+                    print(f"  WARNING: no matched pair for depth={label}, "
+                          f"sep={sep} mm — skipping this cell.")
 
-        results_by_type: Dict[str, RobustnessResults] = {}
+        records: List[Dict[str, Any]] = []
 
         for noise_type in noise_types:
             if self.verbose:
                 print(f"  Noise type = {noise_type}:")
 
-            errors_by_sep: Dict[float, List[float]] = {s: [] for s in separations_mm}
+            for (label, _lo, _hi) in depth_bins:
+                for sep in separations_mm:
+                    cell_errors = []
+                    for pair_i, (idx1, idx2) in enumerate(pairs_by_cell[(label, sep)]):
+                        pos1 = self.source_pos_mm[idx1]
+                        pos2 = self.source_pos_mm[idx2]
+                        mean_depth = float(0.5 * (depth[idx1] + depth[idx2]))
 
-            for sep in separations_mm:
-                for pair_i, (idx1, idx2) in enumerate(pairs_by_sep[sep]):
-                    pos1 = self.source_pos_mm[idx1]
-                    pos2 = self.source_pos_mm[idx2]
+                        for trial in range(n_trials):
+                            try:
+                                eeg_data, meta = self.simulator.simulate_two_dipoles(
+                                    position1_mm=pos1,
+                                    position2_mm=pos2,
+                                    amplitude1_nAm=amplitude_nAm,
+                                    amplitude2_nAm=amplitude_nAm,
+                                    snr_db=snr_db,
+                                    noise_seed=trial * 1000 + pair_i,
+                                    noise_type=noise_type,
+                                    noise_spatial_scale_mm=spatial_scale_mm,
+                                    noise_temporal_exponent=temporal_exponent,
+                                    duration_s=0.5,
+                                    sfreq=256.0
+                                )
 
-                    for trial in range(n_trials):
-                        try:
-                            eeg_data, meta = self.simulator.simulate_two_dipoles(
-                                position1_mm=pos1,
-                                position2_mm=pos2,
-                                amplitude1_nAm=amplitude_nAm,
-                                amplitude2_nAm=amplitude_nAm,
-                                snr_db=snr_db,
-                                noise_seed=trial * 1000 + pair_i,
-                                noise_type=noise_type,
-                                noise_spatial_scale_mm=spatial_scale_mm,
-                                noise_temporal_exponent=temporal_exponent,
-                                duration_s=0.5,
-                                sfreq=256.0
-                            )
+                                source_activity = self._apply_inverse(eeg_data)
 
-                            source_activity = self._apply_inverse(eeg_data)
+                                true_pair = np.array([
+                                    meta['dipole1']['actual_position_mm'],
+                                    meta['dipole2']['actual_position_mm'],
+                                ])
+                                e1, e2 = self._find_two_peaks_and_errors(
+                                    source_activity, true_pair, suppression_mm
+                                )
+                                for err in (e1, e2):
+                                    records.append({
+                                        'noise_type': noise_type,
+                                        'depth_bin': label,
+                                        'mean_depth_mm': mean_depth,
+                                        'separation_mm': float(sep),
+                                        'error_mm': float(err),
+                                    })
+                                    cell_errors.append(err)
 
-                            true_pair = np.array([
-                                meta['dipole1']['actual_position_mm'],
-                                meta['dipole2']['actual_position_mm'],
-                            ])
-                            e1, e2 = self._find_two_peaks_and_errors(
-                                source_activity, true_pair, suppression_mm
-                            )
-                            errors_by_sep[sep].extend([e1, e2])
+                            except Exception as e:
+                                if self.verbose:
+                                    warnings.warn(f"Trial failed: {e}")
 
-                        except Exception as e:
-                            if self.verbose:
-                                warnings.warn(f"Trial failed: {e}")
+                    if self.verbose and cell_errors:
+                        print(f"    {label:>12s}  sep {sep:>4.1f} mm: "
+                              f"mean per-dipole error = {np.mean(cell_errors):.2f} mm "
+                              f"(n={len(cell_errors)})")
 
-                if self.verbose and errors_by_sep[sep]:
-                    print(f"    sep {sep:>4.1f} mm: mean per-dipole error = "
-                          f"{np.mean(errors_by_sep[sep]):.2f} mm "
-                          f"(n={len(errors_by_sep[sep])})")
-
-            # Drop separations that had no realizable pair.
-            realized = [s for s in separations_mm if errors_by_sep[s]]
-            results_by_type[noise_type] = RobustnessResults(
-                test_type='two_dipole_separation',
-                parameter_values=realized,
-                errors={s: errors_by_sep[s] for s in realized},
-                n_sources=self.n_sources,
-                n_trials_per_position=n_trials,
-                n_positions=n_pairs
-            )
-
-        self.results['two_dipole'] = results_by_type
-        return results_by_type
+        result = {
+            'records': records,
+            'depth_bins': [label for (label, _, _) in depth_bins],
+            'depth_bin_edges_mm': depth_bin_edges,
+            'separations_mm': list(separations_mm),
+            'noise_types': list(noise_types),
+        }
+        self.results['two_dipole'] = result
+        return result
 
     def run_snr_test(
         self,
@@ -1039,18 +1140,25 @@ class RobustnessTest:
         }
 
         for test_name, result in self.results.items():
-            # The two-dipole test stores a dict of results (one per noise type),
-            # not a single RobustnessResults; summarize it separately.
-            if isinstance(result, dict):
+            # The two-dipole test stores a records dict (not a RobustnessResults):
+            # a flat list of per-dipole errors tagged by noise_type/depth/separation.
+            # Summarize as a mean-error grid over (noise_type, depth_bin, separation).
+            if isinstance(result, dict) and 'records' in result:
+                records = result['records']
+                grid: Dict[str, Dict[str, Dict[str, list]]] = {}
+                for rec in records:
+                    (grid.setdefault(rec['noise_type'], {})
+                         .setdefault(rec['depth_bin'], {})
+                         .setdefault(f"{rec['separation_mm']:.1f}", [])
+                         .append(rec['error_mm']))
                 summary['tests'][test_name] = {
-                    nt: {
-                        'error_by_separation_mm': {
-                            str(p): float(np.mean(r.errors[p]))
-                            for p in sorted(r.errors.keys())
-                        },
-                        'n_trials_total': int(sum(len(v) for v in r.errors.values())),
-                    }
-                    for nt, r in result.items()
+                    'mean_error_mm': {
+                        nt: {db: {sep: float(np.mean(errs)) for sep, errs in seps.items()}
+                             for db, seps in bins.items()}
+                        for nt, bins in grid.items()
+                    },
+                    'n_trials_total': len(records),
+                    'depth_bin_edges_mm': result.get('depth_bin_edges_mm', {}),
                 }
                 continue
 

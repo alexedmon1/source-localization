@@ -21,14 +21,18 @@ class _StubTest:
     _source_activity_norm = RobustnessTest._source_activity_norm
     _find_two_peaks_and_errors = RobustnessTest._find_two_peaks_and_errors
     _select_dipole_pairs = RobustnessTest._select_dipole_pairs
+    _select_depth_matched_pairs = RobustnessTest._select_depth_matched_pairs
     _select_test_positions = RobustnessTest._select_test_positions
 
-    def __init__(self, source_pos_mm):
+    def __init__(self, source_pos_mm, source_depths=None):
         self.source_pos_mm = np.asarray(source_pos_mm, dtype=float)
         self.n_sources = self.source_pos_mm.shape[0]
-        # depth = distance from grid centroid, for _select_test_positions
-        centroid = self.source_pos_mm.mean(axis=0)
-        self.source_depths = np.linalg.norm(self.source_pos_mm - centroid, axis=1)
+        if source_depths is not None:
+            self.source_depths = np.asarray(source_depths, dtype=float)
+        else:
+            # depth = distance from grid centroid, for _select_test_positions
+            centroid = self.source_pos_mm.mean(axis=0)
+            self.source_depths = np.linalg.norm(self.source_pos_mm - centroid, axis=1)
 
 
 @pytest.fixture
@@ -137,3 +141,68 @@ def test_select_dipole_pairs_never_pairs_source_with_itself(grid):
     pairs = grid._select_dipole_pairs([0.0], n_pairs=3, tolerance_mm=0.5)
     for idx1, idx2 in pairs[0.0]:
         assert idx1 != idx2
+
+
+# ---- depth-matched pair selection ----------------------------------------
+
+@pytest.fixture
+def depth_grid():
+    """A 2D sheet of sources with an explicit depth gradient along x.
+
+    Sources on a 21-point x-line, each also assigned a depth equal to its x
+    coordinate. So a pair 4mm apart in x is also 4mm apart in depth — unless we
+    build a grid where separation and depth can differ. Here we use a y-offset
+    lattice so same-depth pairs exist at a given separation.
+    """
+    xs = np.arange(0, 11)          # 0..10 mm, the depth axis
+    ys = np.array([0.0, 4.0])      # two rows -> same-depth partners 4mm apart in y
+    pos, depth = [], []
+    for x in xs:
+        for y in ys:
+            pos.append([x, y, 0.0])
+            depth.append(float(x))  # depth depends only on x
+    return _StubTest(np.array(pos), source_depths=np.array(depth))
+
+
+def test_depth_matched_pairs_respect_both_tolerances(depth_grid):
+    """Selected pairs must match target separation AND sit in the depth bin."""
+    bins = [('shallow', 0, 30), ('deep', 70, 100)]
+    pairs = depth_grid._select_depth_matched_pairs(
+        [4.0], bins, n_pairs=3,
+        separation_tolerance_mm=0.5, depth_tolerance_mm=0.5
+    )
+    d = depth_grid.source_depths
+    for (label, sep), plist in pairs.items():
+        lo, hi = np.percentile(d, dict(shallow=(0, 30), deep=(70, 100))[label])
+        for idx1, idx2 in plist:
+            actual = np.linalg.norm(
+                depth_grid.source_pos_mm[idx1] - depth_grid.source_pos_mm[idx2])
+            assert abs(actual - sep) <= 0.5
+            # both sources within the depth bin and matched to each other
+            assert lo - 1e-9 <= d[idx1] <= hi + 1e-9
+            assert abs(d[idx1] - d[idx2]) <= 0.5
+
+
+def test_depth_matched_pairs_separate_shallow_from_deep(depth_grid):
+    """Shallow-bin pairs must actually be shallower than deep-bin pairs."""
+    bins = [('shallow', 0, 25), ('deep', 75, 100)]
+    pairs = depth_grid._select_depth_matched_pairs(
+        [4.0], bins, n_pairs=5,
+        separation_tolerance_mm=0.5, depth_tolerance_mm=0.5
+    )
+    d = depth_grid.source_depths
+    shallow_depths = [0.5 * (d[i] + d[j]) for i, j in pairs[('shallow', 4.0)]]
+    deep_depths = [0.5 * (d[i] + d[j]) for i, j in pairs[('deep', 4.0)]]
+    assert shallow_depths and deep_depths
+    assert max(shallow_depths) < min(deep_depths)
+
+
+def test_depth_matched_pairs_empty_cell_when_unsatisfiable(depth_grid):
+    """A separation with no same-depth partner yields an empty cell, not a crash."""
+    bins = [('shallow', 0, 30)]
+    # 50mm separation is unreachable on this grid.
+    pairs = depth_grid._select_depth_matched_pairs(
+        [50.0], bins, n_pairs=3,
+        separation_tolerance_mm=0.5, depth_tolerance_mm=0.5
+    )
+    assert pairs[('shallow', 50.0)] == []

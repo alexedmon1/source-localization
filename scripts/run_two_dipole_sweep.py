@@ -3,15 +3,18 @@
 Sweep per-dipole localization error for two simultaneous sources.
 
 A single DC dipole is the friendliest case for a min-norm inverse. Under
-superposition the smooth solution smears two sources together, worse as they
-approach — and crossing that with noise structure gives the realistic lower
-bound of the expectation range. This sweep varies both:
+superposition the smooth solution smears two sources together — worse as they
+approach, and worse as they get deeper (further from the electrodes). Crossing
+those with noise structure gives the realistic lower bound of the expectation
+range. This sweep varies three axes:
 
+    depth:       distance to nearest electrode (very_shallow ... deep)
     separation:  how far apart the two sources are (smearing axis)
     noise_type:  white (C = I, optimistic) ... colored (realistic)
 
 Per-dipole error is the localization error of each recovered peak after a 2x2
-assignment to the two true positions.
+assignment to the two true positions. Both dipoles of a pair sit at matched
+depth, so each pair has a well-defined depth.
 
 Usage
 -----
@@ -72,6 +75,8 @@ def main():
     parser.add_argument('--spatial-scale-mm', type=float, default=3.0)
     parser.add_argument('--temporal-exponent', type=float, default=1.0)
     parser.add_argument('--separation-tolerance-mm', type=float, default=1.0)
+    parser.add_argument('--depth-tolerance-mm', type=float, default=1.0,
+                        help='Max depth difference between the two dipoles of a pair')
     parser.add_argument('--inverse-method', default='sLORETA')
     parser.add_argument('--inverse-snr', type=float, default=3.0)
     parser.add_argument('--noise-types', nargs='+', default=list(NOISE_TYPES),
@@ -90,7 +95,7 @@ def main():
     )
 
     started = datetime.now()
-    results_by_type = test.run_two_dipole_test(
+    result = test.run_two_dipole_test(
         separations_mm=args.separations,
         noise_types=args.noise_types,
         snr_db=args.snr_db,
@@ -100,22 +105,30 @@ def main():
         spatial_scale_mm=args.spatial_scale_mm,
         temporal_exponent=args.temporal_exponent,
         separation_tolerance_mm=args.separation_tolerance_mm,
+        depth_tolerance_mm=args.depth_tolerance_mm,
     )
     elapsed_s = (datetime.now() - started).total_seconds()
 
-    # Reshape to error[noise_type][separation] = distribution summary
-    per_type = {}
-    for nt, result in results_by_type.items():
-        per_type[nt] = {
-            str(sep): summarize(result.errors[sep])
-            for sep in result.parameter_values
-        }
+    records = result['records']
+    depth_bins = result['depth_bins']
+    separations = result['separations_mm']
+
+    def cell(nt, db, sep):
+        return [r['error_mm'] for r in records
+                if r['noise_type'] == nt and r['depth_bin'] == db
+                and r['separation_mm'] == sep]
+
+    # error[noise_type][depth_bin][separation] = distribution summary
+    grid = {
+        nt: {db: {f"{sep:.1f}": summarize(cell(nt, db, sep)) for sep in separations}
+             for db in depth_bins}
+        for nt in args.noise_types
+    }
 
     payload = {
         'sweep': 'two_dipole',
-        'purpose': 'Realistic lower bound of the expectation range: two '
-                   'correlated sources under varying separation and noise '
-                   'structure.',
+        'purpose': 'Realistic lower bound of the expectation range: two sources '
+                   'under varying depth, separation, and noise structure.',
         'provenance': {
             'timestamp': started.isoformat(),
             'elapsed_s': elapsed_s,
@@ -125,48 +138,48 @@ def main():
         },
         'parameters': {
             'snr_db': args.snr_db,
-            'separations_mm': args.separations,
+            'separations_mm': separations,
+            'depth_bins': depth_bins,
+            'depth_bin_edges_mm': result['depth_bin_edges_mm'],
             'n_pairs': args.n_pairs,
             'n_trials': args.n_trials,
             'amplitude_nAm': args.amplitude_nAm,
             'spatial_scale_mm': args.spatial_scale_mm,
             'temporal_exponent': args.temporal_exponent,
+            'depth_tolerance_mm': args.depth_tolerance_mm,
             'inverse_method': args.inverse_method,
             'inverse_snr': args.inverse_snr,
             'n_sources': int(test.n_sources),
         },
-        'error_mm_by_noise_type_and_separation': per_type,
-        'raw_errors_mm': {
-            nt: {str(sep): [float(e) for e in result.errors[sep]]
-                 for sep in result.parameter_values}
-            for nt, result in results_by_type.items()
-        },
+        'error_mm_by_noise_depth_separation': grid,
+        'records': records,
     }
 
     results_path = output_dir / 'two_dipole_sweep.json'
     with open(results_path, 'w') as f:
         json.dump(payload, f, indent=2)
 
-    print("\n" + "=" * 72)
-    print("TWO-DIPOLE SWEEP — per-dipole error (mm) by separation and noise")
-    print("=" * 72)
-    realized = sorted(
-        {float(s) for nt in per_type for s in per_type[nt]},
-    )
-    header = "noise_type  " + "".join(f"{s:>10.1f}mm" for s in realized)
-    print(header)
-    print("-" * len(header))
+    edges = result['depth_bin_edges_mm']
+    print("\n" + "=" * 78)
+    print("TWO-DIPOLE SWEEP — per-dipole error (mm) by depth x separation x noise")
+    print("=" * 78)
     for nt in args.noise_types:
-        if nt not in per_type:
+        if nt not in grid:
             continue
-        row = f"{nt:<11}"
-        for sep in realized:
-            s = per_type[nt].get(str(sep), {})
-            row += f"{s['mean_mm']:>10.2f}  " if s.get('n') else f"{'-':>10}  "
-        print(row)
-    print("-" * len(header))
-    print("Reading: rightward = closer sources smear more; "
-          "downward = noise color adds on top.")
+        print(f"\nnoise = {nt}")
+        header = f"  {'depth bin':<14}" + "".join(f"{s:>8.1f}mm" for s in separations)
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for db in depth_bins:
+            lo, hi = edges.get(db, (float('nan'), float('nan')))
+            row = f"  {db:<14}"
+            for sep in separations:
+                s = grid[nt][db][f"{sep:.1f}"]
+                row += f"{s['mean_mm']:>8.2f}  " if s.get('n') else f"{'-':>8}  "
+            print(f"{row}   [{lo:.1f}-{hi:.1f} mm deep]")
+    print("\n" + "-" * 78)
+    print("Reading: down = deeper (further from electrodes) resolves worse; "
+          "right = closer sources smear more.")
     print(f"\nSaved: {results_path}")
 
 
