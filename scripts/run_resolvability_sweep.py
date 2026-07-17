@@ -63,6 +63,9 @@ def main():
     parser.add_argument('--depth-tolerance-mm', type=float, default=1.0)
     parser.add_argument('--saddle-ratio', type=float, default=0.8,
                         help='Rayleigh-style dip threshold (~0.81 classic)')
+    parser.add_argument('--prominence-frac', type=float, default=0.5,
+                        help='2nd peak must be >= this fraction of the 1st peak '
+                             '(suppresses noise-induced false positives)')
     parser.add_argument('--max-match-mm', type=float, default=None,
                         help='Optional loose sanity cap on peak-to-source distance '
                              '(off by default; correspondence is distinct-nearest-source)')
@@ -96,6 +99,7 @@ def main():
         separation_tolerance_mm=args.separation_tolerance_mm,
         depth_tolerance_mm=args.depth_tolerance_mm,
         saddle_ratio=args.saddle_ratio,
+        prominence_frac=args.prominence_frac,
         max_match_mm=args.max_match_mm,
     )
     elapsed_s = (datetime.now() - started).total_seconds()

@@ -256,6 +256,23 @@ def test_not_resolved_single_blob(line_grid):
     assert res['n_candidate_peaks'] == 0
 
 
+def test_prominence_gate_rejects_small_second_peak(line_grid):
+    """A tiny second bump (noise-like) must NOT count as a second source.
+
+    This is the guard against the false-positive floor: a single dipole plus a
+    small ripple was mislabeled as two sources ~40-50% of the time until the
+    second peak was required to be a substantial fraction of the first.
+    """
+    # Big peak at 3, tiny bump (20% height) at 7.
+    activity = _gaussian_activity(line_grid, [3.0, 7.0], sigma=0.4, amps=[1.0, 0.2])
+    true = np.array([[3.0, 0, 0], [7.0, 0, 0]])
+    strict = line_grid._resolve_two_sources(activity, true, prominence_frac=0.5)
+    lenient = line_grid._resolve_two_sources(activity, true, prominence_frac=0.1)
+    assert strict['n_candidate_peaks'] == 0   # 0.2 < 0.5 -> no valid second peak
+    assert strict['resolved'] is False
+    assert lenient['resolved'] is True        # 0.2 > 0.1 -> accepted, and resolves
+
+
 def test_not_resolved_when_dip_too_shallow(line_grid):
     """Two broad, overlapping peaks with only a shallow dip -> merged, not resolved."""
     activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=1.7)

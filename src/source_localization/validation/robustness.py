@@ -462,6 +462,7 @@ class RobustnessTest:
         neighbor_radius_mm: Optional[float] = None,
         exclude_radius_mm: Optional[float] = None,
         saddle_ratio: float = 0.8,
+        prominence_frac: float = 0.5,
         max_match_mm: Optional[float] = None
     ) -> Dict[str, Any]:
         """
@@ -471,9 +472,12 @@ class RobustnessTest:
         question — rather than "how accurately are they placed?" (localization).
         A pair counts as *resolved* when all three hold:
 
-        1. **Two distinct maxima:** the global peak, plus a second genuine local
-           maximum farther than ``exclude_radius_mm`` from it (not just an
-           adjacent grid point of the same blob).
+        1. **Two prominent maxima:** the global peak, plus a second local maximum
+           farther than ``exclude_radius_mm`` from it AND at least
+           ``prominence_frac`` x the global peak's height. The prominence gate is
+           essential: without it, a small noise ripple counts as a "second
+           source" and a single dipole is mislabeled as two ~40-50% of the time
+           (measured). A real second source produces a comparable lobe.
         2. **A saddle between them:** the trough along the connecting segment
            falls to <= ``saddle_ratio`` x the weaker peak. This is the EEG
            analogue of the Rayleigh criterion: two merged blobs have no dip.
@@ -500,6 +504,9 @@ class RobustnessTest:
         saddle_ratio : float, default=0.8
             Trough-to-weaker-peak ratio below which a dip counts as a saddle.
             Rayleigh's criterion corresponds to ~0.81.
+        prominence_frac : float, default=0.5
+            The second peak must be at least this fraction of the global peak's
+            height to count. Suppresses noise-induced spurious second peaks.
         max_match_mm : float, optional
             Optional loose sanity cap: if set, each peak must also be within this
             distance of its assigned true source. Off by default — correspondence
@@ -510,8 +517,9 @@ class RobustnessTest:
         -------
         dict
             ``resolved`` (bool) plus diagnostics: ``n_candidate_peaks``,
-            ``saddle_ratio_observed``, ``saddle_ok``, ``distinct_sources``,
-            ``match_max_mm``, ``match_ok``, ``peak1_mm``, ``peak2_mm``.
+            ``peak2_prominence``, ``saddle_ratio_observed``, ``saddle_ok``,
+            ``distinct_sources``, ``match_max_mm``, ``match_ok``, ``peak1_mm``,
+            ``peak2_mm``.
         """
         sa = self._source_activity_norm(source_activity)
         spacing = self._median_grid_spacing()
@@ -527,6 +535,7 @@ class RobustnessTest:
         result = {
             'resolved': False,
             'n_candidate_peaks': 0,
+            'peak2_prominence': None,
             'saddle_ratio_observed': None,
             'saddle_ok': False,
             'distinct_sources': False,
@@ -538,15 +547,20 @@ class RobustnessTest:
 
         maxima = self._local_maxima(sa, neighbor_radius_mm)
         dist_from_peak1 = np.linalg.norm(self.source_pos_mm[maxima] - pos1, axis=1)
-        candidates = maxima[dist_from_peak1 > exclude_radius_mm]
+        # A second peak must be far enough from the first AND prominent enough
+        # (a real lobe, not a noise ripple).
+        far_enough = dist_from_peak1 > exclude_radius_mm
+        prominent = sa[maxima] >= prominence_frac * val1
+        candidates = maxima[far_enough & prominent]
         result['n_candidate_peaks'] = int(candidates.size)
         if candidates.size == 0:
-            return result  # a single blob — one source, not resolved
+            return result  # no prominent second lobe — one source, not resolved
 
         peak2_idx = int(candidates[np.argmax(sa[candidates])])
         val2 = float(sa[peak2_idx])
         pos2 = self.source_pos_mm[peak2_idx]
         result['peak2_mm'] = pos2.tolist()
+        result['peak2_prominence'] = float(val2 / val1) if val1 > 0 else None
 
         trough = self._segment_trough(pos1, pos2, sa)
         weaker = min(val1, val2)
@@ -865,6 +879,7 @@ class RobustnessTest:
         separation_tolerance_mm: float = 1.0,
         depth_tolerance_mm: float = 1.0,
         saddle_ratio: float = 0.8,
+        prominence_frac: float = 0.5,
         max_match_mm: Optional[float] = None,
         neighbor_radius_mm: Optional[float] = None,
         exclude_radius_mm: Optional[float] = None
@@ -984,6 +999,7 @@ class RobustnessTest:
                                     neighbor_radius_mm=neighbor_radius_mm,
                                     exclude_radius_mm=exclude_radius_mm,
                                     saddle_ratio=saddle_ratio,
+                                    prominence_frac=prominence_frac,
                                     max_match_mm=max_match_mm
                                 )
                                 # Secondary: localization error (forced 2 peaks).
@@ -1000,6 +1016,7 @@ class RobustnessTest:
                                     'resolved': bool(res['resolved']),
                                     'loc_error_mm': float(0.5 * (e1 + e2)),
                                     'saddle_ratio_observed': res['saddle_ratio_observed'],
+                                    'peak2_prominence': res['peak2_prominence'],
                                 })
                                 cell_resolved.append(res['resolved'])
 
@@ -1046,6 +1063,7 @@ class RobustnessTest:
             'noise_types': list(noise_types),
             'detector_params': {
                 'saddle_ratio': saddle_ratio,
+                'prominence_frac': prominence_frac,
                 'correspondence': 'distinct_nearest_source',
                 'max_match_mm': max_match_mm,
                 'neighbor_radius_mm': neighbor_radius_mm,
