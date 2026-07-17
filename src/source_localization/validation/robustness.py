@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from scipy import stats
+from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 import json
 from datetime import datetime
@@ -403,6 +404,175 @@ class RobustnessTest:
             float(np.linalg.norm(recovered[1] - true[1])),
         )
 
+    def _get_source_kdtree(self) -> cKDTree:
+        """KD-tree over source positions, built once and cached."""
+        tree = getattr(self, '_source_kdtree_cache', None)
+        if tree is None:
+            tree = cKDTree(self.source_pos_mm)
+            self._source_kdtree_cache = tree
+        return tree
+
+    def _median_grid_spacing(self) -> float:
+        """Median nearest-neighbor spacing of the source grid (its resolution floor)."""
+        val = getattr(self, '_median_spacing_cache', None)
+        if val is None:
+            tree = self._get_source_kdtree()
+            d, _ = tree.query(self.source_pos_mm, k=2)  # col 1 = nearest neighbor
+            val = float(np.median(d[:, 1]))
+            self._median_spacing_cache = val
+        return val
+
+    def _local_maxima(self, values: np.ndarray, radius_mm: float) -> np.ndarray:
+        """Indices of sources whose value is >= every neighbor within radius_mm."""
+        tree = self._get_source_kdtree()
+        neighbor_lists = tree.query_ball_point(self.source_pos_mm, r=radius_mm)
+        maxima = []
+        for i, nb in enumerate(neighbor_lists):
+            others = [j for j in nb if j != i]
+            if not others or values[i] >= values[others].max():
+                maxima.append(i)
+        return np.array(maxima, dtype=int)
+
+    def _segment_trough(
+        self,
+        p1: np.ndarray,
+        p2: np.ndarray,
+        values: np.ndarray,
+        n_samples: int = 21,
+        interior: Tuple[float, float] = (0.15, 0.85)
+    ) -> float:
+        """
+        Minimum reconstructed value along the segment between two peaks.
+
+        Samples the interior of the p1->p2 line (endpoints excluded, since those
+        are the peaks themselves) and takes the nearest source's value at each
+        sample. The minimum is the saddle/trough between the two peaks — the
+        quantity a Rayleigh-style resolution criterion tests.
+        """
+        tree = self._get_source_kdtree()
+        ts = np.linspace(interior[0], interior[1], n_samples)
+        pts = p1[None, :] + ts[:, None] * (p2 - p1)[None, :]
+        _, idx = tree.query(pts)
+        return float(values[idx].min())
+
+    def _resolve_two_sources(
+        self,
+        source_activity: np.ndarray,
+        true_positions: np.ndarray,
+        neighbor_radius_mm: Optional[float] = None,
+        exclude_radius_mm: Optional[float] = None,
+        saddle_ratio: float = 0.8,
+        max_match_mm: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Decide whether a reconstruction shows two distinct sources or one blob.
+
+        This answers "can we tell there are two sources?" — the resolvability
+        question — rather than "how accurately are they placed?" (localization).
+        A pair counts as *resolved* when all three hold:
+
+        1. **Two distinct maxima:** the global peak, plus a second genuine local
+           maximum farther than ``exclude_radius_mm`` from it (not just an
+           adjacent grid point of the same blob).
+        2. **A saddle between them:** the trough along the connecting segment
+           falls to <= ``saddle_ratio`` x the weaker peak. This is the EEG
+           analogue of the Rayleigh criterion: two merged blobs have no dip.
+        3. **Correspondence (parameter-free):** the two maxima fall nearest to
+           *different* true sources — one lobe per source (a Voronoi assignment).
+           This rules out two spurious peaks on the same source without
+           re-introducing a localization-accuracy tolerance. A fixed millimeter
+           tolerance is deliberately avoided here: making it tighter than the
+           localization error would reject genuine two-lobe detections and turn
+           this back into a localization test.
+
+        Parameters
+        ----------
+        source_activity : ndarray
+            Inverse-solution source activity.
+        true_positions : ndarray, shape (2, 3)
+            The two true dipole positions in mm.
+        neighbor_radius_mm : float, optional
+            Radius defining "neighbor" for the local-maximum test. Defaults to
+            1.5x the median grid spacing.
+        exclude_radius_mm : float, optional
+            A second peak must be at least this far from the first. Defaults to
+            1.5x the median grid spacing (i.e. beyond the immediate neighborhood).
+        saddle_ratio : float, default=0.8
+            Trough-to-weaker-peak ratio below which a dip counts as a saddle.
+            Rayleigh's criterion corresponds to ~0.81.
+        max_match_mm : float, optional
+            Optional loose sanity cap: if set, each peak must also be within this
+            distance of its assigned true source. Off by default — correspondence
+            is the parameter-free distinct-nearest rule. Set generously (e.g. one
+            source separation) only to reject peaks in an entirely wrong region.
+
+        Returns
+        -------
+        dict
+            ``resolved`` (bool) plus diagnostics: ``n_candidate_peaks``,
+            ``saddle_ratio_observed``, ``saddle_ok``, ``distinct_sources``,
+            ``match_max_mm``, ``match_ok``, ``peak1_mm``, ``peak2_mm``.
+        """
+        sa = self._source_activity_norm(source_activity)
+        spacing = self._median_grid_spacing()
+        if neighbor_radius_mm is None:
+            neighbor_radius_mm = 1.5 * spacing
+        if exclude_radius_mm is None:
+            exclude_radius_mm = 1.5 * spacing
+
+        peak1_idx = int(np.argmax(sa))
+        val1 = float(sa[peak1_idx])
+        pos1 = self.source_pos_mm[peak1_idx]
+
+        result = {
+            'resolved': False,
+            'n_candidate_peaks': 0,
+            'saddle_ratio_observed': None,
+            'saddle_ok': False,
+            'distinct_sources': False,
+            'match_max_mm': None,
+            'match_ok': False,
+            'peak1_mm': pos1.tolist(),
+            'peak2_mm': None,
+        }
+
+        maxima = self._local_maxima(sa, neighbor_radius_mm)
+        dist_from_peak1 = np.linalg.norm(self.source_pos_mm[maxima] - pos1, axis=1)
+        candidates = maxima[dist_from_peak1 > exclude_radius_mm]
+        result['n_candidate_peaks'] = int(candidates.size)
+        if candidates.size == 0:
+            return result  # a single blob — one source, not resolved
+
+        peak2_idx = int(candidates[np.argmax(sa[candidates])])
+        val2 = float(sa[peak2_idx])
+        pos2 = self.source_pos_mm[peak2_idx]
+        result['peak2_mm'] = pos2.tolist()
+
+        trough = self._segment_trough(pos1, pos2, sa)
+        weaker = min(val1, val2)
+        observed_ratio = trough / weaker if weaker > 0 else np.inf
+        result['saddle_ratio_observed'] = float(observed_ratio)
+        saddle_ok = observed_ratio <= saddle_ratio
+        result['saddle_ok'] = bool(saddle_ok)
+
+        # Correspondence (parameter-free): each peak nearest a DIFFERENT true
+        # source — one lobe per source. Distances kept only as diagnostics /
+        # optional sanity cap; they are NOT a localization-accuracy gate.
+        true = np.asarray(true_positions)
+        d1 = np.linalg.norm(true - pos1, axis=1)  # peak1 to each true source
+        d2 = np.linalg.norm(true - pos2, axis=1)  # peak2 to each true source
+        nearest1, nearest2 = int(np.argmin(d1)), int(np.argmin(d2))
+        distinct_sources = nearest1 != nearest2
+        result['distinct_sources'] = bool(distinct_sources)
+        # Assign each peak to its own nearest source (they differ when distinct).
+        match_max = float(max(d1[nearest1], d2[nearest2]))
+        result['match_max_mm'] = match_max
+        within_cap = (max_match_mm is None) or (match_max <= max_match_mm)
+        result['match_ok'] = bool(distinct_sources and within_cap)
+
+        result['resolved'] = bool(saddle_ok and distinct_sources and within_cap)
+        return result
+
     def _select_dipole_pairs(
         self,
         separations_mm: List[float],
@@ -679,6 +849,211 @@ class RobustnessTest:
             'noise_types': list(noise_types),
         }
         self.results['two_dipole'] = result
+        return result
+
+    def run_resolvability_test(
+        self,
+        separations_mm: Optional[List[float]] = None,
+        noise_types: Optional[List[str]] = None,
+        depth_bins: Optional[List[Tuple[str, float, float]]] = None,
+        snr_db: float = 10.0,
+        n_pairs: int = 4,
+        n_trials: int = 10,
+        amplitude_nAm: float = 50.0,
+        spatial_scale_mm: float = 3.0,
+        temporal_exponent: float = 1.0,
+        separation_tolerance_mm: float = 1.0,
+        depth_tolerance_mm: float = 1.0,
+        saddle_ratio: float = 0.8,
+        max_match_mm: Optional[float] = None,
+        neighbor_radius_mm: Optional[float] = None,
+        exclude_radius_mm: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Sweep the probability of *resolving* two sources as two, not one.
+
+        Where :meth:`run_two_dipole_test` asks "how accurately are two known
+        sources placed?", this asks the prior question — "can we tell there are
+        two at all?" — which is the meaningful limit for closely-spaced sources.
+        For each (depth bin, separation, noise type) cell it reports the fraction
+        of trials in which the reconstruction shows two distinct peaks with a
+        saddle between them (see :meth:`_resolve_two_sources`). From the
+        resolution-probability-vs-separation curve it extracts a **threshold
+        separation**: the closest two sources can be while still being resolved.
+
+        Per-dipole localization error is retained as a secondary field, so a
+        single run yields both "can we separate them" and "given separation, how
+        well are they placed".
+
+        Parameters
+        ----------
+        separations_mm, noise_types, depth_bins, snr_db, n_pairs, n_trials,
+        amplitude_nAm, spatial_scale_mm, temporal_exponent,
+        separation_tolerance_mm, depth_tolerance_mm
+            As in :meth:`run_two_dipole_test`.
+        saddle_ratio : float, default=0.8
+            Rayleigh-style dip threshold passed to the detector.
+        max_match_mm : float, optional
+            Optional loose sanity cap on peak-to-source distance. Off by default;
+            correspondence is the parameter-free distinct-nearest-source rule.
+        neighbor_radius_mm, exclude_radius_mm : float, optional
+            Detector radii; default to 1.5x median grid spacing.
+
+        Returns
+        -------
+        dict
+            ``{'records': [...], 'resolution_probability': {...},
+            'threshold_separation_mm': {...}, 'depth_bins', 'depth_bin_edges_mm',
+            'separations_mm', 'noise_types', 'detector_params'}``. Each record is
+            ``{noise_type, depth_bin, mean_depth_mm, separation_mm, resolved,
+            loc_error_mm, saddle_ratio_observed}``. ``threshold_separation_mm``
+            is keyed [noise_type][depth_bin] and gives the smallest separation
+            with resolution probability >= 0.5 (None if never reached).
+        """
+        if separations_mm is None:
+            separations_mm = [2.0, 4.0, 6.0, 8.0]
+        if noise_types is None:
+            noise_types = list(NOISE_TYPES)
+        if depth_bins is None:
+            depth_bins = self.DEFAULT_DEPTH_BINS
+
+        unknown = set(noise_types) - set(NOISE_TYPES)
+        if unknown:
+            raise ValueError(
+                f"Unknown noise types {sorted(unknown)}. Expected {NOISE_TYPES}."
+            )
+
+        pairs_by_cell = self._select_depth_matched_pairs(
+            separations_mm, depth_bins, n_pairs,
+            separation_tolerance_mm=separation_tolerance_mm,
+            depth_tolerance_mm=depth_tolerance_mm
+        )
+
+        depth = self.source_depths
+        depth_bin_edges = {
+            label: (float(np.percentile(depth, lo)), float(np.percentile(depth, hi)))
+            for (label, lo, hi) in depth_bins
+        }
+
+        if self.verbose:
+            print(f"Running resolvability test: {len(noise_types)} noise types x "
+                  f"{len(depth_bins)} depth bins x {len(separations_mm)} separations, "
+                  f"{n_pairs} pairs, {n_trials} trials each, SNR = {snr_db} dB")
+            cap = f"{max_match_mm} mm" if max_match_mm is not None else "off"
+            print(f"  detector: saddle_ratio={saddle_ratio}, "
+                  f"correspondence=distinct-nearest-source, sanity_cap={cap}")
+
+        records: List[Dict[str, Any]] = []
+
+        for noise_type in noise_types:
+            if self.verbose:
+                print(f"  Noise type = {noise_type}:")
+
+            for (label, _lo, _hi) in depth_bins:
+                for sep in separations_mm:
+                    cell_resolved = []
+                    for pair_i, (idx1, idx2) in enumerate(pairs_by_cell[(label, sep)]):
+                        pos1 = self.source_pos_mm[idx1]
+                        pos2 = self.source_pos_mm[idx2]
+                        mean_depth = float(0.5 * (depth[idx1] + depth[idx2]))
+
+                        for trial in range(n_trials):
+                            try:
+                                eeg_data, meta = self.simulator.simulate_two_dipoles(
+                                    position1_mm=pos1,
+                                    position2_mm=pos2,
+                                    amplitude1_nAm=amplitude_nAm,
+                                    amplitude2_nAm=amplitude_nAm,
+                                    snr_db=snr_db,
+                                    noise_seed=trial * 1000 + pair_i,
+                                    noise_type=noise_type,
+                                    noise_spatial_scale_mm=spatial_scale_mm,
+                                    noise_temporal_exponent=temporal_exponent,
+                                    duration_s=0.5,
+                                    sfreq=256.0
+                                )
+
+                                source_activity = self._apply_inverse(eeg_data)
+                                true_pair = np.array([
+                                    meta['dipole1']['actual_position_mm'],
+                                    meta['dipole2']['actual_position_mm'],
+                                ])
+
+                                res = self._resolve_two_sources(
+                                    source_activity, true_pair,
+                                    neighbor_radius_mm=neighbor_radius_mm,
+                                    exclude_radius_mm=exclude_radius_mm,
+                                    saddle_ratio=saddle_ratio,
+                                    max_match_mm=max_match_mm
+                                )
+                                # Secondary: localization error (forced 2 peaks).
+                                e1, e2 = self._find_two_peaks_and_errors(
+                                    source_activity, true_pair,
+                                    suppression_mm=0.5 * min(separations_mm)
+                                )
+
+                                records.append({
+                                    'noise_type': noise_type,
+                                    'depth_bin': label,
+                                    'mean_depth_mm': mean_depth,
+                                    'separation_mm': float(sep),
+                                    'resolved': bool(res['resolved']),
+                                    'loc_error_mm': float(0.5 * (e1 + e2)),
+                                    'saddle_ratio_observed': res['saddle_ratio_observed'],
+                                })
+                                cell_resolved.append(res['resolved'])
+
+                            except Exception as e:
+                                if self.verbose:
+                                    warnings.warn(f"Trial failed: {e}")
+
+                    if self.verbose and cell_resolved:
+                        frac = float(np.mean(cell_resolved))
+                        print(f"    {label:>12s}  sep {sep:>4.1f} mm: "
+                              f"resolved {frac*100:>5.1f}% (n={len(cell_resolved)})")
+
+        # Resolution probability grid and threshold separation per (noise, depth).
+        resolution_probability: Dict[str, Dict[str, Dict[str, float]]] = {}
+        threshold_separation: Dict[str, Dict[str, Optional[float]]] = {}
+        sorted_seps = sorted(separations_mm)
+        for nt in noise_types:
+            resolution_probability[nt] = {}
+            threshold_separation[nt] = {}
+            for (label, _, _) in depth_bins:
+                probs = {}
+                for sep in sorted_seps:
+                    cell = [r['resolved'] for r in records
+                            if r['noise_type'] == nt and r['depth_bin'] == label
+                            and r['separation_mm'] == sep]
+                    probs[f"{sep:.1f}"] = float(np.mean(cell)) if cell else None
+                resolution_probability[nt][label] = probs
+                # Smallest separation whose probability first reaches >= 0.5.
+                threshold = None
+                for sep in sorted_seps:
+                    p = probs[f"{sep:.1f}"]
+                    if p is not None and p >= 0.5:
+                        threshold = float(sep)
+                        break
+                threshold_separation[nt][label] = threshold
+
+        result = {
+            'records': records,
+            'resolution_probability': resolution_probability,
+            'threshold_separation_mm': threshold_separation,
+            'depth_bins': [label for (label, _, _) in depth_bins],
+            'depth_bin_edges_mm': depth_bin_edges,
+            'separations_mm': list(separations_mm),
+            'noise_types': list(noise_types),
+            'detector_params': {
+                'saddle_ratio': saddle_ratio,
+                'correspondence': 'distinct_nearest_source',
+                'max_match_mm': max_match_mm,
+                'neighbor_radius_mm': neighbor_radius_mm,
+                'exclude_radius_mm': exclude_radius_mm,
+                'median_grid_spacing_mm': self._median_grid_spacing(),
+            },
+        }
+        self.results['resolvability'] = result
         return result
 
     def run_snr_test(
@@ -1140,11 +1515,22 @@ class RobustnessTest:
         }
 
         for test_name, result in self.results.items():
-            # The two-dipole test stores a records dict (not a RobustnessResults):
-            # a flat list of per-dipole errors tagged by noise_type/depth/separation.
-            # Summarize as a mean-error grid over (noise_type, depth_bin, separation).
+            # The two-dipole and resolvability tests store a records dict (not a
+            # RobustnessResults): a flat list tagged by noise_type/depth/separation.
             if isinstance(result, dict) and 'records' in result:
                 records = result['records']
+                if records and 'resolved' in records[0]:
+                    # Resolvability: probability grid + threshold already computed.
+                    summary['tests'][test_name] = {
+                        'resolution_probability': result.get('resolution_probability', {}),
+                        'threshold_separation_mm': result.get('threshold_separation_mm', {}),
+                        'n_trials_total': len(records),
+                        'depth_bin_edges_mm': result.get('depth_bin_edges_mm', {}),
+                        'detector_params': result.get('detector_params', {}),
+                    }
+                    continue
+
+                # Localization: mean-error grid over (noise_type, depth, separation).
                 grid: Dict[str, Dict[str, Dict[str, list]]] = {}
                 for rec in records:
                     (grid.setdefault(rec['noise_type'], {})

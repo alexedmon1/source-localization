@@ -206,3 +206,127 @@ def test_depth_matched_pairs_empty_cell_when_unsatisfiable(depth_grid):
         separation_tolerance_mm=0.5, depth_tolerance_mm=0.5
     )
     assert pairs[('shallow', 50.0)] == []
+
+
+# ---- resolvability detector ----------------------------------------------
+
+_StubResolve = RobustnessTest  # methods borrowed below
+
+
+@pytest.fixture
+def line_grid():
+    """Fine 1D source line (0..10 mm at 0.25 mm) for controlled activity maps."""
+    xs = np.arange(0, 10.001, 0.25)
+    pos = np.column_stack([xs, np.zeros_like(xs), np.zeros_like(xs)])
+    stub = _StubTest(pos)
+    # borrow the resolvability methods onto the stub instance's class chain
+    for name in ('_get_source_kdtree', '_median_grid_spacing', '_local_maxima',
+                 '_segment_trough', '_resolve_two_sources'):
+        setattr(_StubTest, name, getattr(RobustnessTest, name))
+    return stub
+
+
+def _gaussian_activity(stub, centers, sigma=0.5, amps=None):
+    """Sum-of-Gaussians magnitude map over the stub's source line, as (n,1)."""
+    x = stub.source_pos_mm[:, 0]
+    amps = amps or [1.0] * len(centers)
+    val = np.zeros_like(x)
+    for c, a in zip(centers, amps):
+        val += a * np.exp(-((x - c) ** 2) / (2 * sigma ** 2))
+    return val[:, None]
+
+
+def test_resolved_two_clear_peaks(line_grid):
+    """Two narrow, well-separated peaks with a deep dip -> resolved."""
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)
+    true = np.array([[2.0, 0, 0], [6.0, 0, 0]])
+    res = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8)
+    assert res['resolved'] is True
+    assert res['n_candidate_peaks'] >= 1
+    assert res['distinct_sources'] is True
+    assert res['saddle_ratio_observed'] < 0.8
+
+
+def test_not_resolved_single_blob(line_grid):
+    """One source (single peak, monotonic decay) -> no second peak -> not resolved."""
+    activity = _gaussian_activity(line_grid, [5.0], sigma=1.0)
+    true = np.array([[4.0, 0, 0], [6.0, 0, 0]])
+    res = line_grid._resolve_two_sources(activity, true)
+    assert res['resolved'] is False
+    assert res['n_candidate_peaks'] == 0
+
+
+def test_not_resolved_when_dip_too_shallow(line_grid):
+    """Two broad, overlapping peaks with only a shallow dip -> merged, not resolved."""
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=1.7)
+    true = np.array([[2.0, 0, 0], [6.0, 0, 0]])
+    res = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8)
+    # A saddle may or may not be detected, but the dip is too shallow to pass.
+    assert res['saddle_ratio_observed'] > 0.8
+    assert res['resolved'] is False
+
+
+def test_correspondence_is_parameter_free_not_a_localization_gate(line_grid):
+    """Peaks offset from the true sources still resolve, as long as each peak is
+    nearest a DIFFERENT true source. This is the fix for the detector conflating
+    resolvability with localization accuracy: a fixed mm tolerance tighter than
+    the localization error would wrongly reject genuine two-lobe detections."""
+    # Peaks at 2 and 6; true sources shifted ~1mm off (3 and 7). Each peak is
+    # still nearest a distinct true source, so the pair is resolved.
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)
+    true = np.array([[3.0, 0, 0], [7.0, 0, 0]])
+    res = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8)
+    assert res['distinct_sources'] is True
+    assert res['resolved'] is True
+    assert res['match_max_mm'] > 0.5  # peaks are NOT accurately localized...
+    # ...yet the pair is still (correctly) counted as resolved.
+
+
+def test_not_resolved_when_both_peaks_nearest_same_source(line_grid):
+    """Two peaks that both fall nearest ONE true source -> not two distinct lobes."""
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)
+    true = np.array([[8.5, 0, 0], [9.5, 0, 0]])  # both peaks are left of both sources
+    res = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8)
+    assert res['saddle_ok'] is True         # the dip itself is fine
+    assert res['distinct_sources'] is False  # but both peaks map to the same source
+    assert res['resolved'] is False
+
+
+def test_max_match_cap_rejects_wildly_off_peaks(line_grid):
+    """The optional sanity cap rejects distinct-but-far peaks when enabled."""
+    activity = _gaussian_activity(line_grid, [1.0, 6.0], sigma=0.4)
+    true = np.array([[1.5, 0, 0], [10.0, 0, 0]])  # source2 at 10; peak2 (~6) is 4mm off
+    # Distinct-nearest passes (peak1->1.5, peak2->10, since 6 is closer to 10
+    # than to 1.5), but peak2 is ~4mm from its assigned source.
+    uncapped = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8)
+    capped = line_grid._resolve_two_sources(activity, true, saddle_ratio=0.8,
+                                            max_match_mm=3.0)
+    assert uncapped['distinct_sources'] is True
+    assert uncapped['resolved'] is True
+    assert uncapped['match_max_mm'] > 3.0
+    assert capped['resolved'] is False  # cap catches the far peak
+
+
+def test_saddle_ratio_threshold_is_respected(line_grid):
+    """A lenient saddle_ratio should resolve a pair that a strict one rejects."""
+    activity = _gaussian_activity(line_grid, [3.0, 6.0], sigma=1.1)
+    true = np.array([[3.0, 0, 0], [6.0, 0, 0]])
+    observed = line_grid._resolve_two_sources(
+        activity, true, saddle_ratio=0.99
+    )['saddle_ratio_observed']
+    lenient = line_grid._resolve_two_sources(
+        activity, true, saddle_ratio=observed + 0.02)
+    strict = line_grid._resolve_two_sources(
+        activity, true, saddle_ratio=observed - 0.02)
+    assert lenient['resolved'] is True
+    assert strict['resolved'] is False
+
+
+def test_local_maxima_and_spacing(line_grid):
+    """Sanity-check the grid helpers the detector relies on."""
+    assert line_grid._median_grid_spacing() == pytest.approx(0.25, abs=1e-6)
+    activity = _gaussian_activity(line_grid, [2.0, 6.0], sigma=0.5)[:, 0]
+    maxima = line_grid._local_maxima(activity, radius_mm=0.4)
+    peak_x = sorted(line_grid.source_pos_mm[maxima, 0])
+    assert any(abs(px - 2.0) < 0.3 for px in peak_x)
+    assert any(abs(px - 6.0) < 0.3 for px in peak_x)
