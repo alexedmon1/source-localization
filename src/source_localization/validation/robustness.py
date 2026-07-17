@@ -332,6 +332,254 @@ class RobustnessTest:
 
         return np.linalg.norm(peak_pos - true_position)
 
+    def _source_activity_norm(self, source_activity: np.ndarray) -> np.ndarray:
+        """Collapse (oriented, time) source activity to one magnitude per source."""
+        n_orient = source_activity.shape[0] // self.n_sources
+        if n_orient == 3:
+            sa_3d = source_activity.reshape(self.n_sources, 3, -1)
+            return np.linalg.norm(sa_3d, axis=1).mean(axis=1)
+        return np.abs(source_activity).mean(axis=1)
+
+    def _find_two_peaks_and_errors(
+        self,
+        source_activity: np.ndarray,
+        true_positions: np.ndarray,
+        suppression_mm: float
+    ) -> Tuple[float, float]:
+        """
+        Recover two source peaks and match them to two true positions.
+
+        The strongest source is the first peak. Before taking the second, sources
+        within ``suppression_mm`` of the first are masked out — otherwise the two
+        largest values are usually adjacent grid points of a single blob, not two
+        distinct sources. The two recovered peaks are then assigned to the two
+        true positions by whichever pairing minimizes total distance (a 2x2
+        assignment), since the inverse has no inherent source ordering.
+
+        Parameters
+        ----------
+        source_activity : ndarray
+            Inverse-solution source activity.
+        true_positions : ndarray, shape (2, 3)
+            The two true dipole positions in mm.
+        suppression_mm : float
+            Radius around the first peak to exclude when finding the second.
+
+        Returns
+        -------
+        (error1_mm, error2_mm) : tuple of float
+            Per-dipole localization errors, ordered to match ``true_positions``.
+        """
+        sa_norm = self._source_activity_norm(source_activity)
+
+        peak1_idx = int(np.argmax(sa_norm))
+        peak1_pos = self.source_pos_mm[peak1_idx]
+
+        # Mask a neighborhood of the first peak, then take the next strongest.
+        dist_to_peak1 = np.linalg.norm(self.source_pos_mm - peak1_pos, axis=1)
+        masked = sa_norm.copy()
+        masked[dist_to_peak1 <= suppression_mm] = -np.inf
+        if not np.isfinite(masked).any():
+            # Suppression swallowed every source (tiny grid); fall back to the
+            # global second-best so we still return two distinct peaks.
+            masked = sa_norm.copy()
+            masked[peak1_idx] = -np.inf
+        peak2_idx = int(np.argmax(masked))
+        peak2_pos = self.source_pos_mm[peak2_idx]
+
+        recovered = np.array([peak1_pos, peak2_pos])
+        true = np.asarray(true_positions)
+
+        # Two possible assignments; pick the one with smaller total error.
+        straight = (np.linalg.norm(recovered[0] - true[0])
+                    + np.linalg.norm(recovered[1] - true[1]))
+        swapped = (np.linalg.norm(recovered[1] - true[0])
+                   + np.linalg.norm(recovered[0] - true[1]))
+        if swapped < straight:
+            recovered = recovered[::-1]
+
+        return (
+            float(np.linalg.norm(recovered[0] - true[0])),
+            float(np.linalg.norm(recovered[1] - true[1])),
+        )
+
+    def _select_dipole_pairs(
+        self,
+        separations_mm: List[float],
+        n_pairs: int,
+        tolerance_mm: float = 1.0
+    ) -> Dict[float, List[Tuple[int, int]]]:
+        """
+        Find source-index pairs at each requested separation.
+
+        For each base position (spread across depth) and each target separation,
+        pick the source whose distance is closest to the target; keep it only if
+        within ``tolerance_mm``. Returns a dict mapping requested separation to a
+        list of (idx1, idx2) pairs. Separations with no realizable pair on this
+        grid map to an empty list (the caller logs and skips them).
+        """
+        base_indices = self._select_test_positions(n_pairs)
+        pairs: Dict[float, List[Tuple[int, int]]] = {s: [] for s in separations_mm}
+
+        for base_idx in base_indices:
+            base_pos = self.source_pos_mm[base_idx]
+            dists = np.linalg.norm(self.source_pos_mm - base_pos, axis=1)
+            for sep in separations_mm:
+                partner_idx = int(np.argmin(np.abs(dists - sep)))
+                if partner_idx == base_idx:
+                    continue
+                if abs(dists[partner_idx] - sep) <= tolerance_mm:
+                    pairs[sep].append((int(base_idx), partner_idx))
+
+        return pairs
+
+    def run_two_dipole_test(
+        self,
+        separations_mm: Optional[List[float]] = None,
+        noise_types: Optional[List[str]] = None,
+        snr_db: float = 10.0,
+        n_pairs: int = 4,
+        n_trials: int = 10,
+        amplitude_nAm: float = 50.0,
+        spatial_scale_mm: float = 3.0,
+        temporal_exponent: float = 1.0,
+        suppression_mm: Optional[float] = None,
+        separation_tolerance_mm: float = 1.0
+    ) -> Dict[str, RobustnessResults]:
+        """
+        Test per-dipole localization error for two simultaneous sources.
+
+        A single DC dipole is the friendliest case for a min-norm inverse; under
+        superposition the smooth solution smears the two sources together, and
+        that smearing worsens as they get closer. Crossing this with noise
+        structure gives the realistic lower bound of the expectation range: two
+        correlated sources observed through colored noise.
+
+        Returns one RobustnessResults per noise type, each a sweep of per-dipole
+        error over separation (so a caller can read both "how does two-source
+        error grow as sources approach" and "how much does noise color add").
+
+        Parameters
+        ----------
+        separations_mm : list of float, optional
+            Target inter-dipole separations. Default: [2, 4, 6, 8].
+        noise_types : list of str, optional
+            Noise structures to cross with separation. Default: all of
+            :data:`~source_localization.validation.noise.NOISE_TYPES`.
+        snr_db : float, default=10.0
+            Fixed combined-signal SNR.
+        n_pairs : int, default=4
+            Number of base positions (depth-spread) per separation.
+        n_trials : int, default=10
+            Trials per pair per separation per noise type.
+        amplitude_nAm : float, default=50.0
+            Amplitude of each dipole (equal, correlated DC sources).
+        spatial_scale_mm, temporal_exponent : float
+            Noise-shaping parameters, as in :meth:`run_noise_type_test`.
+        suppression_mm : float, optional
+            Radius for masking the first peak before finding the second. Defaults
+            to half the smallest separation, so two sources at the closest tested
+            distance can still be resolved as distinct peaks.
+        separation_tolerance_mm : float, default=1.0
+            How far a grid pair may be from the target separation and still count.
+
+        Returns
+        -------
+        dict of str -> RobustnessResults
+            Keyed by noise type; each result's parameter is separation_mm and
+            errors are pooled per-dipole localization errors.
+        """
+        if separations_mm is None:
+            separations_mm = [2.0, 4.0, 6.0, 8.0]
+        if noise_types is None:
+            noise_types = list(NOISE_TYPES)
+
+        unknown = set(noise_types) - set(NOISE_TYPES)
+        if unknown:
+            raise ValueError(
+                f"Unknown noise types {sorted(unknown)}. Expected {NOISE_TYPES}."
+            )
+
+        if suppression_mm is None:
+            suppression_mm = 0.5 * min(separations_mm)
+
+        pairs_by_sep = self._select_dipole_pairs(
+            separations_mm, n_pairs, tolerance_mm=separation_tolerance_mm
+        )
+
+        if self.verbose:
+            print(f"Running two-dipole test: {len(noise_types)} noise types x "
+                  f"{len(separations_mm)} separations, {n_pairs} pairs, "
+                  f"{n_trials} trials each, SNR = {snr_db} dB")
+            for sep in separations_mm:
+                if not pairs_by_sep[sep]:
+                    print(f"  WARNING: no grid pair within "
+                          f"{separation_tolerance_mm} mm of {sep} mm separation "
+                          f"— skipping this separation.")
+
+        results_by_type: Dict[str, RobustnessResults] = {}
+
+        for noise_type in noise_types:
+            if self.verbose:
+                print(f"  Noise type = {noise_type}:")
+
+            errors_by_sep: Dict[float, List[float]] = {s: [] for s in separations_mm}
+
+            for sep in separations_mm:
+                for pair_i, (idx1, idx2) in enumerate(pairs_by_sep[sep]):
+                    pos1 = self.source_pos_mm[idx1]
+                    pos2 = self.source_pos_mm[idx2]
+
+                    for trial in range(n_trials):
+                        try:
+                            eeg_data, meta = self.simulator.simulate_two_dipoles(
+                                position1_mm=pos1,
+                                position2_mm=pos2,
+                                amplitude1_nAm=amplitude_nAm,
+                                amplitude2_nAm=amplitude_nAm,
+                                snr_db=snr_db,
+                                noise_seed=trial * 1000 + pair_i,
+                                noise_type=noise_type,
+                                noise_spatial_scale_mm=spatial_scale_mm,
+                                noise_temporal_exponent=temporal_exponent,
+                                duration_s=0.5,
+                                sfreq=256.0
+                            )
+
+                            source_activity = self._apply_inverse(eeg_data)
+
+                            true_pair = np.array([
+                                meta['dipole1']['actual_position_mm'],
+                                meta['dipole2']['actual_position_mm'],
+                            ])
+                            e1, e2 = self._find_two_peaks_and_errors(
+                                source_activity, true_pair, suppression_mm
+                            )
+                            errors_by_sep[sep].extend([e1, e2])
+
+                        except Exception as e:
+                            if self.verbose:
+                                warnings.warn(f"Trial failed: {e}")
+
+                if self.verbose and errors_by_sep[sep]:
+                    print(f"    sep {sep:>4.1f} mm: mean per-dipole error = "
+                          f"{np.mean(errors_by_sep[sep]):.2f} mm "
+                          f"(n={len(errors_by_sep[sep])})")
+
+            # Drop separations that had no realizable pair.
+            realized = [s for s in separations_mm if errors_by_sep[s]]
+            results_by_type[noise_type] = RobustnessResults(
+                test_type='two_dipole_separation',
+                parameter_values=realized,
+                errors={s: errors_by_sep[s] for s in realized},
+                n_sources=self.n_sources,
+                n_trials_per_position=n_trials,
+                n_positions=n_pairs
+            )
+
+        self.results['two_dipole'] = results_by_type
+        return results_by_type
+
     def run_snr_test(
         self,
         snr_range: Tuple[float, float] = (-20, 40),
@@ -791,6 +1039,21 @@ class RobustnessTest:
         }
 
         for test_name, result in self.results.items():
+            # The two-dipole test stores a dict of results (one per noise type),
+            # not a single RobustnessResults; summarize it separately.
+            if isinstance(result, dict):
+                summary['tests'][test_name] = {
+                    nt: {
+                        'error_by_separation_mm': {
+                            str(p): float(np.mean(r.errors[p]))
+                            for p in sorted(r.errors.keys())
+                        },
+                        'n_trials_total': int(sum(len(v) for v in r.errors.values())),
+                    }
+                    for nt, r in result.items()
+                }
+                continue
+
             params = sorted(result.errors.keys())
             means = [float(np.mean(result.errors[p])) for p in params]
             n_trials_total = int(sum(len(v) for v in result.errors.values()))
