@@ -32,7 +32,7 @@ Examples
 import numpy as np
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from dataclasses import dataclass, field
 from scipy import stats
 from scipy.spatial import cKDTree
@@ -749,6 +749,76 @@ class RobustnessTest:
 
         return pairs
 
+    def _select_axis_pairs(
+        self,
+        separations_mm: List[float],
+        axes: List[Tuple[str, Optional[Sequence[float]]]],
+        n_pairs: int,
+        separation_tolerance_mm: float = 1.0,
+        angular_tolerance_deg: float = 20.0
+    ) -> Dict[Tuple[str, float], List[Tuple[int, int]]]:
+        """
+        Find source pairs separated along a given anatomical axis.
+
+        Resolvability may be anisotropic: the array sits dorsally, so a front-back
+        (anterior-posterior) separation is seen very differently from a top-bottom
+        (dorsal-ventral) one. This selects pairs whose displacement vector points
+        (within ``angular_tolerance_deg``) along each requested axis, at each
+        target separation. The axis is treated as undirected (front-back ==
+        back-front) via the absolute cosine.
+
+        Parameters
+        ----------
+        separations_mm : list of float
+            Target inter-dipole separations.
+        axes : list of (label, direction)
+            Each direction is a 3-vector (need not be unit); ``None`` means any
+            direction (isotropic control).
+        n_pairs : int
+            Max pairs per (axis, separation) cell.
+        separation_tolerance_mm : float, default=1.0
+            Allowed deviation of a grid pair from the target separation.
+        angular_tolerance_deg : float, default=20.0
+            Max angle between the pair's displacement and the axis direction.
+
+        Returns
+        -------
+        dict of (axis_label, separation) -> list of (idx1, idx2)
+            Cells with no qualifying pair map to an empty list.
+        """
+        pairs: Dict[Tuple[str, float], List[Tuple[int, int]]] = {
+            (label, sep): [] for (label, _) in axes for sep in separations_mm
+        }
+        cos_tol = np.cos(np.deg2rad(angular_tolerance_deg))
+
+        for label, direction in axes:
+            unit = None
+            if direction is not None:
+                d = np.asarray(direction, dtype=float)
+                unit = d / np.linalg.norm(d)
+            for sep in separations_mm:
+                count = 0
+                for base_idx in range(self.n_sources):
+                    if count >= n_pairs:
+                        break
+                    disp = self.source_pos_mm - self.source_pos_mm[base_idx]
+                    dist = np.linalg.norm(disp, axis=1)
+                    mask = np.abs(dist - sep) <= separation_tolerance_mm
+                    mask[base_idx] = False
+                    if unit is not None:
+                        with np.errstate(invalid='ignore', divide='ignore'):
+                            # |cos angle| — axis is undirected
+                            cos_ang = np.abs(disp @ unit) / np.where(dist > 0, dist, 1.0)
+                        mask &= cos_ang >= cos_tol
+                    candidates = np.where(mask)[0]
+                    if candidates.size == 0:
+                        continue
+                    partner_idx = int(candidates[np.argmin(np.abs(dist[candidates] - sep))])
+                    pairs[(label, sep)].append((int(base_idx), partner_idx))
+                    count += 1
+
+        return pairs
+
     #: Default depth bins (label, lo_percentile, hi_percentile). A dedicated
     #: very-shallow bin isolates the sources closest to the electrodes, where
     #: even two-dipole resolution approaches the single-dipole floor (~1 mm).
@@ -757,6 +827,19 @@ class RobustnessTest:
         ('shallow', 15, 40),
         ('mid', 40, 70),
         ('deep', 70, 100),
+    ]
+
+    #: Default anatomical axes for the orientation sweep. Directions are
+    #: (X=L-R medial-lateral, Y=A-P front-back, Z=D-V top-bottom). Chosen from the
+    #: brain's extents: A-P is longest (~14 mm), D-V shortest (~6 mm) and points
+    #: away from the dorsal array.
+    DEFAULT_ORIENTATION_AXES = [
+        ('A-P (front-back)', (0.0, 1.0, 0.0)),
+        ('L-R (lateral)', (1.0, 0.0, 0.0)),
+        ('D-V (top-bottom)', (0.0, 0.0, 1.0)),
+        ('45deg sagittal (AP-DV)', (0.0, 1.0, 1.0)),
+        ('45deg coronal (LR-DV)', (1.0, 0.0, 1.0)),
+        ('any (isotropic)', None),
     ]
 
     def run_two_dipole_test(
@@ -1138,6 +1221,263 @@ class RobustnessTest:
             },
         }
         self.results['resolvability'] = result
+        return result
+
+    def run_orientation_resolvability_test(
+        self,
+        separations_mm: Optional[List[float]] = None,
+        axes: Optional[List[Tuple[str, Optional[Sequence[float]]]]] = None,
+        noise_types: Optional[List[str]] = None,
+        snr_db: float = 10.0,
+        n_pairs: int = 5,
+        n_trials: int = 12,
+        n_null_trials: Optional[int] = None,
+        amplitude_nAm: float = 50.0,
+        spatial_scale_mm: float = 3.0,
+        temporal_exponent: float = 1.0,
+        separation_tolerance_mm: float = 1.0,
+        angular_tolerance_deg: float = 20.0,
+        saddle_ratio: float = 0.8,
+        prominence_frac: float = 0.5,
+        neighbor_radius_mm: Optional[float] = None,
+        exclude_radius_mm: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Null-corrected resolvability by pair orientation and separation.
+
+        Answers "can we tell two sources apart, and does it depend on their
+        orientation relative to the (dorsal) array?" For each (axis, separation)
+        it measures how often two sources produce two-lobe structure, and
+        subtracts a **position-matched single-source null**: for the very same
+        endpoint positions, how often does ONE source alone already look like two
+        (the false-alarm floor from the ill-posed, smooth inverse). The reported
+        signal is the excess, ``P(two-lobe | two) - P(two-lobe | one)``.
+
+        Both conditions are scored by the identical correspondence-free event
+        :meth:`_detect_two_lobes`, so the subtraction is apples-to-apples. The
+        stricter correspondence-checked ``resolved`` rate is kept as a secondary.
+
+        Parameters
+        ----------
+        separations_mm : list of float, optional
+            Target separations. Default: [2, 4, 6, 8, 10].
+        axes : list of (label, direction), optional
+            Anatomical axes to test. Default: :data:`DEFAULT_ORIENTATION_AXES`
+            (A-P, L-R, D-V, two 45deg diagonals, and an isotropic control).
+        noise_types : list of str, optional
+            Default: all of NOISE_TYPES.
+        snr_db : float, default=10.0
+        n_pairs : int, default=5
+            Pairs per (axis, separation) cell.
+        n_trials : int, default=12
+            Two-source trials per pair.
+        n_null_trials : int, optional
+            Single-source null trials per endpoint position. Defaults to n_trials.
+        amplitude_nAm, spatial_scale_mm, temporal_exponent : float
+            Source and noise parameters.
+        separation_tolerance_mm : float, default=1.0
+        angular_tolerance_deg : float, default=20.0
+            How close a pair's displacement must point to the axis.
+        saddle_ratio, prominence_frac : float
+            Detector parameters (see :meth:`_detect_two_lobes`).
+        neighbor_radius_mm, exclude_radius_mm : float, optional
+            Detector radii; default to 1.5x median grid spacing.
+
+        Returns
+        -------
+        dict
+            ``records`` (per two-source trial), ``null_rate`` (per endpoint
+            position and noise), ``grid`` (per axis/separation/noise: p_two,
+            p_null, excess, p_resolved), ``threshold_separation_mm`` (smallest
+            separation with excess >= 0.25), plus axes/separations/params.
+        """
+        if separations_mm is None:
+            separations_mm = [2.0, 4.0, 6.0, 8.0, 10.0]
+        if axes is None:
+            axes = self.DEFAULT_ORIENTATION_AXES
+        if noise_types is None:
+            noise_types = list(NOISE_TYPES)
+        if n_null_trials is None:
+            n_null_trials = n_trials
+
+        unknown = set(noise_types) - set(NOISE_TYPES)
+        if unknown:
+            raise ValueError(
+                f"Unknown noise types {sorted(unknown)}. Expected {NOISE_TYPES}."
+            )
+
+        pairs_by_cell = self._select_axis_pairs(
+            separations_mm, axes, n_pairs,
+            separation_tolerance_mm=separation_tolerance_mm,
+            angular_tolerance_deg=angular_tolerance_deg
+        )
+
+        detector_kw = dict(
+            neighbor_radius_mm=neighbor_radius_mm,
+            exclude_radius_mm=exclude_radius_mm,
+            saddle_ratio=saddle_ratio,
+            prominence_frac=prominence_frac,
+        )
+        depth = self.source_depths
+
+        # --- position-matched null: two-lobe rate for a SINGLE source at each
+        # endpoint position used by any pair, per noise type. Cached & reused. ---
+        endpoint_indices = sorted({idx for plist in pairs_by_cell.values()
+                                   for pair in plist for idx in pair})
+        if self.verbose:
+            print(f"Running orientation resolvability: {len(axes)} axes x "
+                  f"{len(separations_mm)} separations x {len(noise_types)} noise, "
+                  f"{n_pairs} pairs, {n_trials} trials. "
+                  f"Null: {len(endpoint_indices)} positions x {n_null_trials} trials.")
+
+        null_rate: Dict[str, Dict[int, float]] = {nt: {} for nt in noise_types}
+        null_records: List[Dict[str, Any]] = []
+        for nt in noise_types:
+            for idx in endpoint_indices:
+                fires = 0
+                for trial in range(n_null_trials):
+                    try:
+                        eeg, _ = self.simulator.simulate_dipole(
+                            position_mm=self.source_pos_mm[idx],
+                            amplitude_nAm=amplitude_nAm,
+                            snr_db=snr_db,
+                            noise_mode="snr",
+                            noise_seed=trial * 7919 + idx,
+                            noise_type=nt,
+                            noise_spatial_scale_mm=spatial_scale_mm,
+                            noise_temporal_exponent=temporal_exponent,
+                            duration_s=0.5,
+                            sfreq=256.0
+                        )
+                        lobes = self._detect_two_lobes(self._apply_inverse(eeg),
+                                                       **detector_kw)
+                        fires += int(lobes['detected'])
+                    except Exception as e:
+                        if self.verbose:
+                            warnings.warn(f"Null trial failed: {e}")
+                rate = fires / n_null_trials if n_null_trials else float('nan')
+                null_rate[nt][idx] = rate
+                null_records.append({
+                    'noise_type': nt, 'position_idx': idx,
+                    'depth_mm': float(depth[idx]), 'null_two_lobe_rate': rate,
+                })
+
+        # --- signal: two-source trials per (axis, separation, noise) ---
+        records: List[Dict[str, Any]] = []
+        for nt in noise_types:
+            if self.verbose:
+                print(f"  Noise type = {nt}:")
+            for (label, _direction) in axes:
+                for sep in separations_mm:
+                    cell = pairs_by_cell[(label, sep)]
+                    two_lobe_hits, resolved_hits, n = 0, 0, 0
+                    for pair_i, (idx1, idx2) in enumerate(cell):
+                        pos1 = self.source_pos_mm[idx1]
+                        pos2 = self.source_pos_mm[idx2]
+                        mean_depth = float(0.5 * (depth[idx1] + depth[idx2]))
+                        pair_null = 0.5 * (null_rate[nt][idx1] + null_rate[nt][idx2])
+                        for trial in range(n_trials):
+                            try:
+                                eeg, meta = self.simulator.simulate_two_dipoles(
+                                    position1_mm=pos1, position2_mm=pos2,
+                                    amplitude1_nAm=amplitude_nAm,
+                                    amplitude2_nAm=amplitude_nAm,
+                                    snr_db=snr_db,
+                                    noise_seed=trial * 104729 + pair_i,
+                                    noise_type=nt,
+                                    noise_spatial_scale_mm=spatial_scale_mm,
+                                    noise_temporal_exponent=temporal_exponent,
+                                    duration_s=0.5, sfreq=256.0
+                                )
+                                sa = self._apply_inverse(eeg)
+                                true_pair = np.array([
+                                    meta['dipole1']['actual_position_mm'],
+                                    meta['dipole2']['actual_position_mm'],
+                                ])
+                                lobes = self._detect_two_lobes(sa, **detector_kw)
+                                res = self._resolve_two_sources(
+                                    sa, true_pair,
+                                    neighbor_radius_mm=neighbor_radius_mm,
+                                    exclude_radius_mm=exclude_radius_mm,
+                                    saddle_ratio=saddle_ratio,
+                                    prominence_frac=prominence_frac
+                                )
+                                two_lobe_hits += int(lobes['detected'])
+                                resolved_hits += int(res['resolved'])
+                                n += 1
+                                records.append({
+                                    'noise_type': nt, 'axis': label,
+                                    'separation_mm': float(sep),
+                                    'mean_depth_mm': mean_depth,
+                                    'depth1_mm': float(depth[idx1]),
+                                    'depth2_mm': float(depth[idx2]),
+                                    'two_lobe': bool(lobes['detected']),
+                                    'resolved': bool(res['resolved']),
+                                    'pair_null_rate': float(pair_null),
+                                })
+                            except Exception as e:
+                                if self.verbose:
+                                    warnings.warn(f"Trial failed: {e}")
+                    if self.verbose and n:
+                        p_two = two_lobe_hits / n
+                        cell_null = float(np.mean([r['pair_null_rate'] for r in records
+                                                   if r['noise_type'] == nt
+                                                   and r['axis'] == label
+                                                   and r['separation_mm'] == sep]))
+                        print(f"    {label:<24} sep {sep:>4.1f} mm: "
+                              f"two-lobe {p_two*100:4.0f}%  null {cell_null*100:4.0f}%  "
+                              f"excess {(p_two-cell_null)*100:+4.0f}%  (n={n})")
+
+        # --- aggregate grid + thresholds ---
+        grid: Dict[str, Dict[str, Dict[str, Dict[str, Optional[float]]]]] = {}
+        threshold: Dict[str, Dict[str, Optional[float]]] = {}
+        sorted_seps = sorted(separations_mm)
+        for nt in noise_types:
+            grid[nt] = {}
+            threshold[nt] = {}
+            for (label, _d) in axes:
+                grid[nt][label] = {}
+                for sep in sorted_seps:
+                    cell = [r for r in records if r['noise_type'] == nt
+                            and r['axis'] == label and r['separation_mm'] == sep]
+                    if not cell:
+                        grid[nt][label][f"{sep:.1f}"] = {
+                            'p_two': None, 'p_null': None, 'excess': None,
+                            'p_resolved': None, 'n': 0}
+                        continue
+                    p_two = float(np.mean([r['two_lobe'] for r in cell]))
+                    p_null = float(np.mean([r['pair_null_rate'] for r in cell]))
+                    p_res = float(np.mean([r['resolved'] for r in cell]))
+                    grid[nt][label][f"{sep:.1f}"] = {
+                        'p_two': p_two, 'p_null': p_null, 'excess': p_two - p_null,
+                        'p_resolved': p_res, 'n': len(cell)}
+                # threshold = smallest separation with excess >= 0.25
+                thr = None
+                for sep in sorted_seps:
+                    cellv = grid[nt][label][f"{sep:.1f}"]
+                    if cellv['excess'] is not None and cellv['excess'] >= 0.25:
+                        thr = float(sep)
+                        break
+                threshold[nt][label] = thr
+
+        result = {
+            'records': records,
+            'null_records': null_records,
+            'null_rate': {nt: {str(k): v for k, v in d.items()}
+                          for nt, d in null_rate.items()},
+            'grid': grid,
+            'threshold_separation_mm': threshold,
+            'axes': [label for (label, _d) in axes],
+            'separations_mm': list(separations_mm),
+            'noise_types': list(noise_types),
+            'params': {
+                'snr_db': snr_db, 'n_pairs': n_pairs, 'n_trials': n_trials,
+                'n_null_trials': n_null_trials, 'angular_tolerance_deg': angular_tolerance_deg,
+                'saddle_ratio': saddle_ratio, 'prominence_frac': prominence_frac,
+                'excess_threshold': 0.25,
+            },
+        }
+        self.results['orientation_resolvability'] = result
         return result
 
     def run_snr_test(

@@ -22,6 +22,7 @@ class _StubTest:
     _find_two_peaks_and_errors = RobustnessTest._find_two_peaks_and_errors
     _select_dipole_pairs = RobustnessTest._select_dipole_pairs
     _select_depth_matched_pairs = RobustnessTest._select_depth_matched_pairs
+    _select_axis_pairs = RobustnessTest._select_axis_pairs
     _select_test_positions = RobustnessTest._select_test_positions
 
     def __init__(self, source_pos_mm, source_depths=None):
@@ -206,6 +207,65 @@ def test_depth_matched_pairs_empty_cell_when_unsatisfiable(depth_grid):
         separation_tolerance_mm=0.5, depth_tolerance_mm=0.5
     )
     assert pairs[('shallow', 50.0)] == []
+
+
+# ---- axis-oriented pair selection ----------------------------------------
+
+@pytest.fixture
+def cube_grid():
+    """A 3D lattice so pairs can be oriented along any axis."""
+    xs = np.arange(0, 11, 2.0)
+    pos = np.array([[x, y, z] for x in xs for y in xs for z in xs], dtype=float)
+    return _StubTest(pos)
+
+
+def test_axis_pairs_are_oriented_along_requested_axis(cube_grid):
+    """A-P (y) pairs must displace mainly in y; L-R (x) pairs mainly in x."""
+    axes = [('AP', (0, 1, 0)), ('LR', (1, 0, 0)), ('DV', (0, 0, 1))]
+    pairs = cube_grid._select_axis_pairs(
+        [4.0], axes, n_pairs=8,
+        separation_tolerance_mm=0.5, angular_tolerance_deg=15.0)
+    axis_col = {'AP': 1, 'LR': 0, 'DV': 2}
+    for (label, sep), plist in pairs.items():
+        assert plist, f"no pairs for {label}"
+        col = axis_col[label]
+        for i, j in plist:
+            disp = np.abs(cube_grid.source_pos_mm[i] - cube_grid.source_pos_mm[j])
+            # displacement concentrated on the axis's own coordinate
+            assert disp[col] == pytest.approx(np.linalg.norm(disp), abs=0.6)
+            assert np.linalg.norm(disp) == pytest.approx(sep, abs=0.5)
+
+
+def test_axis_pairs_none_direction_is_isotropic():
+    """A None direction accepts pairs in any orientation.
+
+    Uses an irregular (jittered) grid: on a perfectly axis-aligned lattice the
+    deterministic nearest-separation tiebreak would always land on one axis,
+    which is a fixture artifact, not the behavior on the real source grid.
+    """
+    xs = np.arange(0, 11, 2.0)
+    base = np.array([[x, y, z] for x in xs for y in xs for z in xs], dtype=float)
+    jitter = (np.sin(np.arange(base.size)).reshape(base.shape)) * 0.4
+    stub = _StubTest(base + jitter)
+    pairs = stub._select_axis_pairs(
+        [4.0], [('any', None)], n_pairs=20, separation_tolerance_mm=0.8)
+    plist = pairs[('any', 4.0)]
+    assert len(plist) >= 5
+    disps = np.array([np.abs(stub.source_pos_mm[i] - stub.source_pos_mm[j])
+                      for i, j in plist])
+    dominant_axis = disps.argmax(axis=1)
+    assert len(set(dominant_axis.tolist())) > 1  # orientations genuinely mix
+
+
+def test_axis_pairs_angular_tolerance_excludes_off_axis(cube_grid):
+    """A tight angular tolerance along y must reject diagonal displacements."""
+    pairs = cube_grid._select_axis_pairs(
+        [4.0], [('AP', (0, 1, 0))], n_pairs=20,
+        separation_tolerance_mm=0.5, angular_tolerance_deg=10.0)
+    for i, j in pairs[('AP', 4.0)]:
+        disp = cube_grid.source_pos_mm[j] - cube_grid.source_pos_mm[i]
+        cos_ang = abs(disp[1]) / np.linalg.norm(disp)
+        assert cos_ang >= np.cos(np.deg2rad(10.0)) - 1e-9
 
 
 # ---- resolvability detector ----------------------------------------------
