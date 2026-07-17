@@ -27,6 +27,8 @@ import numpy as np
 import mne
 from typing import Tuple, Optional, Dict
 
+from .noise import generate_noise
+
 __all__ = ['DipoleSimulator']
 
 
@@ -106,11 +108,33 @@ class DipoleSimulator:
         # Get source positions
         self.source_positions = self._get_source_positions()
 
+        # Electrode positions, for spatially-correlated noise generation
+        self.electrode_positions_mm = self._get_electrode_positions()
+
         if self.verbose:
             print(f"DipoleSimulator initialized:")
             print(f"  Channels: {self.n_channels}")
             print(f"  Sources: {self.n_dipoles}")
             print(f"  Source positions shape: {self.source_positions.shape}")
+
+    def _get_electrode_positions(self) -> Optional[np.ndarray]:
+        """
+        Extract electrode positions from info, in mm.
+
+        Returns None if positions are unavailable or degenerate (all-zero or
+        NaN ``loc`` fields), in which case spatially-correlated noise cannot be
+        generated and requesting it raises.
+        """
+        positions_m = np.array([ch['loc'][:3] for ch in self.info['chs']])
+
+        if positions_m.shape[0] != self.n_channels:
+            return None
+        if not np.isfinite(positions_m).all():
+            return None
+        if np.allclose(positions_m, 0):
+            return None
+
+        return positions_m * 1000  # m to mm
 
     def _get_source_positions(self) -> np.ndarray:
         """
@@ -151,7 +175,10 @@ class DipoleSimulator:
         snr_db: float = 10.0,
         noise_seed: Optional[int] = None,
         noise_mode: str = "snr",
-        noise_variance_uV2: float = 1.0
+        noise_variance_uV2: float = 1.0,
+        noise_type: str = "white",
+        noise_spatial_scale_mm: float = 3.0,
+        noise_temporal_exponent: float = 1.0
     ) -> Tuple[np.ndarray, Dict]:
         """
         Simulate EEG from a single dipole source.
@@ -184,6 +211,16 @@ class DipoleSimulator:
         noise_variance_uV2 : float, default=1.0
             Noise variance in µV² (used when noise_mode="fixed_variance").
             Typical EEG sensor noise: 0.1-10 µV²
+        noise_type : {'white', 'spatial', 'temporal', 'colored'}, default='white'
+            Noise structure. 'white' satisfies the scaled-identity noise
+            assumption in the inverse and gives best-case performance;
+            'colored' (spatially correlated + 1/f) violates it and gives a
+            realistic lower bound. See :mod:`source_localization.validation.noise`.
+            Independent of noise_mode, which controls noise *level*.
+        noise_spatial_scale_mm : float, default=3.0
+            Correlation length in mm for spatially-correlated noise types.
+        noise_temporal_exponent : float, default=1.0
+            Spectral exponent for 1/f-shaped noise types (1.0 = pink).
 
         Returns
         -------
@@ -247,9 +284,15 @@ class DipoleSimulator:
         # Generate clean EEG using forward model
         eeg_clean = self.leadfield @ dipole_moment
 
-        # Add realistic noise
+        # Add realistic noise (unit variance; scaled to target SNR below)
         rng = np.random.RandomState(noise_seed)
-        noise = rng.randn(self.n_channels, n_times)
+        noise = generate_noise(
+            self.n_channels, n_times, rng,
+            noise_type=noise_type,
+            electrode_positions_mm=self.electrode_positions_mm,
+            spatial_scale_mm=noise_spatial_scale_mm,
+            temporal_exponent=noise_temporal_exponent
+        )
 
         # Calculate signal power
         signal_power = np.mean(eeg_clean ** 2)
@@ -300,7 +343,14 @@ class DipoleSimulator:
             'noise_power_added': float(noise_power_added),
             'actual_snr_db': actual_snr_db,
             'noise_mode': noise_mode,
-            'noise_variance_uV2': noise_variance_uV2 if noise_mode == "fixed_variance" else None
+            'noise_variance_uV2': noise_variance_uV2 if noise_mode == "fixed_variance" else None,
+            'noise_type': noise_type,
+            'noise_spatial_scale_mm': (
+                noise_spatial_scale_mm if noise_type in ('spatial', 'colored') else None
+            ),
+            'noise_temporal_exponent': (
+                noise_temporal_exponent if noise_type in ('temporal', 'colored') else None
+            )
         }
 
         if self.verbose:
@@ -316,6 +366,7 @@ class DipoleSimulator:
                 print(f"  Achieved SNR: {actual_snr_db:.2f} dB")
             else:
                 print(f"  SNR: {snr_db} dB (actual: {actual_snr_db:.2f} dB)")
+            print(f"  Noise type: {noise_type}")
 
         return eeg_data, metadata
 
@@ -458,9 +509,19 @@ class DipoleSimulator:
         duration_s = kwargs.get('duration_s', 1.0)
         sfreq = kwargs.get('sfreq', 500.0)
 
+        noise_type = kwargs.get('noise_type', 'white')
+        noise_spatial_scale_mm = kwargs.get('noise_spatial_scale_mm', 3.0)
+        noise_temporal_exponent = kwargs.get('noise_temporal_exponent', 1.0)
+
         n_times = int(duration_s * sfreq)
         rng = np.random.RandomState(noise_seed)
-        noise = rng.randn(self.n_channels, n_times)
+        noise = generate_noise(
+            self.n_channels, n_times, rng,
+            noise_type=noise_type,
+            electrode_positions_mm=self.electrode_positions_mm,
+            spatial_scale_mm=noise_spatial_scale_mm,
+            temporal_exponent=noise_temporal_exponent
+        )
 
         signal_power = np.mean(eeg_clean ** 2)
         noise_power = np.mean(noise ** 2)
@@ -480,7 +541,8 @@ class DipoleSimulator:
             'separation_mm': float(separation_mm),
             'snr_db': snr_db,
             'signal_power': float(signal_power),
-            'noise_power_added': float(noise_scale ** 2 * noise_power)
+            'noise_power_added': float(noise_scale ** 2 * noise_power),
+            'noise_type': noise_type
         }
 
         if self.verbose:
