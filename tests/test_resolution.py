@@ -6,6 +6,8 @@ source grid and a PSF vector, so they're tested here without one. These pin the
 behavior the resolution map depends on: a sharp PSF disperses less than a broad
 one, a shifted peak reports localization error, and depth aggregation is correct.
 """
+import json
+
 import numpy as np
 import pytest
 
@@ -16,12 +18,28 @@ class _StubResolution:
     """ResolutionAnalysis metric methods over a hand-placed source grid."""
     psf_metrics = ResolutionAnalysis.psf_metrics
     summarize_by_depth = ResolutionAnalysis.summarize_by_depth
+    resolution_vs_snr = ResolutionAnalysis.resolution_vs_snr
+    summarize_vs_snr_by_depth = ResolutionAnalysis.summarize_vs_snr_by_depth
     DEFAULT_DEPTH_BINS = ResolutionAnalysis.DEFAULT_DEPTH_BINS
+    DEFAULT_SNR_VALUES = ResolutionAnalysis.DEFAULT_SNR_VALUES
 
     def __init__(self, source_pos_mm, source_depths):
         self.source_pos_mm = np.asarray(source_pos_mm, float)
         self.n_sources = self.source_pos_mm.shape[0]
         self.source_depths = np.asarray(source_depths, float)
+        self.verbose = False
+        self.calls = []  # (source_idx, snr_db, noise_seed) per _reconstruct
+
+    def _reconstruct(self, source_idx, orientation, snr_db=np.inf,
+                     noise_seed=0, noise_type='white'):
+        """Stand-in operator: a clean peak plus a trial-dependent far speckle."""
+        self.calls.append((source_idx, snr_db, noise_seed))
+        psf = _gauss_psf(self, self.source_pos_mm[source_idx, 0], 0.8)
+        if np.isfinite(snr_db):
+            # Speckle hops around with the seed, as sensor noise would.
+            psf = psf.copy()
+            psf[noise_seed % self.n_sources] += 0.9
+        return psf
 
 
 @pytest.fixture
@@ -68,6 +86,65 @@ def test_dispersion_measured_from_true_not_peak(line):
     centered = line.psf_metrics(true_idx, psf=_gauss_psf(line, 5.0, 1.0))
     offset = line.psf_metrics(true_idx, psf=_gauss_psf(line, 8.0, 1.0))
     assert offset['spatial_dispersion_mm'] > centered['spatial_dispersion_mm']
+
+
+def test_peak_contrast_flags_a_flat_psf(line):
+    """A flat PSF's argmax is arbitrary; contrast ~1 is what says so."""
+    sharp = line.psf_metrics(10, psf=_gauss_psf(line, 5.0, 0.5))
+    flat = line.psf_metrics(10, psf=np.ones(line.n_sources))
+    assert flat['peak_contrast'] == pytest.approx(1.0)
+    assert sharp['peak_contrast'] > 5.0
+
+
+def test_noise_free_snr_runs_a_single_trial(line):
+    """snr=inf is deterministic, so spending n_trials solves on it is waste."""
+    line.resolution_vs_snr(snr_values=[10.0, np.inf], source_indices=[10],
+                           n_trials=6)
+    finite = [c for c in line.calls if np.isfinite(c[1])]
+    noise_free = [c for c in line.calls if not np.isfinite(c[1])]
+    assert len(finite) == 6
+    assert len(noise_free) == 1
+
+
+def test_each_trial_gets_a_distinct_seed(line):
+    line.resolution_vs_snr(snr_values=[0.0, 10.0], source_indices=[8, 12],
+                           n_trials=5)
+    seeds = [c[2] for c in line.calls]
+    assert len(set(seeds)) == len(seeds)  # no accidental seed collisions
+
+
+def test_dispersion_uses_trial_averaged_map(line):
+    """Averaging maps before SD suppresses noise speckle; per-trial SD doesn't."""
+    true_idx = 10
+    sweep = line.resolution_vs_snr(snr_values=[10.0], source_indices=[true_idx],
+                                   n_trials=20)
+    averaged_sd = sweep['spatial_dispersion_mm'][0, 0]
+
+    # SD of one noisy trial, for comparison — inflated by the far speckle.
+    single = line._reconstruct(true_idx, np.array([1.0, 0.0, 0.0]), snr_db=10.0,
+                               noise_seed=0)
+    single_sd = line.psf_metrics(true_idx, psf=single / single.max())[
+        'spatial_dispersion_mm']
+    clean_sd = line.psf_metrics(true_idx, psf=_gauss_psf(line, 5.0, 0.8))[
+        'spatial_dispersion_mm']
+
+    assert averaged_sd < single_sd
+    assert averaged_sd == pytest.approx(clean_sd, abs=0.2)
+
+
+def test_ple_iqr_zero_when_peak_is_stable(line):
+    """The stub's speckle never outgrows the true peak, so PLE shouldn't wander."""
+    sweep = line.resolution_vs_snr(snr_values=[10.0], source_indices=[10],
+                                   n_trials=8)
+    assert sweep['ple_median_mm'][0, 0] == pytest.approx(0.0)
+    assert sweep['ple_iqr_mm'][0, 0] == pytest.approx(0.0)
+
+
+def test_vs_snr_summary_is_json_friendly(line):
+    sweep = line.resolution_vs_snr(snr_values=[10.0, np.inf], n_trials=2)
+    summ = line.summarize_vs_snr_by_depth(sweep)
+    assert set(summ['deep']['by_snr']) == {'10.0', 'inf'}
+    json.dumps(summ)  # raises if numpy scalars leaked through
 
 
 def test_summarize_by_depth_orders_bins(line):

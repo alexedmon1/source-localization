@@ -125,6 +125,7 @@ def main():
         'overall': {
             'median_ple_mm': float(np.nanmedian(m['peak_localization_error_mm'])),
             'median_sd_mm': float(np.nanmedian(m['spatial_dispersion_mm'])),
+            'median_peak_contrast': float(np.nanmedian(m['peak_contrast'])),
         },
         'by_depth': summ,
         'per_source': {
@@ -132,6 +133,7 @@ def main():
             'depth_mm': m['depth_mm'].tolist(),
             'peak_localization_error_mm': m['peak_localization_error_mm'].tolist(),
             'spatial_dispersion_mm': m['spatial_dispersion_mm'].tolist(),
+            'peak_contrast': m['peak_contrast'].tolist(),
         },
     }
     json_path = out / 'resolution_map.json'
@@ -143,12 +145,14 @@ def main():
     print("\n" + "=" * 64)
     print(f"RESOLUTION MAP ({args.inverse_method}, noise-free)")
     print("=" * 64)
-    print(f"{'depth bin':>14} {'n':>4} {'median PLE':>11} {'median SD':>10}")
+    print(f"{'depth bin':>14} {'n':>4} {'median PLE':>11} {'median SD':>10} "
+          f"{'peak contrast':>14}")
     for lab in ['very_shallow', 'shallow', 'mid', 'deep']:
         if lab in summ:
             s = summ[lab]
             print(f"{lab:>14} {s['n']:>4} {s['median_ple_mm']:>8.2f}mm "
-                  f"{s['median_sd_mm']:>8.2f}mm")
+                  f"{s['median_sd_mm']:>8.2f}mm {s['median_peak_contrast']:>13.2f}x")
+    print("  (peak contrast ~1 = flat PSF: the peak, and so the PLE, is arbitrary)")
     print(f"\noverall: PLE {payload['overall']['median_ple_mm']:.2f}mm  "
           f"SD {payload['overall']['median_sd_mm']:.2f}mm")
     print(f"Saved: {json_path}\nSaved: {fig_path}")
