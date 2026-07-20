@@ -11,13 +11,16 @@ import json
 import numpy as np
 import pytest
 
-from source_localization.validation.resolution import ResolutionAnalysis
+from source_localization.validation.resolution import (
+    ResolutionAnalysis, _first_stable_separation)
 
 
 class _StubResolution:
     """ResolutionAnalysis metric methods over a hand-placed source grid."""
     psf_metrics = ResolutionAnalysis.psf_metrics
     summarize_by_depth = ResolutionAnalysis.summarize_by_depth
+    summarize_distance_by_depth = ResolutionAnalysis.summarize_distance_by_depth
+    _partners_at = ResolutionAnalysis._partners_at
     resolution_vs_snr = ResolutionAnalysis.resolution_vs_snr
     summarize_vs_snr_by_depth = ResolutionAnalysis.summarize_vs_snr_by_depth
     DEFAULT_DEPTH_BINS = ResolutionAnalysis.DEFAULT_DEPTH_BINS
@@ -145,6 +148,49 @@ def test_vs_snr_summary_is_json_friendly(line):
     summ = line.summarize_vs_snr_by_depth(sweep)
     assert set(summ['deep']['by_snr']) == {'10.0', 'inf'}
     json.dumps(summ)  # raises if numpy scalars leaked through
+
+
+def test_resolution_distance_needs_a_stable_threshold():
+    """One lucky shell must not set the threshold; larger shells must hold too."""
+    seps = [2.0, 3.0, 4.0, 5.0]
+    # Clears at 3 but collapses at 4 -> not a real threshold.
+    assert np.isnan(_first_stable_separation([0.1, 0.6, 0.2, 0.7], seps))
+    # Clears at 3 and stays clear.
+    assert _first_stable_separation([0.1, 0.6, 0.7, 0.8], seps) == 3.0
+    # Never clears.
+    assert np.isnan(_first_stable_separation([0.1, 0.2, 0.3, 0.4], seps))
+
+
+def test_resolution_distance_skips_untested_shells():
+    """A shell with no partners is unknown, not a failure."""
+    seps = [2.0, 3.0, 4.0, 5.0]
+    assert _first_stable_separation([0.1, 0.6, np.nan, 0.7], seps) == 3.0
+
+
+def test_partners_are_selected_at_the_requested_separation(line):
+    # Grid is 0.5 mm spaced along x; source 10 sits at x=5.0.
+    partners = line._partners_at(10, separation_mm=3.0, n_partners=2, tol_mm=0.3)
+    xs = sorted(line.source_pos_mm[p, 0] for p in partners)
+    assert xs == [2.0, 8.0]  # both directions, exactly 3 mm away
+    assert 10 not in partners  # never itself
+
+
+def test_flat_psf_sources_excluded_from_distance_summary(line):
+    """Averaging in locations whose peak is arbitrary would invent a number."""
+    depth = line.source_depths
+    n = len(depth)
+    dmap = {
+        'depth_mm': depth,
+        # Everything "resolves" at 4 mm, but only half the sources are meaningful.
+        'resolution_distance_mm': np.full(n, 4.0),
+        'meaningful': np.arange(n) % 2 == 0,
+        'null_fraction': np.zeros((n, 3)),
+    }
+    summ = line.summarize_distance_by_depth(dmap)
+    for lab, s in summ.items():
+        assert s['median_resolution_distance_mm'] == 4.0
+        assert s['n_unreliable_flat_psf'] > 0
+        assert s['n'] > s['n_unreliable_flat_psf']
 
 
 def test_summarize_by_depth_orders_bins(line):
