@@ -554,15 +554,25 @@ def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
     # reads as low-vs-high confidence, which is backwards: the innermost band is
     # the most probable place for a source. That misreading made the figure look
     # as though localization had failed when it had not.
+    # Label each band by the probability it HOLDS, not by its cumulative level.
+    # A cumulative label ranks backwards against perceived likelihood: the
+    # innermost band reads "50%" and the outermost "90-95%", so the most
+    # probable region looks the least likely. Stating "holds the top 50%" and
+    # "the next 18%" removes the contradiction, because those numbers are
+    # amounts of probability rather than confidence levels.
     edges = [0.0] + levels
     centres = [0.5 * (edges[i] + edges[i + 1]) for i in range(len(levels))]
-    names = ['most probable\n(inner 50%)', '50-68%', '68-90%',
-             '90-95%\n(least probable)']
+    names = []
+    for i in range(len(levels)):
+        share = 100 * (edges[i + 1] - edges[i])
+        names.append(f'holds the top {share:.0f}%' if i == 0
+                     else f'the next {share:.0f}%')
+    names[-1] += '\n(least probable)'
     cb = fig.colorbar(sc, ax=axes, fraction=0.017, pad=0.012, ticks=centres)
-    cb.ax.set_yticklabels(names[:len(centres)], fontsize=8)
-    cb.ax.invert_yaxis()          # most probable at the top
-    cb.set_label('where a source most likely is\n'
-                 'uncoloured = outside the 95% region (effectively excluded)',
+    cb.ax.set_yticklabels(names, fontsize=8)
+    cb.ax.invert_yaxis()          # densest band at the top
+    cb.set_label('nested credible regions, densest first\n'
+                 'uncoloured = the last 5%, spread over the rest of the brain',
                  fontsize=9)
     fig.suptitle(
         'Two sources: up to what credible level do they stay separate blobs?\n'
