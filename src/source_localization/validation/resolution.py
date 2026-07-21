@@ -386,11 +386,26 @@ class ResolutionAnalysis(RobustnessTest):
         separation_mm: float,
         n_partners: int,
         tol_mm: float,
+        depth_match_mm: Optional[float] = None,
     ) -> List[int]:
-        """Sources sitting ``separation_mm`` away, closest-to-exact first."""
+        """
+        Sources sitting ``separation_mm`` away, closest-to-exact first.
+
+        ``depth_match_mm`` restricts partners to comparable depth. This matters
+        more than it looks: gain falls off steeply with depth, so two
+        equal-strength dipoles at different depths reconstruct with very unequal
+        amplitude (mean ratio 0.38 for unrestricted partners vs 0.71 when matched
+        to +-0.4 mm). Unmatched pairs therefore fail a threshold test because the
+        weaker source drops out, which is a gain effect masquerading as a
+        resolution limit. Pass a tolerance to isolate the resolution question.
+        """
         d = np.linalg.norm(self.source_pos_mm - self.source_pos_mm[source_idx], axis=1)
         cand = np.where(np.abs(d - separation_mm) <= tol_mm)[0]
         cand = cand[cand != source_idx]
+        if depth_match_mm is not None:
+            depth_gap = np.abs(self.source_depths[cand]
+                               - self.source_depths[source_idx])
+            cand = cand[depth_gap <= depth_match_mm]
         return cand[np.argsort(np.abs(d[cand] - separation_mm))][:n_partners].tolist()
 
     def resolution_distance(
