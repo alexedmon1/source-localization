@@ -23,7 +23,7 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
-__all__ = ['interpolate_to_grid', 'render_activation_cloud']
+__all__ = ['interpolate_to_grid', 'render_activation_cloud', 'sample_on_plane']
 
 #: Opacity transfer function. Deliberately convex: high activation renders
 #: nearly solid while the low tail stays faint but visible, which is what makes
@@ -138,6 +138,100 @@ def interpolate_to_grid(
     # VTK point arrays are Fortran-ordered relative to (nx, ny, nz) indexing.
     grid.point_data['activation'] = field.ravel(order='F')
     return grid
+
+
+def sample_on_plane(
+    positions_mm: np.ndarray,
+    values: np.ndarray,
+    center_mm: np.ndarray,
+    e1: np.ndarray,
+    e2: np.ndarray,
+    half_extent_mm: float = 8.0,
+    n: int = 220,
+    sigma_mm: Optional[float] = None,
+    reference_peak: Optional[float] = None,
+):
+    """
+    Sample the activation field on an arbitrary plane, for 2D cross-sections.
+
+    Kernel-weighted **average** (Gaussian Nadaraya-Watson), not the weighted sum
+    used by :func:`interpolate_to_grid`. The difference matters whenever the
+    slice is used to *verify* a threshold rather than just look good: a sum is
+    density-weighted, so a cluster of moderate sources can out-total a single
+    sharp peak. Sampling the real data that way put the plane's maximum on a
+    dense patch and rendered the map's actual global peak at 0.40 of it, which
+    made drawn contours disagree with the thresholds the metrics use. An average
+    reproduces each source's own value at its own location, so a contour at 50%
+    really is the 50% contour.
+
+    Pass ``reference_peak`` (normally ``activation.max()``, the same peak the
+    separability metrics normalize by) so the returned field is in units of
+    "fraction of map peak" and the drawn contour matches the metric exactly.
+    Without it the field is normalized to its own in-plane maximum, which is only
+    correct when the plane happens to contain the global peak.
+
+    Parameters
+    ----------
+    positions_mm : ndarray, shape (n_src, 3)
+    values : ndarray, shape (n_src,)
+    center_mm : ndarray, shape (3,)
+        Plane origin (e.g. the midpoint of two sources).
+    e1, e2 : ndarray, shape (3,)
+        In-plane basis vectors; orthonormalized here.
+    half_extent_mm : float
+        Half-width of the sampled square.
+    n : int
+        Samples per side.
+    sigma_mm : float, optional
+        Splat width; defaults to median nearest-neighbour source spacing.
+
+    Returns
+    -------
+    field : ndarray, shape (n, n)
+        Activation on the plane, normalized to its own peak.
+    coords : ndarray, shape (n,)
+        Axis coordinates in mm, relative to ``center_mm`` (same for both axes).
+    """
+    from scipy.spatial import cKDTree
+
+    pos = np.asarray(positions_mm, float)
+    vals = np.clip(np.asarray(values, float), 0, None)
+
+    if sigma_mm is None:
+        d, _ = cKDTree(pos).query(pos, k=2)
+        sigma_mm = float(np.median(d[:, 1]))
+
+    e1 = np.asarray(e1, float)
+    e1 = e1 / np.linalg.norm(e1)
+    e2 = np.asarray(e2, float)
+    e2 = e2 - np.dot(e2, e1) * e1
+    e2 = e2 / np.linalg.norm(e2)
+
+    t = np.linspace(-half_extent_mm, half_extent_mm, n)
+    uu, vv = np.meshgrid(t, t, indexing='xy')
+    pts = (np.asarray(center_mm, float)[None, :]
+           + uu.ravel()[:, None] * e1[None, :]
+           + vv.ravel()[:, None] * e2[None, :])
+
+    # Gaussian-weighted average over sources within 3 sigma.
+    field = np.zeros(pts.shape[0])
+    tree = cKDTree(pos)
+    neighbours = tree.query_ball_point(pts, r=3.0 * sigma_mm)
+    for k, idx in enumerate(neighbours):
+        if not idx:
+            continue
+        idx = np.asarray(idx)
+        d2 = np.sum((pos[idx] - pts[k]) ** 2, axis=1)
+        w = np.exp(-d2 / (2.0 * sigma_mm ** 2))
+        wsum = w.sum()
+        if wsum > 0:
+            field[k] = float(np.dot(vals[idx], w) / wsum)
+
+    field = field.reshape(n, n)
+    peak = reference_peak if reference_peak is not None else field.max()
+    if peak and peak > 0:
+        field = field / peak
+    return field, t
 
 
 def render_activation_cloud(
