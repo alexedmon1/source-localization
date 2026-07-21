@@ -441,6 +441,8 @@ def series_data(ts, dp, idx_pool, seed, out_npz,
         pairs.append(chosen)
 
     marg = np.zeros((len(snrs), len(separations), dp.n_positions))
+    dens_a = np.zeros_like(marg)
+    dens_b = np.zeros_like(marg)
     meta = np.full((len(snrs), len(separations), 5), np.nan)  # a,b,bf,postsep,truesep
 
     for r, snr in enumerate(snrs):
@@ -464,6 +466,26 @@ def series_data(ts, dp, idx_pool, seed, out_npz,
                                          np.random.default_rng(seed + 17 * r))
             res = ts.analyze(data, sig)
             marg[r, c] = ts.marginal_density(res['joint']) / 2.0
+            # Split the joint mass between the two sources. The pooled marginal
+            # cannot answer "how sure are we about THIS source" — its regions
+            # are shared, so one source can own the entire innermost band. For
+            # each candidate pair, assign its two locations to the two true
+            # sources by whichever pairing is closer overall, then accumulate.
+            # This uses the known truth, which is legitimate for validation and
+            # is what makes a per-source statement possible at all.
+            j = res['joint']
+            di_a = np.linalg.norm(pos[ts.pair_i] - pos[a], axis=1)
+            di_b = np.linalg.norm(pos[ts.pair_i] - pos[b], axis=1)
+            dj_a = np.linalg.norm(pos[ts.pair_j] - pos[a], axis=1)
+            dj_b = np.linalg.norm(pos[ts.pair_j] - pos[b], axis=1)
+            straight = (di_a + dj_b) <= (di_b + dj_a)
+            idx_a = np.where(straight, ts.pair_i, ts.pair_j)
+            idx_b = np.where(straight, ts.pair_j, ts.pair_i)
+            pa = np.zeros(dp.n_positions); pb = np.zeros(dp.n_positions)
+            np.add.at(pa, idx_a, j)
+            np.add.at(pb, idx_b, j)
+            dens_a[r, c] = pa / max(pa.sum(), 1e-300)
+            dens_b[r, c] = pb / max(pb.sum(), 1e-300)
             meta[r, c] = [a, b, res['log10_bayes_factor'],
                           res['median_separation_mm'],
                           float(np.linalg.norm(pos[a] - pos[b]))]
@@ -472,6 +494,7 @@ def series_data(ts, dp, idx_pool, seed, out_npz,
     out_npz = Path(out_npz)
     out_npz.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_npz, marginal=marg, meta=meta,
+                        density_a=dens_a, density_b=dens_b,
                         snrs=np.asarray(snrs, float),
                         separations=np.asarray(separations, float),
                         positions_mm=dp.positions_mm,
@@ -479,34 +502,44 @@ def series_data(ts, dp, idx_pool, seed, out_npz,
     return out_npz
 
 
-def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
-    """
-    Draw the separation x SNR series from cached data — no recomputation.
+def _containment_radius(density, positions, centre, level):
+    """Radius around ``centre`` holding ``level`` of this source's probability."""
+    import numpy as np
+    d = np.linalg.norm(positions - centre, axis=1)
+    order = np.argsort(d)
+    cum = np.cumsum(density[order])
+    total = cum[-1]
+    if total <= 0:
+        return np.nan
+    k = int(np.searchsorted(cum, level * total))
+    return float(d[order[min(k, len(d) - 1)]])
 
-    Colour is the credible BAND a voxel falls in, not the density. A density
-    colour axis cannot work for both ends of this figure: linear makes a sharply
-    peaked posterior (+20 dB) collapse to one invisible voxel, and log makes the
-    numbers meaningless. Bands are genuine probability, always non-empty however
-    peaked the posterior, and read the intuitive way — innermost = most likely.
+
+def fig_series(dp, npz_path, out_path, levels=(0.5, 0.95)):
+    """
+    Per-source answer: within how many mm, with what probability?
+
+    Replaces the nested-credible-band map, which coloured the POOLED marginal
+    over both sources. Those bands are shared between the two sources, so one
+    source could own the entire innermost band while the other had none, and at
+    low SNR a bimodal density's regions fragment into scattered patches. It was
+    a correct picture of the wrong object, and unreadable as a statement about
+    either source.
+
+    Here the joint mass is split between the two sources first (see
+    series_data), and each source gets the only thing that answers the question
+    directly: the radius around it containing 50% and 95% of its own probability.
     """
     import numpy as np
-    from matplotlib.colors import ListedColormap, BoundaryNorm
 
     z = np.load(npz_path)
-    marg, meta = z['marginal'], z['meta']
-    snrs, seps = z['snrs'], z['separations']
-    pos = z['positions_mm']
-    radius = 1.6 * float(z['spacing_mm'])
-
-    levels = list(level_grid)
-    shades = ['#fde725', '#5ec962', '#21918c', '#3b528b']   # inner -> outer
-    cmap = ListedColormap(shades)
-    norm = BoundaryNorm([0] + levels, cmap.N)
+    meta, snrs, seps, pos = z['meta'], z['snrs'], z['separations'], z['positions_mm']
+    dens = (z['density_a'], z['density_b'])
 
     fig, axes = plt.subplots(len(snrs), len(seps),
                              figsize=(3.05 * len(seps), 3.35 * len(snrs)))
     axes = np.atleast_2d(axes)
-    sc = None
+    colours = ('#0072B2', '#D55E00')
 
     for r in range(len(snrs)):
         for c in range(len(seps)):
@@ -517,84 +550,61 @@ def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
                         va='center', fontsize=8, color='#888888',
                         transform=ax.transAxes)
                 continue
-            a, b = int(meta[r, c, 0]), int(meta[r, c, 1])
-            lvl = _credible_level_map(marg[r, c])
-            best_L, verdict = _max_separating_level(dp, lvl, a, b, radius)
+            idx = (int(meta[r, c, 0]), int(meta[r, c, 1]))
+            z0 = 0.5 * (pos[idx[0], 2] + pos[idx[1], 2])
+            ax.scatter(pos[:, 0], pos[:, 1], s=52, marker='s', c='#f2f2f2',
+                       edgecolors='none', zorder=0)
+            _draw_head(ax, dp, z0)
 
-            # Draw EVERY in-brain voxel, sub-threshold ones in pale grey.
-            # Leaving them white made two different things look identical: a
-            # voxel that is inside the brain but outside the 95% region, and a
-            # location that is not brain at all. At +20 dB only ~2 of 522
-            # voxels are coloured, so almost the whole panel was white and read
-            # as "nothing computed here" rather than "ruled out".
-            shown = lvl <= levels[-1]
-            ax.scatter(pos[~shown, 0], pos[~shown, 1], s=58, marker='s',
-                       c='#ececec', edgecolors='none', zorder=0)
-            sc = ax.scatter(pos[shown, 0], pos[shown, 1], c=lvl[shown], s=58,
-                            marker='s', cmap=cmap, norm=norm, edgecolors='none',
-                            zorder=1)
-            _draw_head(ax, dp, 0.5 * (pos[a, 2] + pos[b, 2]))
-            for p_ in (pos[a], pos[b]):
-                ax.plot(p_[0], p_[1], marker='+', ms=13, mew=2.4,
-                        color='#FF2D95', zorder=6)
+            # A radius below the grid spacing means the true voxel alone holds
+            # that much mass — the posterior is tighter than the grid can
+            # express. Printing "0.0 mm" for that reads as a broken number, so
+            # report it as the resolution floor instead and mark it dotted.
+            spacing = float(z['spacing_mm'])
+
+            def _fmt(radius):
+                return (f'<{spacing:.0f} mm (grid limit)' if radius < spacing
+                        else f'{radius:.1f} mm')
+
+            lines = []
+            for k, (name, col) in enumerate(zip('AB', colours)):
+                centre = pos[idx[k]]
+                rr = [_containment_radius(dens[k][r, c], pos, centre, L)
+                      for L in levels]
+                for radius, style in zip(rr, ('-', '--')):
+                    sub_grid = radius < spacing
+                    ax.add_patch(plt.Circle(
+                        (centre[0], centre[1]),
+                        max(radius, 0.5 * spacing), fill=False, ec=col, lw=1.6,
+                        ls=(':' if sub_grid else style), zorder=3))
+                ax.plot(centre[0], centre[1], marker='+', ms=13, mew=2.6,
+                        color=col, zorder=4)
+                lines.append(f'{name}: 50% {_fmt(rr[0])}, 95% {_fmt(rr[1])}')
+
             ax.set_aspect('equal')
             ax.set_xlim(-8, 8); ax.set_ylim(-9, 9)
-            ok = best_L is not None
-            ax.set_title(f'{meta[r, c, 4]:.1f} mm  |  {verdict}', fontsize=9,
-                         loc='left', fontweight='bold',
-                         color=('#00790f' if ok else '#b03000'))
-            # State the peak's distance to the nearest true source on every
-            # panel: it is the direct check that the map is centred where it
-            # should be, and it pre-empts reading a broad low-SNR cloud as a
-            # localization failure.
-            pk = pos[int(np.argmax(marg[r, c]))]
-            d_pk = min(float(np.linalg.norm(pk - pos[a])),
-                       float(np.linalg.norm(pk - pos[b])))
-            ax.text(0.03, 0.03,
-                    f'log10 BF {meta[r, c, 2]:+.1f}\npeak {d_pk:.1f} mm from truth',
-                    transform=ax.transAxes, fontsize=7.5,
-                    bbox=dict(fc='white', ec='none', alpha=0.75, pad=1.4))
+            ax.set_title(f'{meta[r, c, 4]:.1f} mm apart', fontsize=9.5,
+                         loc='left', fontweight='bold')
+            ax.text(0.03, 0.03, '\n'.join(lines), transform=ax.transAxes,
+                    fontsize=7.5, va='bottom',
+                    bbox=dict(fc='white', ec='none', alpha=0.8, pad=1.6))
             if c == 0:
                 ax.set_ylabel(f'SNR {snrs[r]:+.0f} dB', fontweight='bold',
                               fontsize=11)
 
-    # Label the bands as INTERVALS, innermost at the top, and never as bare
-    # numbers. A bare "50%" on the innermost band beside "95%" on the outermost
-    # reads as low-vs-high confidence, which is backwards: the innermost band is
-    # the most probable place for a source. That misreading made the figure look
-    # as though localization had failed when it had not.
-    # Label each band by the probability it HOLDS, not by its cumulative level.
-    # A cumulative label ranks backwards against perceived likelihood: the
-    # innermost band reads "50%" and the outermost "90-95%", so the most
-    # probable region looks the least likely. Stating "holds the top 50%" and
-    # "the next 18%" removes the contradiction, because those numbers are
-    # amounts of probability rather than confidence levels.
-    edges = [0.0] + levels
-    centres = [0.5 * (edges[i] + edges[i + 1]) for i in range(len(levels))]
-    names = []
-    for i in range(len(levels)):
-        share = 100 * (edges[i + 1] - edges[i])
-        names.append(f'holds the top {share:.0f}%' if i == 0
-                     else f'the next {share:.0f}%')
-    names[-1] += '\n(least probable)'
-    cb = fig.colorbar(sc, ax=axes, fraction=0.017, pad=0.012, ticks=centres)
-    cb.ax.set_yticklabels(names, fontsize=8)
-    cb.ax.invert_yaxis()          # densest band at the top
-    cb.set_label('nested credible regions, densest first\n'
-                 'grey = in brain, outside the 95% region (holds the last 5%)\n'
-                 'white = outside the brain, never a candidate',
-                 fontsize=9)
     fig.suptitle(
-        'Two sources: up to what credible level do they stay separate blobs?\n'
-        'columns = true separation, rows = SNR.  pink + = true sources.  '
-        '"SEPARATE to X%" = the regions are still two islands at the X% level.',
+        'How well is EACH source located? Solid circle = 50% probability, '
+        'dashed = 95%\n'
+        'blue = source A, orange = source B.  columns = true separation, '
+        'rows = SNR.  Read as: "the source is within this circle, with this '
+        'probability."',
         fontweight='bold', fontsize=12)
-    fig.text(0.5, 0.02,
-             'The verdict here answers a different question from the Bayes factor '
-             '(log10 BF, shown per panel): BF asks whether there is evidence for '
-             'two sources at all, while the verdict asks whether their location '
-             'regions stay separate. A pair can be confidently two sources whose '
-             'positions still overlap.',
+    fig.text(0.5, 0.015,
+             'Radii are measured around each source\'s TRUE position and contain '
+             'that fraction of the probability the model assigns to that source, '
+             'after splitting the joint mass between the two. Dotted = tighter '
+             'than the 1 mm grid can express. Circles larger than the head mean '
+             'the source is not localized at all at that SNR.',
              ha='center', fontsize=8.5, style='italic', color='#555555')
     fig.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
