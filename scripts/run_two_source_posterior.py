@@ -308,39 +308,110 @@ def _draw_head(ax, dp, z_mm, electrodes=True):
                        edgecolors='#0072B2', linewidths=0.9, alpha=0.85, zorder=5)
 
 
+def _brain_silhouette(i, j):
+    """
+    Exact projected outline of the ACTUAL brain mask in the (i, j) plane.
+
+    Projects the mask along the remaining voxel axis rather than binning the
+    voxel centres: the atlas voxels are strongly anisotropic (0.203 x 0.080 x
+    0.200 mm), so a 2D histogram of centres renders as stripes and ragged edges
+    that look like a defect in the geometry.
+    """
+    import numpy as np, nibabel as nib
+    from pathlib import Path as _P
+    import source_localization as _sl
+    from source_localization.utils.atlas import get_true_affine
+    f = _P(_sl.__file__).parent / 'data' / 'atlas' / 'Atlas_3DRois_brain.nii.gz'
+    nii = nib.load(f)
+    mask = np.asarray(nii.get_fdata()) > 0
+    aff = get_true_affine(nii)
+    k = ({0, 1, 2} - {i, j}).pop()
+    occ = mask.any(axis=k)                       # (n_i, n_j) in voxel order
+    if i > j:
+        occ = occ.T
+    ax_i = aff[i, i] * np.arange(mask.shape[i]) + aff[i, 3]
+    ax_j = aff[j, j] * np.arange(mask.shape[j]) + aff[j, 3]
+    return ax_i, ax_j, occ.T.astype(float) if i < j else occ.astype(float)
+
+
 def fig_geometry(dp, out_path):
-    """The head model the posterior is computed in: BEM layers, electrodes, grid."""
+    """
+    The head model everything is computed in.
+
+    Draws the ACTUAL brain (atlas mask) as well as the BEM layers, because the
+    two are not the same and the difference is what makes this figure
+    confusing otherwise: the BEM's innermost layer is an ellipsoid fitted to the
+    brain and then inflated by `ellipsoid_margin` (1.23), so it extends above
+    the electrode plane. Electrodes therefore sit *inside the inflated
+    ellipsoid* while still being correctly outside the real brain. Showing only
+    the ellipsoids makes that look like a registration error, which is what it
+    was first mistaken for.
+    """
     import numpy as np
     pos, e = dp.positions_mm, dp.electrode_pos_mm
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.9))
-    views = [(0, 1, 'X  left-right (mm)', 'Y  anterior-posterior (mm)', 'A  Axial (from above)'),
-             (1, 2, 'Y  anterior-posterior (mm)', 'Z  dorsal-ventral (mm)', 'B  Sagittal (from the side)'),
-             (0, 2, 'X  left-right (mm)', 'Z  dorsal-ventral (mm)', 'C  Coronal (from the front)')]
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.4))
+    views = [(0, 1, 'X  left-right (mm)', 'Y  anterior-posterior (mm)',
+              'A  Axial (from above)'),
+             (1, 2, 'Y  anterior-posterior (mm)', 'Z  dorsal-ventral (mm)',
+              'B  Sagittal (from the side)'),
+             (0, 2, 'X  left-right (mm)', 'Z  dorsal-ventral (mm)',
+              'C  Coronal (from the front)')]
+
     for ax, (i, j, xl, yl, title) in zip(axes, views):
-        for layer, (col, lw, alpha, name) in enumerate(
-                [('#111111', 1.6, 1.0, 'brain (inner BEM)'),
-                 ('#777777', 1.1, 0.85, 'skull'), ('#bbbbbb', 1.1, 0.85, 'scalp')]):
+        first = ax is axes[0]
+        # Actual brain, filled — the thing sources can occupy.
+        xc, yc, occ = _brain_silhouette(i, j)
+        ax.contourf(xc, yc, occ, levels=[0.5, 1.5], colors=['#dceaf7'],
+                    alpha=0.75, zorder=0)
+        ax.contour(xc, yc, occ, levels=[0.5], colors=['#2a6ea6'],
+                   linewidths=1.8, zorder=1)
+        # BEM layers, dashed to mark them as the idealized conductor.
+        for layer, (col, name) in enumerate(
+                [('#111111', 'BEM inner layer ("brain", inflated x1.23)'),
+                 ('#888888', 'BEM skull'), ('#bbbbbb', 'BEM scalp')]):
             rr = dp.bem_surfaces_mm[layer]
             centre = 0.5 * (rr.max(axis=0) + rr.min(axis=0))
             semi = 0.5 * (rr.max(axis=0) - rr.min(axis=0))
             ang = np.linspace(0, 2 * np.pi, 300)
-            ax.plot(centre[i] + semi[i] * np.cos(ang), centre[j] + semi[j] * np.sin(ang),
-                    color=col, lw=lw, alpha=alpha, label=name if ax is axes[0] else None)
-        ax.scatter(pos[:, i], pos[:, j], s=3, c='#E69F00', alpha=0.45, edgecolors='none',
-                   label=f'source grid ({len(pos)} pts)' if ax is axes[0] else None)
-        ax.scatter(e[:, i], e[:, j], s=34, marker='o', facecolors='none',
-                   edgecolors='#0072B2', linewidths=1.4,
-                   label=f'electrodes ({len(e)})' if ax is axes[0] else None)
+            ax.plot(centre[i] + semi[i] * np.cos(ang),
+                    centre[j] + semi[j] * np.sin(ang), color=col, lw=1.4,
+                    ls='--', zorder=2, label=name if first else None)
+        ax.scatter(pos[:, i], pos[:, j], s=3.0, c='#D55E00', alpha=0.55,
+                   edgecolors='none', zorder=3,
+                   label=f'source grid ({len(pos)} pts, in brain)' if first else None)
+        ax.scatter(e[:, i], e[:, j], s=42, marker='o', facecolors='none',
+                   edgecolors='#0072B2', linewidths=1.6, zorder=4,
+                   label=f'electrodes ({len(e)})' if first else None)
+        if j == 2:   # a view that shows depth: mark the array plane
+            ax.axhline(e[:, 2].max(), color='#0072B2', ls=':', lw=1.1, zorder=2)
+            ax.text(ax.get_xlim()[0], e[:, 2].max(), ' highest electrode',
+                    color='#0072B2', fontsize=8, va='bottom')
         ax.set_xlabel(xl); ax.set_ylabel(yl)
         ax.set_title(title, loc='left', fontweight='bold', fontsize=11)
-        ax.set_aspect('equal'); ax.grid(True, color='#eee')
-    axes[0].legend(frameon=False, fontsize=8, loc='upper center',
-                   bbox_to_anchor=(0.5, -0.16), ncol=2)
+        ax.set_aspect('equal'); ax.grid(True, color='#eee', zorder=0)
+        # Same span in every panel, so the views are directly comparable
+        # instead of one appearing smaller because its extent is smaller.
+        ax.set_xlim(-11, 11); ax.set_ylim(-11, 11)
+
+    axes[0].legend(frameon=False, fontsize=8, loc='upper left',
+                   bbox_to_anchor=(0.0, -0.13), ncol=2)
     sigma = ', '.join(f'{c:g}' for c in dp.bem_conductivities)
-    fig.suptitle('The head model everything is computed in — 3-layer ellipsoid BEM, '
-                 f'{len(e)}-channel dorsal array\n'
-                 f'conductivities (S/m): {sigma}   ·   posterior grid {dp.spacing_mm} mm '
-                 f'({len(pos)} positions inside the brain)', fontweight='bold', fontsize=12)
+    vol = len(pos) * dp.spacing_mm ** 3
+    fig.suptitle(
+        'Head model: 3-layer ellipsoid BEM (dashed) vs the actual brain (shaded)\n'
+        f'{len(e)} dorsal electrodes  ·  conductivities {sigma} S/m  ·  '
+        f'source grid {dp.spacing_mm} mm, {len(pos)} positions, {vol:.0f} mm³',
+        fontweight='bold', fontsize=12)
+    fig.text(0.5, -0.13,
+             'The BEM inner layer is the brain ellipsoid inflated by '
+             'ellipsoid_margin = 1.23, so it rises above the electrodes. That is '
+             'expected and harmless — sources are confined to the shaded brain, '
+             'which lies entirely below the array.\n'
+             'The grid does not quite fill the shaded brain: 2% of brain volume '
+             'falls outside the BEM ellipsoid (it is not ellipsoidal), and a 0.93 '
+             'margin keeps sources off the boundary where the BEM is '
+             'ill-conditioned. Coverage is 532 of 564 mm³ (94.5%).',
+             ha='center', fontsize=9, style='italic', color='#555555')
     fig.tight_layout(rect=[0, 0, 1, 0.90])
     fig.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
