@@ -27,12 +27,20 @@ far-field leakage dominates it. A *completely flat* map — zero information —
 scores 5.3–5.7 mm on this geometry. Measured values are 4.5–5.5 mm, i.e.
 **78–96% of the ceiling**:
 
-| depth bin | measured SD | flat-map SD | % of ceiling |
+| depth bin | measured SD | flat-map SD | measured ÷ flat-map |
 |---|---|---|---|
 | very_shallow | 4.49 mm | 5.73 mm | 78% |
 | shallow | 4.83 mm | 5.27 mm | 92% |
 | mid | 5.17 mm | 5.58 mm | 93% |
 | deep | 5.51 mm | 5.74 mm | 96% |
+
+> **The % here is a ratio of two distances, not a probability.** 100% would mean
+> the metric scores exactly what a completely uninformative map scores.
+>
+> **Good = low. Bad = near 100%.** Below ~50% the metric would have real
+> headroom and be reporting something about localization. **Observed 78–96% is
+> bad** — SD is nearly saturated, so almost all of what it reports is the size
+> of the source space. This is a verdict on the *metric*, not on the pipeline.
 
 It has almost no dynamic range, which is why it barely moved with depth or SNR.
 It was largely measuring the size of the source space. **Do not quote it.**
@@ -49,6 +57,18 @@ reaches zero. The plateau height is the depth-dependent part:
 | mid | 0.94 | 0.66 | 0.55 | 0.47 | 8.2 mm |
 | deep | 0.99 | 0.81 | 0.64 | 0.69 | never reaches half |
 
+> **Cells are reconstructed amplitude as a fraction of that map's own peak**
+> (1.00 = the peak), averaged over sources in the depth bin, at the distance
+> from the true source given by the column. They are not probabilities and do
+> not sum to anything.
+>
+> **Good = falls to near 0 within a few mm, and a small half-max radius. Bad =
+> levels off well above 0.** A far-field value of 0.1 would mean activity 8 mm
+> away is clearly distinguishable from the source; 0.7 means it is nearly
+> indistinguishable. **very_shallow (0.25, half-max 2.6 mm) is acceptable; deep
+> (0.69, never reaching half-max) is bad** — a deep source's reconstruction is
+> barely distinguishable from a uniform map.
+
 That pedestal is what defeats both SD and any threshold-free lobe detector.
 
 ### 1.3 Thresholding the reconstruction (SUPERSEDED)
@@ -58,10 +78,19 @@ source map is actually read, and it does remove the pedestal. Blob radius has
 real dynamic range (very_shallow 4.04 mm at a 15% threshold → 0.90 mm at 80%;
 deep 4.11 → 3.84, i.e. never tightens).
 
-But **"25%" is a display setting, not a probability.** Nothing guarantees the
-true source is inside the 25% region 25% of the time — or any other fraction.
-The percentages could not be audited, which is exactly the objection that
-motivated the rest of this document.
+> **"T = 25%" here means a contour drawn at 25% of the reconstruction's peak
+> amplitude.** It is a display setting. Despite reading like the "25% credible
+> region" of §2, the two are unrelated: this one says nothing about how often
+> the source is inside it.
+>
+> There is no good/bad reading available for these numbers, and **that is the
+> finding** — a threshold percentage cannot be audited against ground truth, so
+> there is no basis on which to call any value right or wrong. Section 2 exists
+> to replace it with a quantity that can be.
+
+Nothing guarantees the true source is inside the 25% region 25% of the time — or
+any other fraction. This is exactly the objection that motivated the rest of
+this document.
 
 It also revealed a squeeze that any threshold method faces: at a low threshold
 both sources survive but merge into one blob (90–100% of pairs); at a high
@@ -98,11 +127,30 @@ placed at continuous off-grid positions.
 
 A p% credible region should contain the true source p% of the time. It does:
 
-| SNR | 50% | 68% | 90% | 95% |
+| SNR | asked for 50% | asked for 68% | asked for 90% | asked for 95% |
 |---|---|---|---|---|
-| +10 dB | 63% | 74% | 89% | 95% |
-| 0 dB | 55% | 73% | 88% | 97% |
-| −5 dB | 56% | 73% | 89% | 94% |
+| +10 dB | got 63% | got 74% | got 89% | got 95% |
+| 0 dB | got 55% | got 73% | got 88% | got 97% |
+| −5 dB | got 56% | got 73% | got 89% | got 94% |
+
+> **The header and the cells are different quantities, and the table only means
+> something because they can disagree.**
+> - **Column header** = the *nominal credible level*: the probability mass we
+>   asked the region to contain. A design parameter — we choose it.
+> - **Cell** = the *empirical coverage*: the fraction of simulation trials in
+>   which the true source actually fell inside that region. Measured, over 200
+>   trials per cell (sampling error ≈ ±3 percentage points).
+>
+> **Good = cell matches header. Bad = cell below header.** Below is the
+> dangerous direction: it means the region is too small and the stated
+> confidence is a lie (asking for 90% but being right 60% of the time). Above
+> the header is merely wasteful — the region is larger than it needed to be, so
+> claims are weaker than they could be but not wrong.
+>
+> Agreement is the claim being made. **Observed: good** — every cell is within
+> a few points of its header, erring high. For the *profile* likelihood they
+> disagreed badly — asked for 68%, got 53% — which is what over-confidence
+> looks like and why the marginal version is used instead.
 
 Slightly conservative (regions a little larger than strictly needed), which is
 the safe direction. **Marginalizing the dipole moment is what buys this** —
@@ -114,13 +162,31 @@ discretization, not a modelling error.
 
 Pooled over random positions and orientations (brain volume ≈ 753 mm³):
 
-| SNR | 50% region | 95% region | 95% equiv. radius | % of brain |
+| SNR | 50% region | 95% region | 95% equiv. radius | 95% region as % of brain |
 |---|---|---|---|---|
 | +20 dB | 0.4 mm³ | 2.4 mm³ | 0.83 mm | 0.3% |
 | +10 dB | 8.8 mm³ | 80.3 mm³ | 2.68 mm | 10.7% |
 | +5 dB | 26.2 mm³ | 191.4 mm³ | 3.57 mm | 25.4% |
 | 0 dB | 58.9 mm³ | 309.5 mm³ | 4.20 mm | 41.1% |
 | −5 dB | 132.8 mm³ | 472.2 mm³ | 4.83 mm | 62.7% |
+
+> **The % here is a volume ratio** — the 95% credible region's volume divided by
+> the whole source space (753 mm³). It is *not* a confidence; the confidence is
+> fixed at 95% and the volume is what varies.
+>
+> **Good = small. Bad = large.** Rough reading, since the useful comparison is
+> to whatever anatomy you want to resolve:
+> - **<1%** — sub-structure resolvable; a claim about a specific small ROI is
+>   supportable.
+> - **~10%** — usable for coarse regional claims only (lobe-scale).
+> - **>40%** — the honest statement is "somewhere in roughly this half of the
+>   brain". No ROI-level claim survives.
+>
+> **Observed: good only at +20 dB.** At 0 dB and below the region covers 41–63%
+> of the brain, which is effectively no spatial information. Note also that the
+> "equivalent radius" column assumes the region is a compact ball — for deep
+> sources it is a crescent, so that column flatters the result and the volume is
+> the number to trust.
 
 **Depth dominates these pooled numbers.** At 0 dB a dorsal source has a 95%
 region of 6 mm³ (0.8% of the brain) while a ventral one spans 237 mm³ (31.5%) —
@@ -154,6 +220,27 @@ source when there is one.
 | +10 dB | −0.67 | 53% | 80% | 73% | 73% | 73% |
 | 0 dB | −0.18 | 13% | 37% | 30% | 33% | 33% |
 
+> **The % here is a detection rate** — the fraction of simulation trials (30 per
+> cell, so ±9 percentage points) in which the two-vs-one Bayes factor beat the
+> null's 90th percentile. It is a frequency, not a confidence attached to any
+> single recording.
+>
+> **The floor is 10%, not 0%.** The threshold is set at the null's 90th
+> percentile, so one-source data trips it 10% of the time *by construction*.
+> That is the false-alarm rate we chose to accept.
+> - **Good = ≥80%**, i.e. two sources are found nearly whenever present.
+> - **Marginal = 40–70%** — better than chance, but a coin-flip per recording.
+> - **Bad = near 10%** — indistinguishable from the false-alarm floor, meaning
+>   the method cannot tell two sources from one at all.
+>
+> **Observed: +20 dB is good (83–100%), +10 dB is marginal, 0 dB is bad**
+> (13–37%, i.e. barely above the floor).
+>
+> The **null median log₁₀BF** column is a sanity check on the method, not a
+> result: it should be negative, meaning the model comparison correctly prefers
+> one source when only one is present. It is (−1.81 to −0.18). Had it been
+> positive, the whole table would be untrustworthy.
+
 **SNR, not separation, is the binding constraint.** At +20 dB two sources are
 detectable essentially always, down to 2–3 mm. At +10 dB it is a coin-flip to
 80%. At 0 dB detection (13–37%) is barely above the 10% false-alarm floor —
@@ -172,6 +259,20 @@ A different, harder problem — posterior median separation vs truth:
 | +20 dB | 3.5 | 3.5 | 4.8 | 6.2 | 7.8 |
 | +10 dB | 5.2 | 5.5 | 5.2 | 6.2 | 7.2 |
 | 0 dB | 5.2 | 5.8 | 5.5 | 6.2 | 6.2 |
+
+> **Cells are the posterior's median estimate of the separation, in mm**;
+> compare each against its column header, which is the truth.
+>
+> **Good = cell matches header. Bad = cell constant across the row**, because a
+> number that does not move when the truth moves carries no information about
+> the truth — it is just the prior showing through.
+>
+> **Observed: +20 dB is good from ~4 mm up** (4.8/6.2/7.8 against 4/6/8), though
+> close pairs are over-estimated (3.5 for a true 2 mm). **+10 dB and 0 dB are
+> bad below ~6 mm** — the estimate sits at 5–6 mm whether the truth is 2 mm or
+> 4 mm. Combined with §3.1 this gives the operationally important case: at
+> +10 dB you may be able to say *two sources are present* while being unable to
+> say *how far apart they are*.
 
 At +20 dB the estimate tracks truth from ~4 mm up (slightly over-estimating
 close pairs). At +10 dB and below it **saturates around 5–6 mm regardless of the
@@ -221,6 +322,21 @@ explains — a model-adequacy statistic, not an SNR:
 | DFS9_937_0 | 218 | 0.37 |
 | DFS9_955_0 | 662 | 0.42 |
 
+> **Cells are a fraction of sensor variance (0–1), per time sample, median over
+> samples** — how much of the measured scalp field the single best-fitting
+> dipole reproduces. This is a *model-fit* statistic. It says nothing on its own
+> about noise, because what the dipole misses is mostly other brain activity.
+>
+> **Good = near 1.0** (the data really do look like one dipole, so the model in
+> §2–3 applies). **Bad = near 0.5 or below** (the data are not one-dipole-like
+> and the single-dipole analysis is describing something the data do not
+> contain).
+>
+> **Observed 0.37–0.48 is bad in that specific sense** — a single dipole
+> accounts for well under half the sensor variance. That is unsurprising for
+> ongoing activity with many simultaneous sources, and it is the honest reason
+> to be cautious about applying §2–3 to these recordings.
+
 Converting that to `SNR = EV/(1−EV)` — as this document previously did, giving
 "−2 to 0 dB" — silently asserts that everything one dipole misses is noise. It
 is not: it is mostly other simultaneous brain sources, plus mismatch between a
@@ -243,6 +359,19 @@ does not happen here. The ratio of evoked RMS to single-trial RMS is:
 | D901_FX9_sbpro_0 | 214 | 0.066 | 0.068 |
 | DFS9_931_0 | 216 | 0.068 | 0.068 |
 | DFS9_937_0 | 218 | 0.069 | 0.068 |
+
+> **Cells are a ratio of amplitudes (unitless)**: the RMS of the trial-average
+> divided by the RMS of a typical single trial. Compare against the last column,
+> which is what the ratio would be if the epochs contained nothing time-locked.
+>
+> **Good (for averaging to help) = ratio near 1.0**, meaning the response
+> survives averaging and N trials buy you 10·log₁₀(N) dB. **Bad = ratio near
+> 1/√N**, meaning averaging cancels everything and buys nothing.
+>
+> **Observed: bad, and unambiguously so** — the measured ratio matches 1/√N to
+> three decimal places. There is no time-locked component whatsoever. Note this
+> is a statement about the *paradigm*, not the recording quality or the
+> pipeline: there is simply no evoked response in these epochs to build up.
 
 The ratio matches `1/√N` to three decimals: **there is no time-locked component
 at all.** Averaging cancels essentially everything, so the trial-averaged SNR in
