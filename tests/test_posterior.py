@@ -93,3 +93,55 @@ def test_coverage_is_near_nominal(toy):
     r = toy.coverage_test(levels=(0.9,), snr_db=10.0, n_trials=120, seed=7,
                           moment_std=1.0)
     assert 0.75 <= r['coverage'][0] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+#
+# Rebuilding the operator costs a BEM solution plus a forward solve, which is
+# pure waste when only a figure is changing. These pin that a round-trip is
+# lossless and that the cache cannot silently serve a stale operator.
+# ---------------------------------------------------------------------------
+
+def test_save_load_round_trip_is_lossless(toy, tmp_path):
+    toy.provenance = {'signature': {'spacing_mm': 1.0}}
+    toy.electrode_pos_mm = np.array([[0.0, 0.0, 9.0], [1.0, 0.0, 9.0]])
+    toy.channel_names = ['E1', 'E2']
+    toy.bem_surfaces_mm = [np.ones((4, 3)), 2 * np.ones((4, 3))]
+    toy.bem_conductivities = [0.33, 0.0042]
+
+    back = DipolePosterior.load(toy.save(tmp_path / 'op.npz'))
+    assert np.array_equal(back.leadfield, toy.leadfield)
+    assert np.array_equal(back.positions_mm, toy.positions_mm)
+    assert back.spacing_mm == toy.spacing_mm
+    assert back.channel_names == ['E1', 'E2']
+    assert np.array_equal(back.electrode_pos_mm, toy.electrode_pos_mm)
+    assert len(back.bem_surfaces_mm) == 2
+    assert back.provenance == toy.provenance
+
+
+def test_reloaded_operator_gives_identical_posteriors(toy, tmp_path):
+    """A cached operator must produce the same numbers, not merely load."""
+    toy.provenance = {}
+    back = DipolePosterior.load(toy.save(tmp_path / 'op.npz'))
+    rng = np.random.default_rng(0)
+    data, sigma = toy.simulate(toy.positions_mm[20], np.array([1.0, 0, 0]),
+                               snr_db=10.0, rng=rng)
+    assert np.allclose(toy.posterior(data, sigma, moment_std=1.0),
+                       back.posterior(data, sigma, moment_std=1.0))
+
+
+def test_cache_signature_tracks_its_inputs(tmp_path):
+    """Spacing alone is not enough — a changed BEM must invalidate the cache."""
+    bem_dir = tmp_path / 'bem_cache'
+    bem_dir.mkdir()
+    bem = bem_dir / 'ellipsoid_3layer.pkl'
+    bem.write_bytes(b'x' * 100)
+
+    sig = DipolePosterior._cache_signature(tmp_path, 1.0, 0.93)
+    assert sig == DipolePosterior._cache_signature(tmp_path, 1.0, 0.93)
+    assert sig != DipolePosterior._cache_signature(tmp_path, 0.5, 0.93)
+    assert sig != DipolePosterior._cache_signature(tmp_path, 1.0, 0.90)
+
+    bem.write_bytes(b'x' * 200)          # head model rebuilt
+    assert sig != DipolePosterior._cache_signature(tmp_path, 1.0, 0.93)

@@ -45,6 +45,7 @@ Classes
 DipolePosterior
     Dense leadfield, likelihood map, credible regions, and calibration test.
 """
+import json
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -90,6 +91,7 @@ class DipolePosterior:
         spacing_mm: float = 0.5,
         inside_frac: float = 0.93,
         verbose: bool = True,
+        cache_dir=None,
     ) -> 'DipolePosterior':
         """
         Rebuild a dense forward model from a pipeline run's cached BEM.
@@ -112,6 +114,22 @@ class DipolePosterior:
         import pickle
         import mne
         mne.set_log_level('ERROR')
+
+        signature = cls._cache_signature(pipeline_dir, spacing_mm, inside_frac)
+        cache_path = None
+        if cache_dir is not None:
+            cache_path = (Path(cache_dir)
+                          / f'operator_{spacing_mm:g}mm.npz')
+            if cache_path.exists():
+                obj = cls.load(cache_path)
+                if obj.provenance.get('signature') == signature:
+                    if verbose:
+                        print(f"  operator loaded from cache "
+                              f"({obj.n_positions} positions, {cache_path.name})")
+                    return obj
+                if verbose:
+                    print(f"  cache {cache_path.name} is stale "
+                          f"(inputs changed) — rebuilding")
 
         p = Path(pipeline_dir)
         bem = pickle.load(open(p / 'bem_cache' / 'ellipsoid_3layer.pkl', 'rb'))
@@ -143,8 +161,77 @@ class DipolePosterior:
         obj.electrode_pos_mm = np.array(
             [ch['loc'][:3] for ch in info['chs']], dtype=float) * 1000.0
         obj.channel_names = list(info['ch_names'])
+        obj.provenance = {'signature': signature}
         obj._check_geometry(verbose=verbose)
+        if cache_path is not None:
+            obj.save(cache_path)
+            if verbose:
+                print(f"  operator cached -> {cache_path}")
         return obj
+
+    # ------------------------------------------------------------- persistence
+    def save(self, path) -> Path:
+        """
+        Write the operator and its geometry to a single ``.npz``.
+
+        Rebuilding costs a BEM solution plus a forward solve (seconds to tens of
+        seconds, and it grows with grid resolution), which is pure waste when
+        the only thing being changed is a figure. Everything a plot or a further
+        analysis needs is stored, so nothing has to be recomputed to redraw.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            'leadfield': self.leadfield,
+            'positions_mm': self.positions_mm,
+            'spacing_mm': np.array(self.spacing_mm),
+            'provenance': np.array(json.dumps(self.provenance)),
+        }
+        if self.electrode_pos_mm is not None:
+            payload['electrode_pos_mm'] = self.electrode_pos_mm
+            payload['channel_names'] = np.array(list(self.channel_names))
+        if self.bem_surfaces_mm is not None:
+            payload['n_bem_surfaces'] = np.array(len(self.bem_surfaces_mm))
+            payload['bem_conductivities'] = np.array(self.bem_conductivities)
+            for i, s in enumerate(self.bem_surfaces_mm):
+                payload[f'bem_surface_{i}'] = s
+        np.savez_compressed(path, **payload)
+        return path
+
+    @classmethod
+    def load(cls, path) -> 'DipolePosterior':
+        """Reload an operator written by :meth:`save`."""
+        z = np.load(Path(path), allow_pickle=False)
+        obj = cls(z['leadfield'], z['positions_mm'], float(z['spacing_mm']))
+        obj.provenance = json.loads(str(z['provenance']))
+        if 'electrode_pos_mm' in z:
+            obj.electrode_pos_mm = z['electrode_pos_mm']
+            obj.channel_names = [str(c) for c in z['channel_names']]
+        if 'n_bem_surfaces' in z:
+            obj.bem_surfaces_mm = [z[f'bem_surface_{i}']
+                                   for i in range(int(z['n_bem_surfaces']))]
+            obj.bem_conductivities = list(z['bem_conductivities'])
+        return obj
+
+    @staticmethod
+    def _cache_signature(pipeline_dir, spacing_mm: float,
+                         inside_frac: float) -> Dict:
+        """
+        What the cached operator depends on.
+
+        Includes the BEM file's size and mtime: a cache keyed only on spacing
+        would silently serve a stale leadfield after the head model is rebuilt,
+        which is exactly the kind of error that is invisible in a figure.
+        """
+        bem = Path(pipeline_dir) / 'bem_cache' / 'ellipsoid_3layer.pkl'
+        st = bem.stat() if bem.exists() else None
+        return {
+            'pipeline_dir': str(Path(pipeline_dir).resolve()),
+            'spacing_mm': float(spacing_mm),
+            'inside_frac': float(inside_frac),
+            'bem_bytes': (st.st_size if st else None),
+            'bem_mtime': (int(st.st_mtime) if st else None),
+        }
 
     def _check_geometry(self, verbose: bool = True) -> None:
         """
@@ -171,6 +258,7 @@ class DipolePosterior:
                   f"volume {self.n_positions * self.spacing_mm ** 3:.0f} mm^3")
 
     #: Geometry attached by :meth:`from_pipeline_dir` (absent otherwise).
+    provenance: Dict = {}
     bem_surfaces_mm = None
     bem_conductivities = ()
     electrode_pos_mm = None
