@@ -1,6 +1,14 @@
 #!/usr/bin/env python
 """
-Noise-free resolution diagnostics — the trustworthy geometric foundation.
+Noise-free resolution diagnostics.
+
+.. warning::
+   **Partially retracted.** The merge distances this script originally reported
+   (6 / 7 / 10 mm by depth) came from a two-lobe test with no false-positive
+   control and are withdrawn — see :func:`merge_distance`. The detector has been
+   fixed, but for new work prefer ``validation/two_source.py``, which answers
+   the same question with a Bayes factor against a matched one-source null.
+   The single-source localization errors below were never affected.
 
 The Monte-Carlo resolvability sweeps (run_resolvability_sweep etc.) mix two very
 different things: the intrinsic geometric resolution of the forward+inverse
@@ -77,7 +85,25 @@ def main():
 
     # --- point-spread profile + two-source merge distance, per depth ---
     def merge_distance(bin_lo, bin_hi):
-        """Smallest separation whose noise-free two-source recon shows a dip."""
+        """
+        Smallest separation whose noise-free two-source recon shows two lobes.
+
+        NOTE (fix): this originally scored a dip as
+        ``activation[midpoint] < 0.8 * min(activation[a], activation[b])``,
+        which never required the second location to *be* a lobe. With a flat or
+        mislocalized point-spread function that test fires with only ONE source
+        present — up to 67% of pairs, noise-free — so it had no false-positive
+        control, and the merge distances it produced (6 / 7 / 10 mm by depth)
+        were wrong and have been retracted.
+
+        It now uses the prominence-gated ``_detect_two_lobes`` (two prominent
+        local maxima plus a saddle), which is the same event used elsewhere and
+        can be scored identically on a one-source null.
+
+        Superseded by the two-source posterior
+        (``validation/two_source.py``), which replaces this detector with a
+        Bayes factor against a matched null. Prefer that for new work.
+        """
         idxs = np.where((d >= np.percentile(d, bin_lo)) & (d <= np.percentile(d, bin_hi)))[0]
         for sep in [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0]:
             dips = []
@@ -89,11 +115,8 @@ def main():
                         position1_mm=sp[a], position2_mm=sp[b],
                         amplitude1_nAm=50, amplitude2_nAm=50, snr_db=INF,
                         noise_seed=0, noise_type='white', duration_s=0.2, sfreq=256.0)
-                    sa = t._source_activity_norm(t._apply_inverse(eeg))
-                    sa = sa / sa.max()
-                    mid = 0.5 * (sp[a] + sp[b])
-                    midx = int(np.argmin(np.linalg.norm(sp - mid, axis=1)))
-                    dips.append(sa[midx] < 0.8 * min(sa[a], sa[b]))
+                    raw = t._apply_inverse(eeg)
+                    dips.append(t._detect_two_lobes(raw)['detected'])
             if dips and np.mean(dips) >= 0.5:
                 return float(sep)
         return None
