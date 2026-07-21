@@ -145,3 +145,30 @@ def test_cache_signature_tracks_its_inputs(tmp_path):
 
     bem.write_bytes(b'x' * 200)          # head model rebuilt
     assert sig != DipolePosterior._cache_signature(tmp_path, 1.0, 0.93)
+
+
+def test_level_map_and_credible_mask_agree(toy):
+    """
+    The map used for colouring must select the same voxels as credible_mask.
+
+    A second, independent implementation in plotting code drifted from this one
+    and reported a well-localized source as missing, so the agreement is pinned.
+    """
+    rng = np.random.default_rng(11)
+    data, sigma = toy.simulate(toy.positions_mm[30], np.array([0, 1.0, 0]),
+                               snr_db=10.0, rng=rng)
+    p = toy.posterior(data, sigma, moment_std=1.0)
+    lvl = toy.credible_level_map(p)
+    for level in (0.5, 0.68, 0.9, 0.95):
+        assert np.array_equal(lvl <= level, toy.credible_mask(p, level))
+
+
+def test_two_equal_atoms_both_sit_inside_the_68_percent_region():
+    """The exact case that broke: two sharp sources, each carrying half the mass."""
+    p = np.zeros(50)
+    p[10] = p[40] = 0.5
+    lvl = DipolePosterior.credible_level_map(p)
+    # Ties order arbitrarily, so assert the pair of levels, not which is which.
+    assert sorted(np.round(lvl[[10, 40]], 6)) == [0.0, 0.5]   # neither is 1.0
+    assert (lvl <= 0.68)[[10, 40]].all()
+    assert DipolePosterior.credible_mask(p, 0.68)[[10, 40]].all()

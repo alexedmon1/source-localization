@@ -459,6 +459,39 @@ class DipolePosterior:
         mask[order[:k]] = True
         return mask
 
+    @staticmethod
+    def credible_level_map(posterior: np.ndarray) -> np.ndarray:
+        """
+        Per voxel, the smallest credible level whose region contains it.
+
+        The map form of :meth:`credible_mask`, for colouring a figure by
+        credible band. It must agree with that method, so it counts the mass
+        strictly *above* each voxel's density rather than the running total
+        including it.
+
+        The distinction is not academic. With two well-localized sources the
+        marginal is two atoms of ~0.5, and the inclusive convention places the
+        second at level 1.000 — outside every region below 100%, so a figure
+        reported one source as missing for a pair the model had identified with
+        log10 Bayes factor > 140. A separate implementation in plotting code is
+        how that divergence arose; keep this the single definition.
+
+        Returns
+        -------
+        ndarray
+            Values in [0, 1). ``level_map <= L`` selects the same voxels as
+            ``credible_mask(posterior, L)``.
+        """
+        p = np.asarray(posterior, float)
+        order = np.argsort(p)[::-1]
+        total = p.sum()
+        if total <= 0:
+            return np.zeros_like(p)
+        exclusive = np.cumsum(p[order]) - p[order]
+        out = np.empty_like(p)
+        out[order] = exclusive / total
+        return out
+
     def credible_volume_mm3(self, posterior: np.ndarray,
                             level: float = 0.5) -> float:
         """Volume of the highest-density region at ``level``."""

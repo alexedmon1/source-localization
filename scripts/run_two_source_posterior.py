@@ -222,19 +222,8 @@ def fig_main(results, ts, dp, idx, out_path, seed):
 
 
 def _credible_level_map(density):
-    """
-    For each voxel, the smallest credible level whose region contains it.
-
-    Runs 0-100% and is a genuine probability statement — a voxel at 50% is
-    exactly on the boundary of the 50% highest-density region. This is what the
-    colour axis shows, instead of "% of peak" (an amplitude, not a probability)
-    or a log density (unreadable, and its numbers mean nothing to a reader).
-    """
-    import numpy as np
-    order = np.argsort(density)[::-1]
-    lvl = np.empty_like(density)
-    lvl[order] = np.cumsum(density[order]) / max(density.sum(), 1e-300)
-    return lvl
+    """Delegates to DipolePosterior.credible_level_map — single definition."""
+    return DipolePosterior.credible_level_map(density)
 
 
 def _island_labels(dp, mask, radius_mm):
@@ -260,7 +249,7 @@ def _island_labels(dp, mask, radius_mm):
 
 
 def _max_separating_level(dp, lvl, a, b, radius_mm,
-                          levels=np.arange(0.05, 0.99, 0.05)):
+                          levels=np.arange(0.05, 1.0, 0.05)):
     """
     Largest credible level at which the two sources still sit in separate islands.
 
@@ -545,18 +534,35 @@ def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
             ax.set_title(f'{meta[r, c, 4]:.1f} mm  |  {verdict}', fontsize=9,
                          loc='left', fontweight='bold',
                          color=('#00790f' if ok else '#b03000'))
-            ax.text(0.03, 0.03, f'log10 BF {meta[r, c, 2]:+.1f}',
+            # State the peak's distance to the nearest true source on every
+            # panel: it is the direct check that the map is centred where it
+            # should be, and it pre-empts reading a broad low-SNR cloud as a
+            # localization failure.
+            pk = pos[int(np.argmax(marg[r, c]))]
+            d_pk = min(float(np.linalg.norm(pk - pos[a])),
+                       float(np.linalg.norm(pk - pos[b])))
+            ax.text(0.03, 0.03,
+                    f'log10 BF {meta[r, c, 2]:+.1f}\npeak {d_pk:.1f} mm from truth',
                     transform=ax.transAxes, fontsize=7.5,
                     bbox=dict(fc='white', ec='none', alpha=0.75, pad=1.4))
             if c == 0:
                 ax.set_ylabel(f'SNR {snrs[r]:+.0f} dB', fontweight='bold',
                               fontsize=11)
 
-    cb = fig.colorbar(sc, ax=axes, fraction=0.017, pad=0.012,
-                      ticks=[l - 0.02 for l in levels])
-    cb.ax.set_yticklabels([f'{int(100*l)}%' for l in levels])
-    cb.set_label('credible region the voxel falls in\n'
-                 'innermost (50%) = most probable location for a source',
+    # Label the bands as INTERVALS, innermost at the top, and never as bare
+    # numbers. A bare "50%" on the innermost band beside "95%" on the outermost
+    # reads as low-vs-high confidence, which is backwards: the innermost band is
+    # the most probable place for a source. That misreading made the figure look
+    # as though localization had failed when it had not.
+    edges = [0.0] + levels
+    centres = [0.5 * (edges[i] + edges[i + 1]) for i in range(len(levels))]
+    names = ['most probable\n(inner 50%)', '50-68%', '68-90%',
+             '90-95%\n(least probable)']
+    cb = fig.colorbar(sc, ax=axes, fraction=0.017, pad=0.012, ticks=centres)
+    cb.ax.set_yticklabels(names[:len(centres)], fontsize=8)
+    cb.ax.invert_yaxis()          # most probable at the top
+    cb.set_label('where a source most likely is\n'
+                 'uncoloured = outside the 95% region (effectively excluded)',
                  fontsize=9)
     fig.suptitle(
         'Two sources: up to what credible level do they stay separate blobs?\n'
