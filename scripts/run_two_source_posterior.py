@@ -521,9 +521,18 @@ def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
             lvl = _credible_level_map(marg[r, c])
             best_L, verdict = _max_separating_level(dp, lvl, a, b, radius)
 
+            # Draw EVERY in-brain voxel, sub-threshold ones in pale grey.
+            # Leaving them white made two different things look identical: a
+            # voxel that is inside the brain but outside the 95% region, and a
+            # location that is not brain at all. At +20 dB only ~2 of 522
+            # voxels are coloured, so almost the whole panel was white and read
+            # as "nothing computed here" rather than "ruled out".
             shown = lvl <= levels[-1]
+            ax.scatter(pos[~shown, 0], pos[~shown, 1], s=58, marker='s',
+                       c='#ececec', edgecolors='none', zorder=0)
             sc = ax.scatter(pos[shown, 0], pos[shown, 1], c=lvl[shown], s=58,
-                            marker='s', cmap=cmap, norm=norm, edgecolors='none')
+                            marker='s', cmap=cmap, norm=norm, edgecolors='none',
+                            zorder=1)
             _draw_head(ax, dp, 0.5 * (pos[a, 2] + pos[b, 2]))
             for p_ in (pos[a], pos[b]):
                 ax.plot(p_[0], p_[1], marker='+', ms=13, mew=2.4,
@@ -572,7 +581,8 @@ def fig_series(dp, npz_path, out_path, level_grid=(0.5, 0.68, 0.9, 0.95)):
     cb.ax.set_yticklabels(names, fontsize=8)
     cb.ax.invert_yaxis()          # densest band at the top
     cb.set_label('nested credible regions, densest first\n'
-                 'uncoloured = the last 5%, spread over the rest of the brain',
+                 'grey = in brain, outside the 95% region (holds the last 5%)\n'
+                 'white = outside the brain, never a candidate',
                  fontsize=9)
     fig.suptitle(
         'Two sources: up to what credible level do they stay separate blobs?\n'
