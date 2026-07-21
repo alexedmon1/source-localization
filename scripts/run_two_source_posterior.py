@@ -221,6 +221,260 @@ def fig_main(results, ts, dp, idx, out_path, seed):
     plt.close(fig)
 
 
+def _credible_level_map(density):
+    """
+    For each voxel, the smallest credible level whose region contains it.
+
+    Runs 0-100% and is a genuine probability statement — a voxel at 50% is
+    exactly on the boundary of the 50% highest-density region. This is what the
+    colour axis shows, instead of "% of peak" (an amplitude, not a probability)
+    or a log density (unreadable, and its numbers mean nothing to a reader).
+    """
+    import numpy as np
+    order = np.argsort(density)[::-1]
+    lvl = np.empty_like(density)
+    lvl[order] = np.cumsum(density[order]) / max(density.sum(), 1e-300)
+    return lvl
+
+
+def _island_labels(dp, mask, radius_mm):
+    """Connected-component label per voxel for a boolean mask; -1 outside."""
+    import numpy as np
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    from scipy.spatial import cKDTree
+    lab = np.full(mask.shape, -1, dtype=int)
+    idx = np.where(mask)[0]
+    if idx.size == 0:
+        return lab
+    pr = np.array(sorted(cKDTree(dp.positions_mm[idx]).query_pairs(radius_mm)),
+                  dtype=int)
+    if len(pr) == 0:
+        lab[idx] = np.arange(idx.size)
+        return lab
+    g = coo_matrix((np.ones(len(pr)), (pr[:, 0], pr[:, 1])),
+                   shape=(idx.size, idx.size))
+    _, comp = connected_components(g + g.T, directed=False)
+    lab[idx] = comp
+    return lab
+
+
+def _max_separating_level(dp, lvl, a, b, radius_mm,
+                          levels=np.arange(0.05, 0.99, 0.05)):
+    """
+    Largest credible level at which the two sources still sit in separate islands.
+
+    A single fixed level cannot answer this. The marginal density holds TWO
+    units of mass (one per source), so its 50% region contains roughly ONE lobe
+    by construction — at high SNR that region is a couple of voxels and the
+    other source falls outside it, which looks like failure but is an artifact
+    of the level, not a property of the data. Scanning instead reports how much
+    of the probability mass stays resolved into two distinct blobs: higher is
+    better, and "no level works" is a genuine merge.
+
+    Returns (best_level or None, verdict).
+    """
+    best = None
+    both_in_one = False
+    for L in levels:
+        mask = lvl <= L
+        if not (mask[a] and mask[b]):
+            continue
+        lab = _island_labels(dp, mask, radius_mm)
+        if lab[a] != lab[b]:
+            best = float(L)
+        else:
+            both_in_one = True
+    if best is not None:
+        return best, f'SEPARATE to {best:.0%}'
+    return None, ('MERGED' if both_in_one else 'ONE SOURCE LOST')
+
+
+def _draw_head(ax, dp, z_mm, electrodes=True):
+    """Overlay the BEM layers (and nearby electrodes) at this slice height."""
+    import numpy as np
+    styles = [('#111111', 1.4, 1.0), ('#777777', 1.0, 0.8), ('#777777', 1.0, 0.5)]
+    for layer, (col, lw, alpha) in enumerate(styles):
+        ring = dp.layer_outline_mm(layer, z_mm)
+        if ring is not None:
+            ax.plot(ring[:, 0], ring[:, 1], color=col, lw=lw, alpha=alpha, zorder=4)
+    if electrodes and dp.electrode_pos_mm is not None:
+        e = dp.electrode_pos_mm
+        # The array is dorsal, so most electrodes sit above any source slice;
+        # only draw those close to this plane rather than implying they lie in it.
+        near = np.abs(e[:, 2] - z_mm) < 4.0
+        if near.any():
+            ax.scatter(e[near, 0], e[near, 1], s=13, marker='o', facecolors='none',
+                       edgecolors='#0072B2', linewidths=0.9, alpha=0.85, zorder=5)
+
+
+def fig_geometry(dp, out_path):
+    """The head model the posterior is computed in: BEM layers, electrodes, grid."""
+    import numpy as np
+    pos, e = dp.positions_mm, dp.electrode_pos_mm
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.9))
+    views = [(0, 1, 'X  left-right (mm)', 'Y  anterior-posterior (mm)', 'A  Axial (from above)'),
+             (1, 2, 'Y  anterior-posterior (mm)', 'Z  dorsal-ventral (mm)', 'B  Sagittal (from the side)'),
+             (0, 2, 'X  left-right (mm)', 'Z  dorsal-ventral (mm)', 'C  Coronal (from the front)')]
+    for ax, (i, j, xl, yl, title) in zip(axes, views):
+        for layer, (col, lw, alpha, name) in enumerate(
+                [('#111111', 1.6, 1.0, 'brain (inner BEM)'),
+                 ('#777777', 1.1, 0.85, 'skull'), ('#bbbbbb', 1.1, 0.85, 'scalp')]):
+            rr = dp.bem_surfaces_mm[layer]
+            centre = 0.5 * (rr.max(axis=0) + rr.min(axis=0))
+            semi = 0.5 * (rr.max(axis=0) - rr.min(axis=0))
+            ang = np.linspace(0, 2 * np.pi, 300)
+            ax.plot(centre[i] + semi[i] * np.cos(ang), centre[j] + semi[j] * np.sin(ang),
+                    color=col, lw=lw, alpha=alpha, label=name if ax is axes[0] else None)
+        ax.scatter(pos[:, i], pos[:, j], s=3, c='#E69F00', alpha=0.45, edgecolors='none',
+                   label=f'source grid ({len(pos)} pts)' if ax is axes[0] else None)
+        ax.scatter(e[:, i], e[:, j], s=34, marker='o', facecolors='none',
+                   edgecolors='#0072B2', linewidths=1.4,
+                   label=f'electrodes ({len(e)})' if ax is axes[0] else None)
+        ax.set_xlabel(xl); ax.set_ylabel(yl)
+        ax.set_title(title, loc='left', fontweight='bold', fontsize=11)
+        ax.set_aspect('equal'); ax.grid(True, color='#eee')
+    axes[0].legend(frameon=False, fontsize=8, loc='upper center',
+                   bbox_to_anchor=(0.5, -0.16), ncol=2)
+    sigma = ', '.join(f'{c:g}' for c in dp.bem_conductivities)
+    fig.suptitle('The head model everything is computed in — 3-layer ellipsoid BEM, '
+                 f'{len(e)}-channel dorsal array\n'
+                 f'conductivities (S/m): {sigma}   ·   posterior grid {dp.spacing_mm} mm '
+                 f'({len(pos)} positions inside the brain)', fontweight='bold', fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    fig.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
+def fig_series(ts, dp, idx_pool, out_path, seed, level=0.5,
+               separations=(2.0, 3.0, 4.0, 6.0, 8.0), snrs=(20.0, 10.0, 0.0)):
+    """Separation x SNR grid of the two-source posterior, with a non-overlap test."""
+    import numpy as np
+    pos = dp.positions_mm
+    rng = np.random.default_rng(seed)
+    radius = 1.6 * dp.spacing_mm
+
+    # One pair per separation, held fixed down the SNR column, so a column shows
+    # the effect of noise alone rather than the effect of a different pair.
+    pairs = []
+    for sep in separations:
+        chosen = None
+        for _ in range(400):
+            a = int(rng.choice(idx_pool))
+            d = np.linalg.norm(pos[idx_pool] - pos[a], axis=1)
+            cand = idx_pool[np.abs(d - sep) <= 0.5]
+            cand = cand[cand != a]
+            # depth-matched: gain falls steeply with depth, and an unmatched
+            # pair fails because the weaker source vanishes, not because the two
+            # are too close to tell apart.
+            cand = cand[np.abs(pos[cand, 2] - pos[a, 2]) <= 0.5]
+            if len(cand):
+                chosen = (a, int(cand[0]))
+                break
+        pairs.append(chosen)
+
+    fig, axes = plt.subplots(len(snrs), len(separations),
+                             figsize=(3.05 * len(separations), 3.35 * len(snrs)))
+    axes = np.atleast_2d(axes)
+    im = None
+
+    for r, snr in enumerate(snrs):
+        for c, (sep, pr) in enumerate(zip(separations, pairs)):
+            ax = axes[r, c]
+            ax.set_xticks([]); ax.set_yticks([])
+            if pr is None:
+                ax.text(0.5, 0.5, 'no depth-matched\npair at this separation',
+                        ha='center', va='center', fontsize=8, color='#888888',
+                        transform=ax.transAxes)
+                continue
+            a, b = pr
+            # Pick the orientation pair giving the most balanced sensor
+            # contribution. With fixed orientations one dipole can dominate
+            # purely through gain, and the panel then shows amplitude imbalance
+            # rather than whether the two are resolvable.
+            triad = np.eye(3)
+            best_bal, o1b, o2b = -1.0, triad[0], triad[1]
+            g1s, g2s = dp.leadfield_at(pos[a]), dp.leadfield_at(pos[b])
+            for o1 in triad:
+                for o2 in triad:
+                    n1 = np.linalg.norm(g1s @ o1); n2 = np.linalg.norm(g2s @ o2)
+                    bal = min(n1, n2) / max(n1, n2, 1e-30)
+                    if bal > best_bal:
+                        best_bal, o1b, o2b = bal, o1, o2
+            data, sig = ts.simulate_pair(pos[a], pos[b], o1b, o2b, snr,
+                                         np.random.default_rng(seed + 17 * r))
+            res = ts.analyze(data, sig)
+            marg = ts.marginal_density(res['joint']) / 2.0
+            lvl = _credible_level_map(marg)
+
+            # Non-overlap test: scan levels rather than fixing one (see
+            # _max_separating_level for why a fixed level is misleading here).
+            best_L, verdict = _max_separating_level(dp, lvl, a, b, radius)
+            sep_ok = best_L is not None
+
+            z0 = 0.5 * (pos[a, 2] + pos[b, 2])
+            # Maximum-intensity projection along the dorsal-ventral axis. A
+            # single slice hides mass that sits just out of plane, which made
+            # panels look empty while the 3D verdict said otherwise. The two
+            # sources are depth-matched, so projecting along z does not merge
+            # them.
+            sl = np.ones(len(pos), bool)
+            # Colour = posterior density relative to its own peak, so certainty
+            # is highest AT the source and decays outward, which is how a
+            # certainty map is read. (The credible-LEVEL map is the cumulative
+            # inverse of this — 0% at the source, 100% far away — and reads
+            # backwards no matter how it is labelled.) The probability
+            # statements are the contours below, not the colour.
+            rel = 100.0 * marg / max(marg.max(), 1e-300)
+            key = np.round(pos[:, :2], 6)
+            uniq, inv = np.unique(key, axis=0, return_inverse=True)
+            proj = np.zeros(len(uniq))
+            np.maximum.at(proj, inv, rel)
+            im = ax.scatter(uniq[:, 0], uniq[:, 1], c=proj, s=64, marker='s',
+                            cmap='inferno', vmin=0, vmax=100, edgecolors='none')
+            _draw_head(ax, dp, z0)
+            for p_ in (pos[a], pos[b]):
+                ax.plot(p_[0], p_[1], marker='+', ms=13, mew=2.4, color='#FF2D95',
+                        zorder=6)
+            ax.set_aspect('equal')
+            def _proj_mask(mask):
+                out = np.zeros(len(uniq), bool)
+                np.logical_or.at(out, inv, mask)
+                return out
+
+            m95 = _proj_mask(lvl <= 0.95)
+            if m95.any():
+                ax.scatter(uniq[m95, 0], uniq[m95, 1], s=64, marker='s',
+                           facecolors='none', edgecolors='#00E5FF',
+                           linewidths=0.35, alpha=0.5, zorder=2)
+            if sep_ok:
+                lab = _island_labels(dp, lvl <= best_L, radius)
+                for comp in (lab[a], lab[b]):
+                    m2 = _proj_mask(lab == comp)
+                    if m2.any():
+                        ax.scatter(uniq[m2, 0], uniq[m2, 1], s=64, marker='s',
+                                   facecolors='none', edgecolors='#39FF14',
+                                   linewidths=0.7, zorder=3)
+            ax.set_title(f'{np.linalg.norm(pos[a]-pos[b]):.1f} mm  |  {verdict}',
+                         fontsize=9, loc='left',
+                         color=('#00790f' if sep_ok else '#b03000'),
+                         fontweight='bold')
+            if c == 0:
+                ax.set_ylabel(f'SNR {snr:+.0f} dB', fontweight='bold', fontsize=11)
+
+    cb = fig.colorbar(im, ax=axes, fraction=0.018, pad=0.015)
+    cb.set_label('posterior probability density, % of peak\n'
+                 '100% = most probable location for a source   ·   0% = ruled out',
+                 fontsize=9)
+    fig.suptitle(
+        'Two sources: up to what credible level do they stay separate blobs?\n'
+        'columns = true separation, rows = SNR.  pink + = true sources, '
+        'green = the two still-distinct blobs, cyan = 95% credible region',
+        fontweight='bold', fontsize=12)
+    fig.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -262,6 +516,10 @@ def main():
                                      args.n_trials, args.seed)
 
     fig_main(results, ts, dp, idx, out / 'two_source_posterior.png', args.seed)
+    fig_geometry(dp, out / 'bem_setup.png')
+    print(f"Saved: {out / 'bem_setup.png'}")
+    fig_series(ts, dp, idx, out / 'two_source_series.png', args.seed)
+    print(f"Saved: {out / 'two_source_series.png'}")
     if not args.figure_only:
         with open(out / 'two_source_posterior.json', 'w') as f:
             json.dump({str(k): v for k, v in results.items()}, f, indent=2)

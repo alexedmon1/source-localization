@@ -134,17 +134,126 @@ class DipolePosterior:
         # make_forward_solution may drop positions it deems invalid; trust the
         # source space it returns rather than the grid we asked for.
         used = fwd['src'][0]['rr'][fwd['src'][0]['inuse'].astype(bool)]
-        return cls(fwd['sol']['data'], used * 1000.0, spacing_mm)
+        obj = cls(fwd['sol']['data'], used * 1000.0, spacing_mm)
+
+        # Keep the geometry the leadfield was computed from, so figures can be
+        # drawn against the actual head model rather than in a bare voxel space.
+        obj.bem_surfaces_mm = [s['rr'] * 1000.0 for s in bem['surfs']]
+        obj.bem_conductivities = list(bem.get('sigma', []))
+        obj.electrode_pos_mm = np.array(
+            [ch['loc'][:3] for ch in info['chs']], dtype=float) * 1000.0
+        obj.channel_names = list(info['ch_names'])
+        obj._check_geometry(verbose=verbose)
+        return obj
+
+    def _check_geometry(self, verbose: bool = True) -> None:
+        """
+        Refuse a candidate space that contains impossible source locations.
+
+        A source cannot sit above the electrode array that records it. This
+        exact failure went unnoticed once — the grid was built from the inflated
+        BEM surface and 28 positions ended up above the highest electrode — so
+        it is now checked rather than assumed.
+        """
+        if self.electrode_pos_mm is None:
+            return
+        z_max = float(self.electrode_pos_mm[:, 2].max())
+        above = int((self.positions_mm[:, 2] > z_max).sum())
+        if above:
+            raise ValueError(
+                f"{above} of {self.n_positions} candidate positions lie above "
+                f"the highest electrode (z = {z_max:.2f} mm). The source grid "
+                f"is not confined to the brain — check the mask constraint in "
+                f"_grid_inside.")
+        if verbose:
+            print(f"  geometry OK: all {self.n_positions} positions below the "
+                  f"array (electrode z max {z_max:.2f} mm); "
+                  f"volume {self.n_positions * self.spacing_mm ** 3:.0f} mm^3")
+
+    #: Geometry attached by :meth:`from_pipeline_dir` (absent otherwise).
+    bem_surfaces_mm = None
+    bem_conductivities = ()
+    electrode_pos_mm = None
+    channel_names = ()
+
+    def layer_outline_mm(self, layer: int, z_mm: float, n: int = 240):
+        """
+        Cross-section of a BEM layer at height ``z_mm``, as an (n, 2) polygon.
+
+        The BEM layers are axis-aligned ellipsoids (preset
+        ``ellipsoid_method: axis_aligned``), so the slice is an ellipse obtained
+        analytically from the layer's centre and semi-axes. Returns ``None``
+        when the plane misses the layer.
+        """
+        if self.bem_surfaces_mm is None:
+            return None
+        rr = self.bem_surfaces_mm[layer]
+        centre = 0.5 * (rr.max(axis=0) + rr.min(axis=0))
+        semi = 0.5 * (rr.max(axis=0) - rr.min(axis=0))
+        t = (z_mm - centre[2]) / semi[2]
+        if abs(t) >= 1.0:
+            return None
+        k = np.sqrt(1.0 - t ** 2)
+        ang = np.linspace(0, 2 * np.pi, n)
+        return np.column_stack([centre[0] + semi[0] * k * np.cos(ang),
+                                centre[1] + semi[1] * k * np.sin(ang)])
 
     @staticmethod
-    def _grid_inside(bem: Dict, spacing_mm: float, frac: float) -> np.ndarray:
-        """Regular grid (metres) inside the innermost BEM surface."""
-        inner = bem['surfs'][0]['rr']
-        a = np.abs(inner).max(axis=0)
-        step = spacing_mm / 1000.0
-        axes = [np.arange(-a[i], a[i] + step / 2, step) for i in range(3)]
-        grid = np.array(np.meshgrid(*axes, indexing='ij')).reshape(3, -1).T
-        return grid[np.sum((grid / (a * frac)) ** 2, axis=1) <= 1.0]
+    def _grid_inside(bem: Dict, spacing_mm: float, frac: float,
+                     brain_mask_path=None) -> np.ndarray:
+        """
+        Regular grid (metres) of candidate source positions inside the brain.
+
+        Constrained by the **atlas brain mask**, not by the BEM's innermost
+        surface. That surface is an ellipsoid fitted to the brain voxels and
+        then inflated by ``ellipsoid_margin`` (1.23 by default), so it is ~23%
+        larger on every axis — about 1.9x the volume. Using it as the candidate
+        space put 49% of the grid outside real tissue and 28 points *above the
+        highest electrode*, which are impossible source locations, and inflated
+        the "brain volume" from ~390 mm^3 to ~750 mm^3, halving every
+        "percent of brain" figure. The pipeline's own source space never had
+        this problem because it places sources at 0.25-0.95 of the brain radius.
+
+        The mask is read with :func:`utils.atlas.get_true_affine` — the atlas
+        header's voxel sizes are 10x too large, and the **translation must be
+        scaled too**, otherwise the mask lands nowhere near the source
+        coordinates.
+        """
+        import nibabel as nib
+        from ..utils.atlas import get_true_affine
+
+        if brain_mask_path is None:
+            brain_mask_path = (Path(__file__).resolve().parents[1]
+                               / 'data' / 'atlas' / 'Atlas_3DRois_brain.nii.gz')
+        nii = nib.load(str(brain_mask_path))
+        mask = np.asarray(nii.get_fdata()) > 0
+        affine = get_true_affine(nii)
+
+        occupied = np.argwhere(mask)
+        mm = (affine @ np.column_stack(
+            [occupied, np.ones(len(occupied))]).T).T[:, :3]
+        lo, hi = mm.min(axis=0), mm.max(axis=0)
+
+        axes = [np.arange(lo[i], hi[i] + spacing_mm / 2, spacing_mm)
+                for i in range(3)]
+        grid_mm = np.array(np.meshgrid(*axes, indexing='ij')).reshape(3, -1).T
+
+        inv = np.linalg.inv(affine)
+        vox = np.rint((inv @ np.column_stack(
+            [grid_mm, np.ones(len(grid_mm))]).T).T[:, :3]).astype(int)
+        in_bounds = np.all((vox >= 0) & (vox < np.array(mask.shape)), axis=1)
+        keep = np.zeros(len(grid_mm), bool)
+        v = vox[in_bounds]
+        keep[in_bounds] = mask[v[:, 0], v[:, 1], v[:, 2]]
+
+        # Also require containment in the BEM conductor, so no source sits on or
+        # outside the innermost surface where the solution is ill-conditioned.
+        inner = bem['surfs'][0]['rr'] * 1000.0
+        centre = 0.5 * (inner.max(axis=0) + inner.min(axis=0))
+        semi = 0.5 * (inner.max(axis=0) - inner.min(axis=0))
+        keep &= np.sum(((grid_mm - centre) / (semi * frac)) ** 2, axis=1) <= 1.0
+
+        return grid_mm[keep] / 1000.0
 
     @staticmethod
     def _as_source_space(template, positions_m: np.ndarray):

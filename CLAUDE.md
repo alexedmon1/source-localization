@@ -90,13 +90,35 @@ src/source_localization/
 ## Critical Implementation Details
 
 ### Atlas Voxel Size Scaling (CRITICAL)
-The atlas NIfTI header has voxel sizes 10× larger than reality. All coordinate calculations MUST divide by 10:
+Most atlas NIfTI files have voxel sizes 10× larger than reality, and need correcting:
 ```python
 # Header: [2.03, 0.80, 2.0] mm → Actual: [0.203, 0.080, 0.2] mm
-affine_corrected = affine.copy()
-affine_corrected[:3, :3] /= 10.0
+from source_localization.utils.atlas import get_true_affine
+affine = get_true_affine(nifti_img)   # ALWAYS use this, never scale by hand
 ```
-This is handled automatically by `utils/atlas.py`.
+
+**The rule is file-specific, not universal.** Some bundled files are already
+stored in true units, and correcting those scales them down a further 10× —
+silently, because the affine stays well-formed and coordinates simply land
+outside the volume:
+
+| File | Header zooms | Needs 10× correction? |
+|---|---|---|
+| `Atlas_3DRois.nii`, `Atlas_3DRois_brain.nii.gz` | 2.03, 0.80, 2.00 | **Yes** |
+| `*.pre_symm.*`, `*.preregfix.*`, `*.ORIGINAL_SWAPPED.*` | 2.03, 0.80, 2.00 | **Yes** |
+| `Atlas_3DRoisLeftRight.Labels.nii` (+ `.preregfix`) | 0.203, 0.080, 0.200 | **No — already true** |
+
+Both conventions describe the same geometry: `get_true_affine()` on the inflated
+brain volume reproduces the Labels file's native affine to within 4e-5 mm.
+
+`get_true_affine()` / `get_true_voxel_sizes()` **detect** which convention a file
+uses (`header_is_inflated()`), so they are safe to call on any atlas file. This
+is why `steps/roi_extraction.py` correctly uses the Labels file's affine as-is.
+
+Two failure modes, both silent — always go through `utils/atlas.py`:
+- Correcting an already-true file → coordinates 10× too small.
+- Scaling only `affine[:3, :3]` and not the translation → origin 10× off, so the
+  volume lands nowhere near the source coordinates.
 
 ### BEM Geometry
 - Brain radius: ~6.4mm (from 95th percentile of brain voxels)

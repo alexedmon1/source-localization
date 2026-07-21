@@ -154,9 +154,13 @@ def fig_orbital(dp, out_path, snrs=(20.0, 10.0, 0.0), seed=3):
             img, extent, _ = _slice_image(dp, post, truth[2])
             ax = axes[r, c]
 
+            # Linear, as a percentage of the peak: a log density axis spans
+            # orders of magnitude whose numbers mean nothing to a reader, and
+            # it exaggerates the far tail. The probability statements are the
+            # credible contours below, not the colour.
             peak = np.nanmax(img)
-            ax.imshow(img, origin='lower', extent=extent, cmap='magma',
-                      norm=LogNorm(vmin=peak * 1e-4, vmax=peak),
+            ax.imshow(100.0 * img / peak, origin='lower', extent=extent,
+                      cmap='magma', vmin=0, vmax=100,
                       interpolation='bilinear', aspect='equal')
             # Contour the credible regions at their true density levels, so the
             # outline is the actual boundary of the 50% / 95% mass.
@@ -187,9 +191,9 @@ def fig_orbital(dp, out_path, snrs=(20.0, 10.0, 0.0), seed=3):
             if c == 0:
                 ax.set_ylabel(f'{label}\nA-P (mm)', fontweight='bold', fontsize=10)
 
-    fig.suptitle('p(true source location | data) — axial slice through the source '
-                 '(log colour scale)\n'
-                 'green = 50% credible region, cyan = 95%, white cross = true source',
+    fig.suptitle('p(true source location | data) — axial slice through the source\n'
+                 'colour = posterior density, % of peak (100% = most probable location).  '
+                 'green = 50% credible region, cyan = 95%, cross = true source',
                  fontweight='bold', fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
     fig.savefig(out_path, dpi=150, bbox_inches='tight')
