@@ -31,6 +31,11 @@ A complete, validated Python package for mouse EEG source localization with two 
 
 ## Overview
 
+> **📖 Documentation site:** [`docs/`](docs/index.md) — guides (adding an atlas,
+> electrode setup) and **known issues** you should read before interpreting
+> output. Preview locally with
+> `uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs serve`.
+
 This package provides a complete, validated pipeline for performing source localization on mouse EEG data. It implements multiple head models (BEM), source space configurations, and inverse methods to estimate brain activity from scalp EEG recordings.
 
 ### What is Source Localization?
