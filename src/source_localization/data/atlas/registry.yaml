@@ -1,30 +1,110 @@
+# Atlas registry — maps an atlas name to the file set that defines it.
+#
+# Selected with `--atlas NAME` on the CLI, or `Pipeline.from_preset(..., atlas=NAME)`
+# / `Config.apply_atlas(NAME)` from the API. Only the `inputs:` block is copied
+# into the pipeline config; `meta:` is descriptive and is never treated as a path.
+#
+# All parcellations share one voxel grid (64 x 256 x 50) and one coordinate space,
+# so the BEM, source space and electrodes are unchanged by the choice of atlas —
+# only the ROI label lookup differs.
+#
+# `brain_mask_coverage_pct` is the fraction of Atlas_3DRois_brain.nii.gz voxels
+# carrying a non-zero label. It is NOT 100% for any atlas: the Allen
+# parcellations tile grey matter, leaving white matter, ventricles and parcel
+# boundaries unlabeled, and Antwerp labels named structures only. Anything
+# mapping a coordinate to an ROI must handle unlabeled positions — see
+# steps/roi_extraction.py, which falls back to the nearest labeled voxel.
+# (This replaces a `full_brain_coverage: true` flag that was both untrue for
+# every Allen entry and never read by any code.)
+#
+# To add an atlas, add an entry here — nothing else needs to change.
+
 antwerp:
-  brain_labels: data/atlas/Atlas_3DRoisLeftRight.Labels.nii
-  roi_mapping: data/atlas/roi_mapping.json
-  roi_categories: data/atlas/roi_categories.yaml
-  brain_volume: data/atlas/Atlas_3DRois.nii
-  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
-  full_brain_coverage: false
+  inputs:
+    brain_labels: data/atlas/Atlas_3DRoisLeftRight.Labels.nii
+    roi_mapping: data/atlas/roi_mapping.json
+    roi_categories: data/atlas/roi_categories.yaml
+    brain_volume: data/atlas/Atlas_3DRois.nii
+    brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  meta:
+    description: >-
+      UAnterwerpen C57BL/6 MRI atlas. Named anatomical structures only, so large
+      interior regions carry no label and nearest-label assignment can move a
+      source up to 2.6 mm. Ten parcels are smaller than a 0.5 mm source grid can
+      resolve. Historical default; prefer allen32 for per-ROI claims.
+    parcels: 46
+    lateralized: true
+    brain_mask_coverage_pct: 30.9
+    labeled_volume_mm3: 174.3
 
 allen:
-  brain_labels: data/atlas/allen/allen_labels.nii.gz
-  roi_mapping: data/atlas/allen/roi_mapping.json
-  roi_categories: data/atlas/allen/roi_categories.yaml
-  brain_volume: data/atlas/Atlas_3DRois.nii
-  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
-  full_brain_coverage: true
+  # Alias for allen32 — identical files. Kept because `--atlas allen` predates
+  # the allen32/allen64 split and existing runs reference it.
+  inputs:
+    brain_labels: data/atlas/allen/allen_labels.nii.gz
+    roi_mapping: data/atlas/allen/roi_mapping.json
+    roi_categories: data/atlas/allen/roi_categories.yaml
+    brain_volume: data/atlas/Atlas_3DRois.nii
+    brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  meta:
+    description: Alias for allen32 (same files).
+    alias_of: allen32
+    parcels: 32
+    lateralized: true
+    brain_mask_coverage_pct: 65.7
+    labeled_volume_mm3: 370.6
 
 allen32:
-  brain_labels: data/atlas/allen/allen_labels.nii.gz
-  roi_mapping: data/atlas/allen/roi_mapping.json
-  roi_categories: data/atlas/allen/roi_categories.yaml
-  brain_volume: data/atlas/Atlas_3DRois.nii
-  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
-  full_brain_coverage: true
+  inputs:
+    brain_labels: data/atlas/allen/allen_labels.nii.gz
+    roi_mapping: data/atlas/allen/roi_mapping.json
+    roi_categories: data/atlas/allen/roi_categories.yaml
+    brain_volume: data/atlas/Atlas_3DRois.nii
+    brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  meta:
+    description: >-
+      Allen CCFv3 registered into Antwerp space and grouped into 16 parcels per
+      hemisphere (ids 1-16 left, 17-32 right). Tiles grey matter, so nearest-label
+      assignment is a sub-voxel nudge. Each parcel carries a tier (1 = dorsal
+      cortex near the electrodes, 2 = central subcortical, 3 = lateral/ventral)
+      recording how well EEG reaches it. See allen/METHODS.md.
+    parcels: 32
+    parcels_per_hemisphere: 16
+    lateralized: true
+    brain_mask_coverage_pct: 65.7
+    labeled_volume_mm3: 370.6
+
+coarse22:
+  # Reachable as `coarse_22roi` too — see LEGACY_ATLAS_ALIASES in config.py.
+  inputs:
+    brain_labels: data/atlas/coarse_parcellation/coarse_22roi_atlas.nii
+    roi_mapping: data/atlas/coarse_parcellation/coarse_22roi_mapping.json
+    brain_volume: data/atlas/Atlas_3DRois.nii
+    brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  meta:
+    description: >-
+      The 46 Antwerp structures regrouped into 22 regions, dropping white matter
+      and the septal nucleus. Inherits Antwerp's sparse coverage. NOTE this is
+      the one label volume with a 10x-inflated header, so anything reading it
+      must go through utils.atlas.get_true_affine() — using the raw affine puts
+      the labels at +/-49 mm while sources sit at +/-5 mm. No roi_categories file.
+    parcels: 22
+    lateralized: false
+    brain_mask_coverage_pct: 30.5
+    labeled_volume_mm3: 171.7
 
 allen64:
-  brain_labels: data/atlas/allen/allen_labels_allen64.nii.gz
-  roi_mapping: data/atlas/allen/roi_mapping_allen64.json
-  brain_volume: data/atlas/Atlas_3DRois.nii
-  brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
-  full_brain_coverage: true
+  inputs:
+    brain_labels: data/atlas/allen/allen_labels_allen64.nii.gz
+    roi_mapping: data/atlas/allen/roi_mapping_allen64.json
+    brain_volume: data/atlas/Atlas_3DRois.nii
+    brain_mask: data/atlas/Atlas_3DRois_brain.nii.gz
+  meta:
+    description: >-
+      Finer Allen parcellation, 32 parcels per hemisphere. Note there is no
+      roi_categories file for this atlas.
+    parcels: 64
+    parcels_per_hemisphere: 32
+    lateralized: true
+    brain_mask_coverage_pct: 69.3
+    labeled_volume_mm3: 390.8

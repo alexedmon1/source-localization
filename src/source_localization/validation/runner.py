@@ -52,6 +52,9 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import yaml
 
+from ..config import (ATLAS_DEFINITIONS, DEFAULT_ATLAS, atlas_input_paths,
+                      resolve_atlas_name)
+
 
 def deep_merge(base: Dict, override: Dict) -> Dict:
     """
@@ -248,11 +251,15 @@ class ValidationRunner:
         self.config_name = self.config_path.stem
         self.verbose = verbose
 
-        # Apply atlas overrides if provided
+        # Apply atlas overrides if provided. '_atlas_name' is metadata used for
+        # the output directory suffix and must not be copied into inputs, where
+        # every other key is a file path.
         if atlas_overrides:
             if 'inputs' not in self.config:
                 self.config['inputs'] = {}
             for key, value in atlas_overrides.items():
+                if key == '_atlas_name':
+                    continue
                 self.config['inputs'][key] = value
             # Update config name to reflect atlas
             atlas_suffix = atlas_overrides.get('_atlas_name', 'custom')
@@ -2124,7 +2131,11 @@ def run_validation(
     verbose : bool
         Print progress
     atlas : str
-        Atlas to use: 'full' (47 ROIs) or 'coarse_22roi' (22 ROIs)
+        Atlas name from the shared registry ('antwerp', 'allen', 'allen32',
+        'allen64', 'coarse22'), or a legacy alias ('full' -> antwerp,
+        'coarse_22roi' -> coarse22). Anything other than Antwerp overrides the
+        config's input paths and suffixes the output directory with the atlas
+        name.
     test_mode : str, optional
         Override test mode: 'roi_centroids' (legacy) or 'uniform_grid' (depth-stratified).
         Default: from config, or 'roi_centroids' if not specified.
@@ -2156,25 +2167,23 @@ def run_validation(
         print(f"Results directory: {results_dir}")
         print(f"Running {len(config_files)} validation(s)...")
 
-    # Atlas path overrides
+    # Atlas path overrides, taken from the shared registry rather than an
+    # if/elif chain. The chain previously here knew only 'coarse_22roi' and
+    # 'allen32' and duplicated their paths, so it silently diverged from
+    # registry.yaml and made the other atlases unreachable from validation.
     atlas_overrides = None
-    if atlas != 'full':
-        if atlas == 'coarse_22roi':
-            atlas_overrides = {
-                'brain_labels': 'data/atlas/coarse_parcellation/coarse_22roi_atlas.nii',
-                'roi_mapping': 'data/atlas/coarse_parcellation/coarse_22roi_mapping.json',
-                '_atlas_name': 'coarse22'
-            }
-            if verbose:
-                print(f"Using COARSE 22-ROI atlas")
-        elif atlas == 'allen32':
-            atlas_overrides = {
-                'brain_labels': 'data/atlas/allen/allen_labels.nii.gz',
-                'roi_mapping': 'data/atlas/allen/roi_mapping.json',
-                '_atlas_name': 'allen32'
-            }
-            if verbose:
-                print(f"Using ALLEN32 atlas (32 Allen CCFv3 ROIs)")
+    canonical = resolve_atlas_name(atlas)
+    if canonical != DEFAULT_ATLAS:
+        # Antwerp is what the presets already point at, so leave the config
+        # untouched for it — that also keeps the output directory unsuffixed,
+        # which scripts/run_parallel_validation.py relies on.
+        atlas_overrides = atlas_input_paths(canonical)
+        atlas_overrides['_atlas_name'] = canonical
+        if verbose:
+            meta = ATLAS_DEFINITIONS[canonical].get('meta', {})
+            print(f"Using {canonical.upper()} atlas "
+                  f"({meta.get('parcels', '?')} parcels, "
+                  f"{meta.get('brain_mask_coverage_pct', '?')}% of brain mask)")
 
     # Run validations
     all_results = []

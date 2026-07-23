@@ -42,8 +42,10 @@ def run_config(config_name: str, test_name: str, n_trials: int, atlas: str, test
         )
 
         if result.returncode == 0:
-            # Move results to test category subdirectory
-            # Config name includes atlas suffix (e.g., V01_sphere_vol_dspm_coarse22)
+            # Move results to test category subdirectory. The directory is named
+            # for the config alone — run_validation passes output_dir explicitly,
+            # so the atlas suffix ValidationRunner adds to config_name affects
+            # result labelling inside the files, not this path.
             src_dir = RESULTS_BASE / config_name
             dst_dir = RESULTS_BASE / test_name / config_name
 
@@ -80,7 +82,7 @@ def main():
     parser.add_argument('--test', default='original')
     parser.add_argument('--trials', type=int, default=25)
     parser.add_argument('--workers', type=int, default=6)
-    parser.add_argument('--atlas', default='coarse_22roi')
+    parser.add_argument('--atlas', default='allen32')
     parser.add_argument('--test-mode', default='uniform_grid')
     parser.add_argument('--configs', nargs='+', help='Specific configs to run')
     args = parser.parse_args()

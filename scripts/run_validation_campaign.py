@@ -2,7 +2,7 @@
 """
 Comprehensive Validation Campaign Runner.
 
-Runs all validation configurations with coarse 22-ROI atlas and uniform_grid test mode.
+Runs all validation configurations with the Allen32 atlas and uniform_grid test mode.
 Organizes results into proper directory hierarchy.
 
 Usage:
@@ -31,7 +31,7 @@ def run_single_config(
     config_name: str,
     output_dir: Path,
     n_trials: int = 100,
-    atlas: str = 'coarse_22roi',
+    atlas: str = 'allen32',
     test_mode: str = 'uniform_grid'
 ) -> Tuple[str, bool, str]:
     """

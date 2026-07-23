@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .pipeline import Pipeline
-from .config import Config
+from .config import Config, ATLAS_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,25 @@ def _get_available_presets():
     if presets_dir.exists():
         return sorted([p.stem for p in presets_dir.glob('*.yaml')])
     return []
+
+
+def _atlas_choices_help():
+    """One-line summary per registered atlas, built from the registry itself.
+
+    Written from the registry rather than by hand because the previous hardcoded
+    help string claimed 'allen (49 ROIs)' when that atlas has 32.
+    """
+    parts = []
+    for name in sorted(ATLAS_DEFINITIONS):
+        meta = ATLAS_DEFINITIONS[name].get('meta', {})
+        n = meta.get('parcels')
+        if meta.get('alias_of'):
+            parts.append(f"{name} (= {meta['alias_of']})")
+        elif n is not None:
+            parts.append(f"{name} ({n} parcels)")
+        else:
+            parts.append(name)
+    return ', '.join(parts)
 
 
 def _create_run_parser(subparsers=None):
@@ -87,11 +106,15 @@ Examples:
     parser.add_argument('--visualize', action='store_true',
                         help='Include visualization (optional post-processing)')
 
-    # Atlas selection
+    # Atlas selection. Choices come from the registry so a new atlas is
+    # reachable from the CLI as soon as it is added to registry.yaml — the
+    # hardcoded list previously here silently blocked allen32 and allen64.
     parser.add_argument('--atlas',
-                        choices=['antwerp', 'allen'],
+                        choices=sorted(ATLAS_DEFINITIONS),
                         default=None,
-                        help='Atlas to use: antwerp (47 ROIs, default) or allen (49 ROIs)')
+                        help='Atlas parcellation to use (default: the preset\'s '
+                             'own paths, i.e. antwerp). Choices: '
+                             + _atlas_choices_help())
 
     # Other flags
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
