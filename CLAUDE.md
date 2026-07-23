@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Package Overview
 
-This is the **Mouse EEG Source Localization** package - a production-ready Python pipeline for solving the EEG inverse problem on mouse brain data. It estimates neural source activity from 30-channel scalp EEG recordings using the Antwerp Mouse Brain Atlas (47 ROIs).
+This is the **Mouse EEG Source Localization** package - a production-ready Python pipeline for solving the EEG inverse problem on mouse brain data. It estimates neural source activity from 30-channel scalp EEG recordings, and reports it over an atlas parcellation.
+
+**The atlas is a choice, not a fixed property of the package.** Four parcellations
+are registered (`antwerp`, `allen`/`allen32`, `allen64`) and the source geometry
+is identical across all of them — only the ROI label lookup changes. Antwerp is
+the historical default; **`allen32` is the one to prefer for ROI-level work**.
+See "Atlas Selection" below before assuming which atlas is in play.
 
 ## Development Commands
 
@@ -87,6 +93,91 @@ src/source_localization/
 - Override via CLI: `--snr 5.0 --method MNE`
 - Or Python API: `Pipeline.from_preset('ellipsoid_surface', **{'inverse.snr': 5.0})`
 
+### Atlas Selection
+
+Atlases are declared in `src/source_localization/data/atlas/registry.yaml`, loaded
+into `config.ATLAS_DEFINITIONS`, and applied by `Config.apply_atlas(name)`, which
+overwrites the `inputs:` paths. **Presets hardcode the Antwerp paths**, so an
+atlas is only used if it is asked for explicitly.
+
+```bash
+python -m source_localization.cli --preset shell_ellipsoid --atlas allen ...
+```
+```python
+Pipeline.from_preset('shell_ellipsoid', atlas='allen32')   # API reaches all keys
+```
+
+| Registry key | Labels file | Parcels | Notes |
+|---|---|---|---|
+| `antwerp` | `Atlas_3DRoisLeftRight.Labels.nii` | 46 + background | Default. Named structures only |
+| `allen` | `allen/allen_labels.nii.gz` | 32 + background | **Identical to `allen32`** — same files |
+| `allen32` | `allen/allen_labels.nii.gz` | 32 + background | 16 per hemisphere, `1-16 = L`, `17-32 = R` |
+| `allen64` | `allen/allen_labels_allen64.nii.gz` | 64 + background | 32 per hemisphere |
+
+Each registry entry is `inputs:` (the file paths, copied into the pipeline
+config) plus `meta:` (parcel count, coverage, tier scheme — descriptive only,
+never copied). Read metadata with `Config.atlas_meta(name)`. `--atlas` choices
+and help text are both generated from the registry, so **adding an atlas to
+`registry.yaml` is the only step needed** to make it selectable.
+`tests/test_atlas_registry.py` asserts the declared parcel counts and coverage
+percentages against the shipped NIfTI files, so the registry cannot drift from
+what it describes.
+
+**Both CLIs share the registry.** `cli.py` and `validation/cli.py` used to have
+disjoint atlas vocabularies overlapping on one name, with the validation side
+hardcoding paths in `if/elif` chains. Names now resolve through
+`config.resolve_atlas_name()`, and the validation CLI additionally accepts the
+two legacy names its scripts pass:
+
+| Legacy name | Canonical |
+|---|---|
+| `full` | `antwerp` |
+| `coarse_22roi` | `coarse22` |
+
+The validation CLI still **defaults to `full`** (i.e. Antwerp), and selecting
+anything else suffixes the output directory with the atlas name.
+
+### Label volumes have different affine conventions — always detect
+
+`coarse_22roi_atlas.nii` is the one label volume with a **10×-inflated header**;
+Antwerp's and both Allen files are already in true units. `roi_extraction.py`
+used the raw affine, which is right for the latter and puts coarse22's labels at
+**±49 mm while sources sit at ±5 mm**. Nothing raised — the nearest-labeled-voxel
+fallback always finds *a* voxel — so all 215 shell sources silently collapsed
+onto **2 of 22** ROIs. Fixed by routing through `get_true_affine()`, which
+detects the convention and is a verified no-op for the true-unit files.
+
+After the fix, ROIs receiving at least one of the 215 shell sources:
+`antwerp` 37/46, `allen32` 31/32, `allen64` 59/64, `coarse22` 22/22.
+
+**Any code reading a label volume must go through `utils/atlas.py`.** Do not use
+`nii.affine` directly, and do not assume the file you were handed matches the one
+you tested against.
+
+**Coverage matters for anything that maps coordinates to ROIs.** Measured against
+the 0.5 mm validation source grid (4251 positions inside the brain mask):
+
+| | Antwerp | Allen32 |
+|---|---|---|
+| positions strictly inside a label | 31.4% | **69.3%** |
+| within 0.5 mm of a label | 73.2% | **98.9%** |
+| within 1.0 mm of a label | 90.0% | **100%** |
+| worst-case nearest-label distance | 2.56 mm | **0.98 mm** |
+| smallest parcel (grid positions) | **1** | **18** |
+
+Antwerp leaves large unlabeled interior regions, so nearest-labeled-voxel
+assignment (`steps/roi_extraction.py`) can move a source up to 2.6 mm to reach a
+label, and ten of its parcels have ≤4 candidate positions. Allen32 is
+grey-matter-tiling, so the same assignment is a sub-voxel nudge. Prefer Allen32
+whenever the result is a per-ROI claim.
+
+Allen32 also carries metadata the Antwerp mapping does not: a `tier` per parcel
+(1 = dorsal cortex near the electrodes, 2 = central subcortical, 3 =
+lateral/ventral far from them) and `category` (cortical, hippocampal, thalamic,
+subcortical, hypothalamic, olfactory, cerebellum, brainstem). The tiers encode
+how well EEG can reach each parcel and are the natural stratifier for
+depth-dependent results.
+
 ## Critical Implementation Details
 
 ### Atlas Voxel Size Scaling (CRITICAL)
@@ -104,9 +195,19 @@ outside the volume:
 
 | File | Header zooms | Needs 10× correction? |
 |---|---|---|
-| `Atlas_3DRois.nii`, `Atlas_3DRois_brain.nii.gz` | 2.03, 0.80, 2.00 | **Yes** |
-| `*.pre_symm.*`, `*.preregfix.*`, `*.ORIGINAL_SWAPPED.*` | 2.03, 0.80, 2.00 | **Yes** |
+| `Atlas_3DRois.nii` (+ `.pre_symm`, `.preregfix`) | 2.03, 0.80, 2.00 | **Yes** |
+| `Atlas_3DRois_brain.nii.gz` (+ `.pre_symm`, `.preregfix`) | 2.03, 0.80, 2.00 | **Yes** |
+| `Atlas_3DRoisLeftRight.Labels.ORIGINAL_SWAPPED.*` | 2.03, 0.80, 2.00 | **Yes** |
+| `allen/allen_labels_v1_49roi.*` (superseded) | 2.03, 0.80, 2.00 | **Yes** |
+| `coarse_parcellation/coarse_22roi_atlas.*` | 2.03, 0.80, 2.00 | **Yes** |
 | `Atlas_3DRoisLeftRight.Labels.nii` (+ `.preregfix`) | 0.203, 0.080, 0.200 | **No — already true** |
+| `allen/allen_labels.nii.gz` (+ `_allen64`, `.preregfix`) | 0.203, 0.080, 0.200 | **No — already true** |
+| `allen/allen_annotation_in_antwerp.*` | 0.203, 0.080, 0.200 | **No — already true** |
+
+**The filename suffix does not tell you the convention.** `.preregfix` appears on
+both sides of this table — `Atlas_3DRois.preregfix.nii` is inflated while
+`Atlas_3DRoisLeftRight.Labels.preregfix.nii` is not. Only the header zooms
+decide. All current Allen label files are already in true units.
 
 Both conventions describe the same geometry: `get_true_affine()` on the inflated
 brain volume reproduces the Labels file's native affine to within 4e-5 mm.
@@ -161,10 +262,37 @@ roi_power = pipeline.step_outputs['spectral_analysis']['roi_band_power']['gamma'
 
 ## Data Files
 
-Bundled with package in `src/source_localization/data/`:
-- `atlas/Atlas_3DRois.nii` - Brain volume with 47 ROI labels
-- `atlas/roi_mapping.json` - ROI names and metadata
-- `electrodes/mouse_array_coords.csv` - 30-channel NeuroNexus array positions (E1–E30, plus a Bregma fiducial)
+Bundled with package in `src/source_localization/data/`.
+
+**Do not confuse the template with the labels.** `Atlas_3DRois.nii` is the MRI
+*intensity* template — it holds ~808,000 distinct grey values, not ROI IDs.
+Every parcellation is a separate integer label volume. All files below share one
+voxel grid (64 × 256 × 50) and one coordinate space, so they are interchangeable
+as label sources.
+
+| File | Role | Contents |
+|---|---|---|
+| `atlas/Atlas_3DRois.nii` | `brain_volume` | **Intensity template.** Continuous MRI values. **Not labels** |
+| `atlas/Atlas_3DRois_brain.nii.gz` | `brain_mask` | Skull-stripped binary mask, 563.7 mm³. Defines the source volume |
+| `atlas/Atlas_3DRoisLeftRight.Labels.nii` | `brain_labels` (antwerp) | Integer IDs 0–46; 46 named structures + background |
+| `atlas/roi_mapping.json` | `roi_mapping` (antwerp) | Names, abbreviations, colors, categories for the above |
+| `atlas/allen/allen_labels.nii.gz` | `brain_labels` (allen/allen32) | Integer IDs 0–32; 16 parcels per hemisphere |
+| `atlas/allen/roi_mapping.json` | `roi_mapping` (allen/allen32) | Names, `tier`, `category`, `hemisphere`, source Allen structure IDs |
+| `atlas/allen/allen_labels_allen64.nii.gz` | `brain_labels` (allen64) | Integer IDs 0–64; 32 parcels per hemisphere |
+| `atlas/registry.yaml` | — | Maps atlas name → the file set above |
+| `electrodes/mouse_array_coords.csv` | — | 30-channel NeuroNexus array positions (E1–E30, plus a Bregma fiducial) |
+
+Also present but **not registered, do not use as label sources**:
+`allen/allen_labels_v1_49roi.*` (superseded by allen32/allen64),
+`allen/allen_annotation_in_antwerp.*` (raw warped Allen CCFv3 annotation, 553
+distinct structures, before parcel grouping — note `allen/METHODS.md` says "661
+Allen structures preserved", which does not match the shipped file),
+`coarse_parcellation/coarse_22roi_atlas.*`
+(a separate 22-ROI Antwerp regrouping), and every `.pre_symm` / `.preregfix` /
+`.ORIGINAL_SWAPPED` variant (earlier registration states, kept for provenance).
+
+`atlas/allen/METHODS.md` documents the ANTs registration of Allen CCFv3 into
+Antwerp space and how the parcels were built.
 
 ## Output Structure
 
