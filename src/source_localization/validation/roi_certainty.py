@@ -16,15 +16,35 @@ Two views of the same joint distribution over (true parcel, attributed parcel):
   sharply for a small parcel beside a large one, and precision depends on the
   assumed prior over source location (here uniform over labeled tissue).
 
-Two estimators, so the cost of the deployed method is visible:
+Two arms, named for what they represent rather than for their operator:
 
-- **posterior** — the fundamental limit. ``P(parcel | B)`` is the posterior mass
-  falling in each parcel; the point attribution is its argmax. Because the
-  density is calibrated, these parcel probabilities are auditable: when it says
-  0.7 it should be right 70% of the time (:func:`reliability`).
-- **sLORETA** — the pipeline's actual estimator. The attributed parcel is the one
-  containing the peak of the sLORETA reconstruction on the shell source space.
-  A point estimate only, so it has a confusion matrix but no reliability curve.
+- **ceiling** — the fundamental limit: the calibrated posterior on the dense
+  grid. ``P(parcel | B)`` is the posterior mass falling in each parcel; the point
+  attribution is its argmax. Because the density is calibrated, these parcel
+  probabilities are auditable: when it says 0.7 it should be right 70% of the
+  time (:func:`reliability`).
+- **deployed** — what a user actually gets: sLORETA on the shell source space.
+  The attributed parcel is the one containing the peak of the sLORETA
+  reconstruction on the 215-point shell. A point estimate only, so it has a
+  confusion matrix but no reliability curve.
+
+.. warning::
+   The two arms differ in **three** ways at once, so the gap between them is the
+   *total cost of deployment*, **not** an "estimator gap" attributable to
+   sLORETA:
+
+   1. *Source space* — the ceiling scores on the dense 0.5 mm grid, of which the
+      simulated truth is always a node, so the true location is in its
+      dictionary; the deployed arm scores on the 215-point shell (~1.4 mm), where
+      the true location is almost never a candidate.
+   2. *Attribution* — the ceiling takes the argmax of parcel-integrated posterior
+      mass; the deployed arm takes a single peak source and reads off its parcel.
+   3. *Operator* — calibrated posterior vs sLORETA, the only difference the name
+      "sLORETA" actually denotes, and the smallest of the three.
+
+   Read the gap as "fundamental limit vs deployed pipeline," not "MNE vs
+   sLORETA." An operator-only comparison would need both arms on the same source
+   space and attribution rule.
 
 Everything is stratified by the true source's distance to the nearest electrode
 (:data:`.run_two_source_posterior.DEPTH_BANDS`), because localization on this
