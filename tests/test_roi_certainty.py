@@ -130,8 +130,9 @@ def test_reliability_of_a_calibrated_toy(pmap):
     truth = rc.sample_truth_positions(pmap, n_per_parcel=4, rng=rng)
     rel = rc.reliability(dp, pmap, truth, snr_db=10.0,
                          rng=np.random.default_rng(7), n_bins=5)
-    assert rel['count'].sum() == len(truth['idx'])
-    # Where there are enough trials, predicted and empirical should track within
+    # Multiclass calibration bins every (trial, parcel) pair, not just the true one.
+    assert rel['count'].sum() == len(truth['idx']) * pmap.n_parcels
+    # Where there are enough pairs, predicted and empirical should track within
     # a loose tolerance — this is a smoke check on calibration, not a proof.
     good = rel['count'] >= 8
     if good.any():

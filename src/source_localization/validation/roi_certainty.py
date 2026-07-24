@@ -395,16 +395,25 @@ def reliability(
     moment_std: Optional[float] = 1.0,
 ) -> Dict[str, np.ndarray]:
     """
-    Reliability of the posterior parcel probabilities (posterior arm only).
+    Multiclass calibration of the parcel probabilities (posterior arm only).
 
-    For each trial, bin the posterior probability assigned to the *true* parcel,
-    and within each probability bin record how often the true parcel really was
-    the argmax. If the probabilities are honest, a bin centred at 0.7 should
-    contain trials whose true parcel wins ~70% of the time. This is the parcel
-    analogue of :meth:`DipolePosterior.coverage_test`.
+    Over *every* ``(trial, parcel)`` pair, bin by the predicted
+    ``P(parcel | B)`` and record how often that parcel really is the true one.
+    On the diagonal, "the pipeline reported ``P(k) = p``" means "the source is in
+    ``k`` with probability ``p``" — the property that lets a user act on the
+    number. This is the parcel analogue of
+    :meth:`DipolePosterior.coverage_test`.
 
-    Returns bin centres, mean predicted probability, empirical hit rate, and
-    per-bin counts.
+    Note it is emphatically **not** the same as binning the *true* parcel's mass
+    against the argmax-win rate: those are different events (a parcel holding 0.3
+    of the mass wins far more than 30% of the time when the remaining 0.7 is
+    fragmented across small neighbours), so that version is not a calibration
+    test. ``scripts/run_roi_certainty.py`` draws the same diagram from cached
+    probabilities.
+
+    Returns bin centres, mean predicted probability, empirical ``P(parcel is
+    true)``, and per-bin ``(trial, parcel)`` counts (which sum to
+    ``n_trials * n_parcels``).
     """
     edges = np.linspace(0.0, 1.0, n_bins + 1)
     pred_sum = np.zeros(n_bins)
@@ -416,14 +425,13 @@ def reliability(
         data, noise_std = dp.simulate(
             dp.positions_mm[gi], o, snr_db, rng, leadfield=dp._G[gi])
         probs = posterior_parcel_probs(dp, data, noise_std, pmap, moment_std)
-        true_k = truth['parcel'][t]
-        p_true = probs[true_k]
-        won = int(probs.argmax() == true_k)
+        is_true = np.zeros(pmap.n_parcels)
+        is_true[truth['parcel'][t]] = 1.0
 
-        b = min(int(p_true * n_bins), n_bins - 1)
-        pred_sum[b] += p_true
-        hit_sum[b] += won
-        count[b] += 1
+        b = np.clip((probs * n_bins).astype(int), 0, n_bins - 1)
+        np.add.at(pred_sum, b, probs)
+        np.add.at(hit_sum, b, is_true)
+        np.add.at(count, b, 1)
 
     with np.errstate(invalid='ignore', divide='ignore'):
         mean_pred = np.where(count > 0, pred_sum / count, np.nan)
