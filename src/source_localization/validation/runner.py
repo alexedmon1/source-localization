@@ -657,6 +657,7 @@ class ValidationRunner:
                 pts_by_roi, _, roi_placement_meta = load_atlas_roi_test_points(
                     str(roi_labels_file), str(roi_names_file),
                     placement=roi_placement, n_per_roi=roi_n_per,
+                    sample_strategy=val_config.get('roi_sample_strategy', 'random'),
                 )
                 roi_ids = sorted([rid for rid in pts_by_roi.keys() if rid != 0])
                 if roi_indices is not None:
@@ -1237,6 +1238,7 @@ class ValidationRunner:
                 pts_by_roi, _, roi_placement_meta = load_atlas_roi_test_points(
                     str(roi_labels_file), str(roi_names_file),
                     placement=roi_placement, n_per_roi=roi_n_per,
+                    sample_strategy=val_config.get('roi_sample_strategy', 'random'),
                 )
                 roi_ids = sorted([rid for rid in pts_by_roi.keys() if rid != 0])
                 if roi_indices is not None:

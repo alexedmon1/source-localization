@@ -396,6 +396,7 @@ def load_atlas_roi_test_points(
     roi_names_json: Optional[str] = None,
     placement: str = "medoid",
     n_per_roi: int = 1,
+    sample_strategy: str = "random",
     seed: int = 20260728,
 ):
     """Generate ROI test points that are GUARANTEED to lie inside their own ROI.
@@ -433,14 +434,28 @@ def load_atlas_roi_test_points(
         ``medoid``   nearest in-ROI voxel to the centroid. One point per ROI, so
                      it is directly comparable to legacy centroid results.
                      Verified inside its own ROI for all 32 Allen-32 parcels.
-        ``sample``   ``n_per_roi`` voxels drawn within the ROI, spread by greedy
-                     farthest-point selection from the medoid. A single point
-                     cannot characterise a 5,000-voxel curved sheet; this gives
-                     within-ROI coverage and variance.
+        ``sample``   ``n_per_roi`` voxels drawn within the ROI. A single point
+                     cannot characterise a 5,000-voxel curved sheet, and a
+                     single-voxel move can swing an ROI's accuracy by ~30 points
+                     (Motor_L went 100% -> 72% between centroid and medoid), so
+                     multi-point sampling is the only stable estimate.
+                     See ``sample_strategy``.
         ``centroid`` legacy behaviour, retained only for reproducing historical
                      runs. Not recommended.
     n_per_roi : int
         Points per ROI; ignored unless ``placement="sample"``.
+    sample_strategy : {"random", "farthest"}
+        Only used when ``placement="sample"``.
+
+        ``random`` (default) uniform draw over the ROI's voxels, giving an
+        UNBIASED estimate of accuracy over the parcel's volume.
+
+        ``farthest`` greedy farthest-point selection. Maximises spatial
+        coverage but deliberately picks the most PERIPHERAL voxels, which are
+        exactly the boundary points most likely to be misattributed. It is
+        therefore a worst-case, boundary-weighted probe, not a representative
+        one: on Allen-32 it scored 25.5% overall versus 49.8% for medoid.
+        Use it to characterise boundary behaviour, never as "the" accuracy.
     seed : int
         Unused by the deterministic strategies; recorded for provenance.
 
@@ -481,15 +496,29 @@ def load_atlas_roi_test_points(
             chosen = centroid_voxel[None, :]
         else:
             d2c = np.linalg.norm(vox - centroid_voxel, axis=1)
-            order = [int(np.argmin(d2c))]
+            order = [int(np.argmin(d2c))]          # medoid always first
             if placement == "sample" and n_per_roi > 1:
-                # Greedy farthest-point: spread coverage over the parcel rather
-                # than clustering near the (possibly exterior) centroid.
-                mind = np.linalg.norm(vox - vox[order[0]], axis=1)
-                for _ in range(min(n_per_roi, len(vox)) - 1):
-                    nxt = int(np.argmax(mind))
-                    order.append(nxt)
-                    mind = np.minimum(mind, np.linalg.norm(vox - vox[nxt], axis=1))
+                k = min(n_per_roi, len(vox)) - 1
+                if sample_strategy == "farthest":
+                    # Boundary-weighted probe -- see docstring. Biased hard.
+                    mind = np.linalg.norm(vox - vox[order[0]], axis=1)
+                    for _ in range(k):
+                        nxt = int(np.argmax(mind))
+                        order.append(nxt)
+                        mind = np.minimum(
+                            mind, np.linalg.norm(vox - vox[nxt], axis=1))
+                elif sample_strategy == "random":
+                    # Uniform over the parcel's voxels => unbiased over volume.
+                    # Seeded per ROI so the draw is reproducible and independent
+                    # of ROI iteration order.
+                    rng = np.random.default_rng(seed + int(roi_id))
+                    pool = np.setdiff1d(np.arange(len(vox)), np.array(order))
+                    order += rng.choice(pool, size=min(k, len(pool)),
+                                        replace=False).tolist()
+                else:
+                    raise ValueError(
+                        f"sample_strategy must be random|farthest, "
+                        f"got {sample_strategy!r}")
             chosen = vox[order].astype(float)
 
         pts = nib.affines.apply_affine(affine, chosen)
@@ -509,7 +538,9 @@ def load_atlas_roi_test_points(
 
         test_points[int(roi_id)] = np.atleast_2d(pts)
 
-    meta = {"placement": placement, "n_per_roi": n_per_roi, "seed": seed,
+    meta = {"placement": placement, "n_per_roi": n_per_roi,
+            "sample_strategy": sample_strategy if placement == "sample" else None,
+            "seed": seed,
             "centroid_outside_roi": sorted(centroid_outside),
             "n_centroid_outside": len(centroid_outside)}
 
