@@ -596,6 +596,7 @@ class ValidationRunner:
             )
 
         # Determine test positions based on mode
+        roi_placement_meta = None
         if test_mode == 'uniform_grid':
             if self.verbose:
                 print(f"  Using UNIFORM GRID test mode (spacing={grid_spacing_mm}mm, margin={grid_margin_mm}mm)")
@@ -622,22 +623,53 @@ class ValidationRunner:
                 for i in range(n_test_positions)
             ]
         else:
-            # Legacy mode: test at ROI centroids
-            if self.verbose:
-                print(f"  Using ROI_CENTROIDS test mode (legacy)")
+            # ROI-based test mode. `roi_placement` decides WHERE inside each ROI
+            # the test dipole goes:
+            #   'medoid'  (default) nearest in-ROI voxel to the centroid
+            #   'sample'  n_per_roi points spread within the ROI
+            #   'centroid' legacy; the geometric centroid, which for non-convex
+            #             parcels can lie OUTSIDE the ROI and then scores the
+            #             trial against the wrong label (5/32 ROIs in Allen-32:
+            #             Hippocampus_Post_L/R -> Thalamus, Lateral_Cortex_L/R
+            #             and Cerebellum_L -> unlabeled). See
+            #             load_atlas_roi_test_points().
+            roi_placement = val_config.get('roi_placement', 'medoid')
+            roi_n_per = int(val_config.get('roi_points_per_roi', 1))
 
-            # Get list of ROI IDs to test
-            roi_ids = sorted([rid for rid in roi_centroids.keys() if rid != 0])
-            if roi_indices is not None:
-                roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
+            if roi_placement == 'centroid':
+                if self.verbose:
+                    print("  Using ROI_CENTROIDS test mode (LEGACY placement -- "
+                          "non-convex ROIs may be tested outside themselves)")
+                roi_ids = sorted([rid for rid in roi_centroids.keys() if rid != 0])
+                if roi_indices is not None:
+                    roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
+                test_points = [
+                    (roi_centroids[roi_id], roi_id,
+                     roi_names_map.get(roi_id, f"ROI_{roi_id}"))
+                    for roi_id in roi_ids
+                ]
+                roi_placement_meta = {'placement': 'centroid', 'n_per_roi': 1}
+            else:
+                from .utils import load_atlas_roi_test_points
+                if self.verbose:
+                    print(f"  Using ROI test mode (placement={roi_placement}, "
+                          f"n_per_roi={roi_n_per})")
+                pts_by_roi, _, roi_placement_meta = load_atlas_roi_test_points(
+                    str(roi_labels_file), str(roi_names_file),
+                    placement=roi_placement, n_per_roi=roi_n_per,
+                )
+                roi_ids = sorted([rid for rid in pts_by_roi.keys() if rid != 0])
+                if roi_indices is not None:
+                    roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
+                test_points = []
+                for roi_id in roi_ids:
+                    pts = np.atleast_2d(pts_by_roi[roi_id]) * scale_factor
+                    base = roi_names_map.get(roi_id, f"ROI_{roi_id}")
+                    for k, p in enumerate(pts):
+                        name = base if len(pts) == 1 else f"{base}#{k+1}"
+                        test_points.append((p, roi_id, name))
 
-            n_test_positions = len(roi_ids)
-
-            # Create position info list
-            test_points = [
-                (roi_centroids[roi_id], roi_id, roi_names_map.get(roi_id, f"ROI_{roi_id}"))
-                for roi_id in roi_ids
-            ]
+            n_test_positions = len(test_points)
 
         n_rois = len(set(p[1] for p in test_points if p[1] > 0))
 
@@ -666,6 +698,11 @@ class ValidationRunner:
             # See LOCALIZATION_ERROR_DEFINITION. Recorded so every downstream
             # table can state its own definition without archaeology.
             'localization_error_definition': LOCALIZATION_ERROR_DEFINITION,
+            # Where inside each ROI the test dipole was placed. Legacy
+            # 'centroid' can fall outside non-convex parcels; recorded so an
+            # ROI-accuracy table always states its own placement.
+            'roi_placement': (roi_placement_meta
+                              if test_mode != 'uniform_grid' else None),
             'snr_results': {}
         }
 
@@ -1164,6 +1201,7 @@ class ValidationRunner:
             )
 
         # Determine test positions based on mode
+        roi_placement_meta = None
         if test_mode == 'uniform_grid':
             test_positions, test_roi_labels = generate_uniform_test_grid(
                 str(roi_labels_file),
@@ -1179,15 +1217,38 @@ class ValidationRunner:
                 for i in range(n_test_positions)
             ]
         else:
-            # ROI centroids mode
-            roi_ids = sorted([rid for rid in roi_centroids.keys() if rid != 0])
-            if roi_indices is not None:
-                roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
-            n_test_positions = len(roi_ids)
-            test_points = [
-                (roi_centroids[roi_id], roi_id, roi_names_map.get(roi_id, f"ROI_{roi_id}"))
-                for roi_id in roi_ids
-            ]
+            # ROI-based mode -- same placement contract as run(); see there and
+            # load_atlas_roi_test_points() for why 'centroid' is not the default.
+            roi_placement = val_config.get('roi_placement', 'medoid')
+            roi_n_per = int(val_config.get('roi_points_per_roi', 1))
+
+            if roi_placement == 'centroid':
+                roi_ids = sorted([rid for rid in roi_centroids.keys() if rid != 0])
+                if roi_indices is not None:
+                    roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
+                test_points = [
+                    (roi_centroids[roi_id], roi_id,
+                     roi_names_map.get(roi_id, f"ROI_{roi_id}"))
+                    for roi_id in roi_ids
+                ]
+                roi_placement_meta = {'placement': 'centroid', 'n_per_roi': 1}
+            else:
+                from .utils import load_atlas_roi_test_points
+                pts_by_roi, _, roi_placement_meta = load_atlas_roi_test_points(
+                    str(roi_labels_file), str(roi_names_file),
+                    placement=roi_placement, n_per_roi=roi_n_per,
+                )
+                roi_ids = sorted([rid for rid in pts_by_roi.keys() if rid != 0])
+                if roi_indices is not None:
+                    roi_ids = [roi_ids[i] for i in roi_indices if i < len(roi_ids)]
+                test_points = []
+                for roi_id in roi_ids:
+                    pts = np.atleast_2d(pts_by_roi[roi_id]) * scale_factor
+                    base = roi_names_map.get(roi_id, f"ROI_{roi_id}")
+                    for k, p in enumerate(pts):
+                        test_points.append(
+                            (p, roi_id, base if len(pts) == 1 else f"{base}#{k+1}"))
+            n_test_positions = len(test_points)
 
         n_rois = len(set(p[1] for p in test_points if p[1] > 0))
 
@@ -1216,6 +1277,11 @@ class ValidationRunner:
             # See LOCALIZATION_ERROR_DEFINITION. Recorded so every downstream
             # table can state its own definition without archaeology.
             'localization_error_definition': LOCALIZATION_ERROR_DEFINITION,
+            # Where inside each ROI the test dipole was placed. Legacy
+            # 'centroid' can fall outside non-convex parcels; recorded so an
+            # ROI-accuracy table always states its own placement.
+            'roi_placement': (roi_placement_meta
+                              if test_mode != 'uniform_grid' else None),
             'snr_results': {}
         }
 

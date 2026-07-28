@@ -328,6 +328,7 @@ def load_atlas_roi_centroids(
     roi_centroids = {}
     roi_names = {}
 
+    outside = []
     for roi_id in roi_ids:
         # Get voxel coordinates for this ROI
         voxel_coords = np.array(np.where(atlas_data == roi_id)).T
@@ -338,8 +339,22 @@ def load_atlas_roi_centroids(
         # Convert to mm using corrected affine
         centroid_mm = nib.affines.apply_affine(affine, centroid_voxel)
 
+        # WARNING: the geometric centroid of a NON-CONVEX parcel can fall
+        # OUTSIDE the parcel. See module docstring of roi_test_points() and
+        # load_atlas_roi_test_points() for the measured Allen-32 cases.
+        ci = np.round(centroid_voxel).astype(int)
+        in_bounds = all(0 <= ci[k] < atlas_data.shape[k] for k in range(3))
+        if not in_bounds or int(atlas_data[tuple(ci)]) != int(roi_id):
+            outside.append(int(roi_id))
+
         roi_centroids[int(roi_id)] = centroid_mm
         roi_names[int(roi_id)] = f"ROI_{int(roi_id)}"
+
+    if outside:
+        print(f"  NOTE: {len(outside)} ROI centroid(s) fall OUTSIDE their own ROI "
+              f"(non-convex parcels): {sorted(outside)}.")
+        print(f"        Scoring ROI classification at those points tests the wrong "
+              f"label. Prefer load_atlas_roi_test_points(placement='medoid'|'sample').")
 
     # Load ROI names from JSON if provided
     if roi_names_json and Path(roi_names_json).exists():
@@ -374,6 +389,138 @@ def load_atlas_roi_centroids(
             )
 
     return roi_centroids, roi_names
+
+
+def load_atlas_roi_test_points(
+    roi_labels_nifti: str,
+    roi_names_json: Optional[str] = None,
+    placement: str = "medoid",
+    n_per_roi: int = 1,
+    seed: int = 20260728,
+):
+    """Generate ROI test points that are GUARANTEED to lie inside their own ROI.
+
+    Replaces centroid placement for ROI-classification benchmarking.
+
+    Why this exists
+    ---------------
+    The geometric centroid of a non-convex parcel can fall outside the parcel.
+    Measured on Allen-32 (voxel size 0.203 x 0.080 x 0.200 mm), 5 of 32 centroids
+    land outside their own ROI:
+
+        Hippocampus_Post_L -> Thalamus_L       (0.23 mm from nearest in-ROI voxel)
+        Hippocampus_Post_R -> Thalamus_R       (0.21 mm)
+        Lateral_Cortex_L   -> unlabeled        (0.16 mm)
+        Lateral_Cortex_R   -> unlabeled        (0.29 mm)
+        Cerebellum_L       -> unlabeled        (0.09 mm)
+
+    All five are thin curved sheets or C-shapes: bounding-box fill 10.6-22.5%
+    versus 24-35% for convex parcels such as Somatosensory or Thalamus. The
+    posterior hippocampus is a C wrapping the thalamus, so its centroid landing
+    in thalamus is expected anatomy, not a parcellation defect -- every ROI is
+    >=99.1% a single connected component.
+
+    The displacement is only ~1 voxel, but it places the test dipole in a
+    DIFFERENT structure while the trial is still scored against the original
+    label. Consequences observed with centroid placement:
+      * Lateral_Cortex_L/R scored recall 0.00 AND precision 0.00;
+      * Hippocampus_Post_R trials were "misattributed" to Thalamus_R 16/25 times
+        -- the inverse solution was right, the label was wrong.
+
+    Parameters
+    ----------
+    placement : {"medoid", "sample", "centroid"}
+        ``medoid``   nearest in-ROI voxel to the centroid. One point per ROI, so
+                     it is directly comparable to legacy centroid results.
+                     Verified inside its own ROI for all 32 Allen-32 parcels.
+        ``sample``   ``n_per_roi`` voxels drawn within the ROI, spread by greedy
+                     farthest-point selection from the medoid. A single point
+                     cannot characterise a 5,000-voxel curved sheet; this gives
+                     within-ROI coverage and variance.
+        ``centroid`` legacy behaviour, retained only for reproducing historical
+                     runs. Not recommended.
+    n_per_roi : int
+        Points per ROI; ignored unless ``placement="sample"``.
+    seed : int
+        Unused by the deterministic strategies; recorded for provenance.
+
+    Returns
+    -------
+    test_points : dict[int, np.ndarray]
+        ROI ID -> array of shape (n_points, 3) in mm.
+    roi_names : dict[int, str]
+    meta : dict
+        ``placement``, ``n_per_roi``, ``seed``, and ``centroid_outside_roi``
+        (the ROI IDs whose centroid was outside, i.e. what this fixes).
+    """
+    if placement not in ("medoid", "sample", "centroid"):
+        raise ValueError(f"placement must be medoid|sample|centroid, got {placement!r}")
+
+    atlas_nii = nib.load(roi_labels_nifti)
+    atlas_data = np.round(atlas_nii.get_fdata()).astype(int)
+    affine = corrected_atlas_affine(atlas_nii)
+
+    _, roi_names = load_atlas_roi_centroids(roi_labels_nifti, roi_names_json)
+
+    roi_ids = np.unique(atlas_data)
+    roi_ids = roi_ids[roi_ids > 0]
+
+    test_points = {}
+    centroid_outside = []
+
+    for roi_id in roi_ids:
+        vox = np.array(np.where(atlas_data == roi_id)).T
+        centroid_voxel = vox.mean(axis=0)
+
+        ci = np.round(centroid_voxel).astype(int)
+        in_bounds = all(0 <= ci[k] < atlas_data.shape[k] for k in range(3))
+        if not in_bounds or int(atlas_data[tuple(ci)]) != int(roi_id):
+            centroid_outside.append(int(roi_id))
+
+        if placement == "centroid":
+            chosen = centroid_voxel[None, :]
+        else:
+            d2c = np.linalg.norm(vox - centroid_voxel, axis=1)
+            order = [int(np.argmin(d2c))]
+            if placement == "sample" and n_per_roi > 1:
+                # Greedy farthest-point: spread coverage over the parcel rather
+                # than clustering near the (possibly exterior) centroid.
+                mind = np.linalg.norm(vox - vox[order[0]], axis=1)
+                for _ in range(min(n_per_roi, len(vox)) - 1):
+                    nxt = int(np.argmax(mind))
+                    order.append(nxt)
+                    mind = np.minimum(mind, np.linalg.norm(vox - vox[nxt], axis=1))
+            chosen = vox[order].astype(float)
+
+        pts = nib.affines.apply_affine(affine, chosen)
+
+        # Hard guarantee: every returned point must be inside its own ROI.
+        if placement != "centroid":
+            for p in np.atleast_2d(pts):
+                vi = np.round(nib.affines.apply_affine(
+                    np.linalg.inv(affine), p)).astype(int)
+                ok = all(0 <= vi[k] < atlas_data.shape[k] for k in range(3))
+                if not ok or int(atlas_data[tuple(vi)]) != int(roi_id):
+                    raise AssertionError(
+                        f"placement={placement!r} produced a point outside ROI "
+                        f"{roi_id} ({roi_names.get(int(roi_id))}). This is the "
+                        f"exact failure mode this function exists to prevent."
+                    )
+
+        test_points[int(roi_id)] = np.atleast_2d(pts)
+
+    meta = {"placement": placement, "n_per_roi": n_per_roi, "seed": seed,
+            "centroid_outside_roi": sorted(centroid_outside),
+            "n_centroid_outside": len(centroid_outside)}
+
+    print(f"  ROI test points: placement={placement}, "
+          f"{sum(len(v) for v in test_points.values())} points across "
+          f"{len(test_points)} ROIs")
+    if centroid_outside:
+        print(f"    (legacy centroid placement would have put {len(centroid_outside)} "
+              f"ROI(s) outside their own parcel: {sorted(centroid_outside)})")
+
+    return test_points, roi_names, meta
 
 
 def load_roi_source_mapping(

@@ -171,3 +171,69 @@ def test_requested_error_is_never_less_than_snapped_minus_snapping():
         snapping = compute_localization_error(requested, snapped)
         assert e_req <= e_snap + snapping + 1e-9
         assert e_snap <= e_req + snapping + 1e-9
+
+
+# --------------------------------------------------------------------------
+# ROI test-point placement (non-convex parcels)
+# --------------------------------------------------------------------------
+
+ATLAS = "src/source_localization/data/atlas/allen/allen_labels.nii.gz"
+NAMES = "src/source_localization/data/atlas/allen/roi_mapping.json"
+
+
+@pytest.mark.parametrize("placement,n_per", [("medoid", 1), ("sample", 5)])
+def test_roi_test_points_are_inside_their_own_roi(placement, n_per):
+    """Every generated test point must lie inside the ROI it is scored against.
+
+    The geometric centroid of a non-convex parcel can fall outside it. In
+    Allen-32 that affects 5 of 32 ROIs (Hippocampus_Post_L/R land in thalamus;
+    Lateral_Cortex_L/R and Cerebellum_L land in unlabeled tissue), which scored
+    Lateral_Cortex at 0.00 recall AND 0.00 precision -- a test-design artifact.
+    load_atlas_roi_test_points() asserts the guarantee internally; this pins it.
+    """
+    import os
+    from pathlib import Path
+    from source_localization.validation.utils import load_atlas_roi_test_points
+
+    root = Path(__file__).resolve().parent.parent
+    atlas, names = root / ATLAS, root / NAMES
+    if not atlas.exists():
+        pytest.skip("atlas data not available")
+
+    pts, roi_names, meta = load_atlas_roi_test_points(
+        str(atlas), str(names), placement=placement, n_per_roi=n_per)
+
+    assert len(pts) == 32
+    assert meta["placement"] == placement
+    if placement == "sample":
+        assert sum(len(v) for v in pts.values()) == 32 * n_per
+
+
+def test_centroid_outside_roi_is_detected_and_reported():
+    """The known non-convex cases must be surfaced, not silently tolerated."""
+    from pathlib import Path
+    from source_localization.validation.utils import load_atlas_roi_test_points
+
+    root = Path(__file__).resolve().parent.parent
+    atlas = root / ATLAS
+    if not atlas.exists():
+        pytest.skip("atlas data not available")
+
+    _, _, meta = load_atlas_roi_test_points(
+        str(atlas), str(root / NAMES), placement="medoid")
+    assert meta["n_centroid_outside"] == 5, (
+        f"expected 5 Allen-32 ROIs whose centroid falls outside themselves, "
+        f"got {meta['n_centroid_outside']}. If the atlas changed, re-verify "
+        f"which parcels are affected before updating this number."
+    )
+
+
+def test_default_roi_placement_is_not_centroid():
+    """Default must be the safe placement; 'centroid' is legacy-only."""
+    import inspect
+    from source_localization.validation import runner as runner_mod
+    src = inspect.getsource(runner_mod)
+    assert "val_config.get('roi_placement', 'medoid')" in src, (
+        "ROI placement default changed away from 'medoid'. Centroid placement "
+        "tests non-convex ROIs outside themselves."
+    )
