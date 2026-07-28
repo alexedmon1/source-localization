@@ -397,6 +397,7 @@ def load_atlas_roi_test_points(
     placement: str = "medoid",
     n_per_roi: int = 1,
     sample_strategy: str = "random",
+    enforce_lr_symmetry: bool = True,
     seed: int = 20260728,
 ):
     """Generate ROI test points that are GUARANTEED to lie inside their own ROI.
@@ -456,6 +457,29 @@ def load_atlas_roi_test_points(
         therefore a worst-case, boundary-weighted probe, not a representative
         one: on Allen-32 it scored 25.5% overall versus 49.8% for medoid.
         Use it to characterise boundary behaviour, never as "the" accuracy.
+    enforce_lr_symmetry : bool, default True
+        Generate LEFT-hemisphere points, then mirror them across world x=0 to
+        produce the RIGHT-hemisphere points -- exactly what the ROI-based source
+        space does (`source_space/roi_based.py`: `_place_pca` on the left, then
+        `_mirror_voxel_x`).
+
+        This matters because the two were inconsistent. The source space is
+        symmetric by construction: allocation asymmetry of 5.7% (driven by the
+        label volumes) is equalised to 0.0% by setting each pair to
+        max(n_L, n_R), and right positions are exact mirrors of left ones.
+        The validation, however, drew its test points straight from
+        allen_labels.nii.gz, which is 8.5% L/R mismatched (Hippocampus_Post
+        +18.8%, Frontal_Anterior +11.3%), while scoring them against the
+        pipeline's symmetric `roi_assignments`. Asymmetric probes were therefore
+        being tested against a symmetric source space, and the discrepancy was
+        largest exactly where the labels disagree most -- which is why
+        Lateral_Cortex_L scored 0.00 and Hippocampus_Post_L stalled at 0.08 even
+        after the placement fix.
+
+        Note the mirrored right points are NOT guaranteed to fall inside the
+        right label (they land inside it ~91.5% of the time), because the label
+        volume itself is asymmetric. That is intentional and mirrors the source
+        space's own behaviour; the fraction is reported in ``meta``.
     seed : int
         Unused by the deterministic strategies; recorded for provenance.
 
@@ -480,10 +504,22 @@ def load_atlas_roi_test_points(
     roi_ids = np.unique(atlas_data)
     roi_ids = roi_ids[roi_ids > 0]
 
+    # L/R pairing from ROI names, so the right hemisphere can be derived by
+    # mirroring rather than sampled independently from asymmetric labels.
+    lr_pairs, mirrored_ids = {}, set()
+    if enforce_lr_symmetry:
+        name2id = {v: k for k, v in roi_names.items()}
+        for nm, i in name2id.items():
+            if nm.endswith("_L") and nm[:-2] + "_R" in name2id:
+                lr_pairs[int(i)] = int(name2id[nm[:-2] + "_R"])
+        mirrored_ids = set(lr_pairs.values())
+
     test_points = {}
     centroid_outside = []
 
     for roi_id in roi_ids:
+        if int(roi_id) in mirrored_ids:
+            continue    # right-hemisphere ROI: derived from its left partner below
         vox = np.array(np.where(atlas_data == roi_id)).T
         centroid_voxel = vox.mean(axis=0)
 
@@ -538,7 +574,28 @@ def load_atlas_roi_test_points(
 
         test_points[int(roi_id)] = np.atleast_2d(pts)
 
+    # Mirror LEFT points across world x=0 to build the RIGHT hemisphere, matching
+    # source_space/roi_based.py::_mirror_voxel_x exactly.
+    n_r_inside = n_r_total = 0
+    for left_id, right_id in lr_pairs.items():
+        if left_id not in test_points:
+            continue
+        mir = np.atleast_2d(test_points[left_id]).copy()
+        mir[:, 0] *= -1.0
+        test_points[right_id] = mir
+        for pt in mir:
+            vi = np.round(nib.affines.apply_affine(
+                np.linalg.inv(affine), pt)).astype(int)
+            n_r_total += 1
+            if all(0 <= vi[k] < atlas_data.shape[k] for k in range(3)) and \
+                    int(atlas_data[tuple(vi)]) == int(right_id):
+                n_r_inside += 1
+
     meta = {"placement": placement, "n_per_roi": n_per_roi,
+            "enforce_lr_symmetry": enforce_lr_symmetry,
+            "n_lr_pairs_mirrored": len(lr_pairs),
+            "mirrored_right_inside_own_label_frac": (
+                n_r_inside / n_r_total if n_r_total else None),
             "sample_strategy": sample_strategy if placement == "sample" else None,
             "seed": seed,
             "centroid_outside_roi": sorted(centroid_outside),
