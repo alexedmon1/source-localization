@@ -381,8 +381,12 @@ class RobustnessTest:
                         # Apply inverse
                         source_activity = self._apply_inverse(eeg_data)
 
-                        # Compute error
-                        true_pos = metadata['actual_position_mm']
+                        # Compute error against the REQUESTED position, matching
+                        # runner.LOCALIZATION_ERROR_DEFINITION. Previously used
+                        # 'actual_position_mm' (a legacy alias for the SNAPPED
+                        # position), which measured a different quantity than the
+                        # main benchmark reported under the same name.
+                        true_pos = metadata['requested_position_mm']
                         error = self._find_peak_and_error(source_activity, true_pos)
                         results[snr_db].append(error)
 
@@ -475,8 +479,12 @@ class RobustnessTest:
                         # Apply inverse
                         source_activity = self._apply_inverse(eeg_data)
 
-                        # Compute error
-                        true_pos = metadata['actual_position_mm']
+                        # Compute error against the REQUESTED position, matching
+                        # runner.LOCALIZATION_ERROR_DEFINITION. Previously used
+                        # 'actual_position_mm' (a legacy alias for the SNAPPED
+                        # position), which measured a different quantity than the
+                        # main benchmark reported under the same name.
+                        true_pos = metadata['requested_position_mm']
                         error = self._find_peak_and_error(source_activity, true_pos)
                         results[noise_var].append(error)
 
@@ -569,8 +577,12 @@ class RobustnessTest:
                         # Apply inverse
                         source_activity = self._apply_inverse(eeg_data)
 
-                        # Compute error
-                        true_pos = metadata['actual_position_mm']
+                        # Compute error against the REQUESTED position, matching
+                        # runner.LOCALIZATION_ERROR_DEFINITION. Previously used
+                        # 'actual_position_mm' (a legacy alias for the SNAPPED
+                        # position), which measured a different quantity than the
+                        # main benchmark reported under the same name.
+                        true_pos = metadata['requested_position_mm']
                         error = self._find_peak_and_error(source_activity, true_pos)
                         results[amplitude].append(error)
 

@@ -469,15 +469,39 @@ class DipoleSimulator:
 
         eeg_data = eeg_clean + noise_scale * noise
 
-        # Combined metadata
+        # Combined metadata.
+        #
+        # Two separations exist and they are NOT interchangeable:
+        #   requested_separation_mm : distance between the positions the caller
+        #       asked for. In a resolvability sweep this is the INDEPENDENT
+        #       VARIABLE -- it is what the experiment varies.
+        #   separation_mm           : distance between the SNAPPED source points
+        #       the dipoles were actually placed on. This is what was physically
+        #       simulated, and it can differ from the request by up to the local
+        #       source spacing.
+        # Reporting only the latter (the behaviour before this fix) silently
+        # loses the design variable; reporting only the former would misstate
+        # what was simulated. Both are recorded.
         separation_mm = np.linalg.norm(
-            meta1['actual_position_mm'] - meta2['actual_position_mm']
+            np.asarray(meta1['snapped_source_position_mm'])
+            - np.asarray(meta2['snapped_source_position_mm'])
+        )
+        requested_separation_mm = np.linalg.norm(
+            np.asarray(meta1['requested_position_mm'])
+            - np.asarray(meta2['requested_position_mm'])
         )
 
         metadata = {
             'dipole1': meta1,
             'dipole2': meta2,
+            # Achieved (snapped) separation -- what was actually simulated.
             'separation_mm': float(separation_mm),
+            # Requested separation -- the design variable of a resolvability sweep.
+            'requested_separation_mm': float(requested_separation_mm),
+            # How far snapping moved the pair together/apart.
+            'separation_snapping_error_mm': float(
+                abs(separation_mm - requested_separation_mm)
+            ),
             'snr_db': snr_db,
             'signal_power': float(signal_power),
             'noise_power_added': float(noise_scale ** 2 * noise_power)

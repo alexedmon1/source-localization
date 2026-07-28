@@ -42,6 +42,35 @@ Examples
 >>> runner.save_results(metrics)
 """
 
+# ---------------------------------------------------------------------------
+# Localization-error reference convention
+# ---------------------------------------------------------------------------
+# 'requested' : error is measured from the position the test protocol ASKED for.
+#               The uniform test grid is generated independently of the source
+#               space, so this includes the discretisation penalty of a coarse
+#               source space -- a real property of that source space. This is
+#               the definition the published MS1 benchmark reports, the one
+#               stated in its Table 2 caption ("independent of the source space,
+#               ensuring true spatial estimation rather than grid recovery"),
+#               and the one simulate_dipole()'s metadata contract specifies.
+#
+# 'snapped'   : error is measured from the source point the dipole was snapped
+#               onto. Isolates inverse-operator accuracy from source-space
+#               density -- a legitimate but DIFFERENT question, and one that
+#               flatters sparse source spaces on a grid-independent test.
+#
+# Both are always computed and persisted ('localization_errors' and
+# 'localization_errors_snapped', plus 'snapping_errors' and the raw
+# true/snapped/estimated positions) so that either can be reported, neither can
+# be silently substituted for the other, and any past run can be re-derived
+# under either convention without re-simulating.
+#
+# History: releases up to v0.3.0 computed ONLY the snapped error but reported it
+# under the generic key 'localization_errors', contradicting both the docstring
+# contract and the published benchmark. Fixed on this branch.
+LOCALIZATION_ERROR_DEFINITION = 'requested'
+
+
 import json
 import sys
 from collections import Counter
@@ -633,6 +662,10 @@ class ValidationRunner:
             'noise_mode': dipole_config.get('noise_mode', 'snr'),
             'noise_variance_uV2': dipole_config.get('noise_variance_uV2', 1.0) if dipole_config.get('noise_mode') == 'fixed_variance' else None,
             'timestamp': datetime.now().isoformat(),
+            # Which reference position 'localization_errors' is measured FROM.
+            # See LOCALIZATION_ERROR_DEFINITION. Recorded so every downstream
+            # table can state its own definition without archaeology.
+            'localization_error_definition': LOCALIZATION_ERROR_DEFINITION,
             'snr_results': {}
         }
 
@@ -642,7 +675,13 @@ class ValidationRunner:
                 print(f"\n  Testing at SNR = {snr_db} dB...")
 
             snr_metrics = {
+                # PRIMARY error: peak vs REQUESTED position (see
+                # LOCALIZATION_ERROR_DEFINITION).
                 'localization_errors': [],
+                # DIAGNOSTIC error: peak vs SNAPPED source position.
+                'localization_errors_snapped': [],
+                # Distance requested -> snapped; explains the gap between the two.
+                'snapping_errors': [],
                 'roi_correct': [],
                 'adjacent_roi_correct': [],
                 'amplitude_ratios': [],
@@ -652,6 +691,8 @@ class ValidationRunner:
                 'estimated_roi_ids': [],
                 'estimated_roi_names': [],
                 'true_positions_mm': [],
+                'snapped_positions_mm': [],
+                'estimated_positions_mm': [],
                 'peak_in_background': []  # Track when absolute peak is in ROI 0
             }
 
@@ -702,17 +743,22 @@ class ValidationRunner:
                             valid_roi_peak_idx = idx
                             break
 
-                    # Compute localization error from ABSOLUTE peak to SNAPPED source position
-                    # Use snapped_source_position_mm (where dipole was actually placed) for fair
-                    # comparison across source spaces with different densities. This measures
-                    # pure inverse solution accuracy, independent of source space resolution.
+                    # Localization error under BOTH reference conventions -- see
+                    # LOCALIZATION_ERROR_DEFINITION in this module for the rationale.
                     requested_position_mm = np.array(sim_meta['requested_position_mm'])
                     snapped_position_mm = np.array(sim_meta['snapped_source_position_mm'])
-                    loc_error_scaled = compute_localization_error(
+                    loc_error = compute_localization_error(
+                        requested_position_mm,
+                        absolute_peak_position
+                    ) / scale_factor
+                    loc_error_snapped = compute_localization_error(
                         snapped_position_mm,
                         absolute_peak_position
-                    )
-                    loc_error = loc_error_scaled / scale_factor
+                    ) / scale_factor
+                    snapping_error = compute_localization_error(
+                        requested_position_mm,
+                        snapped_position_mm
+                    ) / scale_factor
 
                     # Determine estimated ROI from VALID ROI peak (for ROI accuracy)
                     # ROI 0 is background - use valid peak for ROI classification
@@ -728,6 +774,8 @@ class ValidationRunner:
 
                     # Store metrics
                     snr_metrics['localization_errors'].append(loc_error)
+                    snr_metrics['localization_errors_snapped'].append(loc_error_snapped)
+                    snr_metrics['snapping_errors'].append(snapping_error)
                     snr_metrics['roi_correct'].append(roi_correct)
                     snr_metrics['depths'].append(depth)
                     snr_metrics['position_names'].append(pos_name)
@@ -735,6 +783,10 @@ class ValidationRunner:
                     snr_metrics['estimated_roi_ids'].append(int(estimated_roi))
                     snr_metrics['estimated_roi_names'].append(estimated_roi_name)
                     snr_metrics['true_positions_mm'].append(requested_position_mm.tolist())
+                    snr_metrics['snapped_positions_mm'].append(snapped_position_mm.tolist())
+                    snr_metrics['estimated_positions_mm'].append(
+                        np.asarray(absolute_peak_position).tolist()
+                    )
                     snr_metrics['peak_in_background'].append(peak_in_background)
 
             # Compute per-position metrics (compatible with both modes)
@@ -1160,13 +1212,23 @@ class ValidationRunner:
             'noise_mode': dipole_config.get('noise_mode', 'snr'),
             'noise_variance_uV2': dipole_config.get('noise_variance_uV2', 1.0) if dipole_config.get('noise_mode') == 'fixed_variance' else None,
             'timestamp': datetime.now().isoformat(),
+            # Which reference position 'localization_errors' is measured FROM.
+            # See LOCALIZATION_ERROR_DEFINITION. Recorded so every downstream
+            # table can state its own definition without archaeology.
+            'localization_error_definition': LOCALIZATION_ERROR_DEFINITION,
             'snr_results': {}
         }
 
         # Run simulation loop (same as main run() method)
         for snr_db in snr_levels:
             snr_metrics = {
+                # PRIMARY error: peak vs REQUESTED position (see
+                # LOCALIZATION_ERROR_DEFINITION).
                 'localization_errors': [],
+                # DIAGNOSTIC error: peak vs SNAPPED source position.
+                'localization_errors_snapped': [],
+                # Distance requested -> snapped; explains the gap between the two.
+                'snapping_errors': [],
                 'roi_correct': [],
                 'adjacent_roi_correct': [],
                 'amplitude_ratios': [],
@@ -1176,6 +1238,8 @@ class ValidationRunner:
                 'estimated_roi_ids': [],
                 'estimated_roi_names': [],
                 'true_positions_mm': [],
+                'snapped_positions_mm': [],
+                'estimated_positions_mm': [],
                 'peak_in_background': []
             }
 
@@ -1213,11 +1277,16 @@ class ValidationRunner:
                             valid_roi_peak_idx = idx
                             break
 
-                    # Compute metrics
+                    # Compute metrics -- both error conventions, see
+                    # LOCALIZATION_ERROR_DEFINITION in this module.
                     requested_position_mm = np.array(sim_meta['requested_position_mm'])
                     snapped_position_mm = np.array(sim_meta['snapped_source_position_mm'])
-                    loc_error_scaled = compute_localization_error(snapped_position_mm, absolute_peak_position)
-                    loc_error = loc_error_scaled / scale_factor
+                    loc_error = compute_localization_error(
+                        requested_position_mm, absolute_peak_position) / scale_factor
+                    loc_error_snapped = compute_localization_error(
+                        snapped_position_mm, absolute_peak_position) / scale_factor
+                    snapping_error = compute_localization_error(
+                        requested_position_mm, snapped_position_mm) / scale_factor
 
                     estimated_roi = roi_mapping[valid_roi_peak_idx]
                     estimated_roi_name = roi_names_map.get(estimated_roi, f"ROI_{estimated_roi}")
@@ -1227,6 +1296,8 @@ class ValidationRunner:
 
                     # Store
                     snr_metrics['localization_errors'].append(loc_error)
+                    snr_metrics['localization_errors_snapped'].append(loc_error_snapped)
+                    snr_metrics['snapping_errors'].append(snapping_error)
                     snr_metrics['roi_correct'].append(roi_correct)
                     snr_metrics['depths'].append(depth)
                     snr_metrics['position_names'].append(pos_name)
@@ -1234,6 +1305,10 @@ class ValidationRunner:
                     snr_metrics['estimated_roi_ids'].append(int(estimated_roi))
                     snr_metrics['estimated_roi_names'].append(estimated_roi_name)
                     snr_metrics['true_positions_mm'].append(requested_position_mm.tolist())
+                    snr_metrics['snapped_positions_mm'].append(snapped_position_mm.tolist())
+                    snr_metrics['estimated_positions_mm'].append(
+                        np.asarray(absolute_peak_position).tolist()
+                    )
                     snr_metrics['peak_in_background'].append(peak_in_background)
 
             # Compute summaries (same logic as main run method)
