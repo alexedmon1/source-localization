@@ -192,8 +192,23 @@ class RobustnessTest:
         # Create simulator
         self.simulator = DipoleSimulator(fwd, info, src, verbose=False)
 
-        # Get source positions
-        self.source_pos_mm = src[0]['rr'] * 1000
+        # Source positions must come from the FORWARD solution, not the source
+        # space. `src[0]['rr']` lists every candidate position, but the BEM can
+        # exclude some when the forward is computed (e.g. roi_based_sphere keeps
+        # 200 of 204 -- four sources fall outside the spherical BEM). The inverse
+        # operator, and therefore every reconstructed array, is indexed by the
+        # forward's sources.
+        #
+        # Taking positions from `src` in that case misaligns everything indexed
+        # by a reconstruction: `_source_activity_norm` computes
+        # `n_orient = 600 // 204 = 2`, silently skips the orientation-collapsing
+        # branch, and `source_pos_mm[peak_idx]` then indexes a 204-row array with
+        # indices up to 599. Where the two agree -- the common case -- this is
+        # identical to the previous behaviour.
+        if getattr(fwd, 'get', None) is not None and fwd.get('source_rr') is not None:
+            self.source_pos_mm = np.asarray(fwd['source_rr']) * 1000
+        else:  # pragma: no cover - defensive
+            self.source_pos_mm = src[0]['rr'] * 1000
         self.n_sources = len(self.source_pos_mm)
 
         # Get electrode positions for depth calculation
