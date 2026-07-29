@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from scipy.spatial import cKDTree
 
+from ..utils.atlas import get_true_affine
+
 
 def run(config, previous_outputs):
     """
@@ -98,11 +100,18 @@ def run(config, previous_outputs):
     nii_labels = nib.load(brain_labels_file)
     label_data = nii_labels.get_fdata()
 
-    # Use the ORIGINAL NIfTI affine (not the 10× corrected one).
-    # The pipeline's source coordinates are computed in the same coordinate
-    # frame as the original atlas headers, so applying the 10× voxel size
-    # correction here would create a 10× coordinate mismatch.
-    affine = nii_labels.affine
+    # Resolve the affine by DETECTING the file's voxel-size convention rather
+    # than assuming one. Label volumes do not agree:
+    #   true units already : Atlas_3DRoisLeftRight.Labels.nii, allen_labels*.nii.gz
+    #   10x-inflated header: coarse_parcellation/coarse_22roi_atlas.nii
+    # get_true_affine() returns the affine unchanged for the first group, so this
+    # is a no-op for Antwerp and both Allen atlases. It is not a no-op for the
+    # coarse 22-ROI atlas, where the raw affine placed the labels at +/-49 mm
+    # while sources sit at +/-5 mm — every source then fell outside the volume
+    # and the nearest-labeled-voxel fallback silently collapsed all 215 shell
+    # sources onto 2 of the 22 ROIs. Nothing raised, because the fallback always
+    # finds *a* voxel.
+    affine = get_true_affine(nii_labels)
 
     # Load ROI mapping JSON
     with open(roi_mapping_file, 'r') as f:

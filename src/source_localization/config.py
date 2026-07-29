@@ -11,13 +11,47 @@ def _load_atlas_registry() -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-# Atlas definitions: maps atlas name -> input path overrides
+# Atlas definitions: maps atlas name -> {'inputs': {...}, 'meta': {...}}
 # All paths are relative to the package data directory
 # To add a new atlas, edit data/atlas/registry.yaml
 ATLAS_DEFINITIONS = _load_atlas_registry()
 
 # Default atlas used by all presets
 DEFAULT_ATLAS = 'antwerp'
+
+# The validation CLI grew its own atlas vocabulary before the registry existed
+# ('full', 'coarse_22roi'), and scripts/ still pass those names. They are mapped
+# here rather than in either CLI so there is exactly one place where a name is
+# resolved, and so both entry points accept both vocabularies.
+LEGACY_ATLAS_ALIASES = {
+    'full': 'antwerp',
+    'coarse_22roi': 'coarse22',
+}
+
+
+def resolve_atlas_name(name: str) -> str:
+    """Map an atlas name (possibly a legacy alias) to its registry key.
+
+    Raises
+    ------
+    ValueError
+        If the name is neither a registry key nor a known alias.
+    """
+    if name in ATLAS_DEFINITIONS:
+        return name
+    if name in LEGACY_ATLAS_ALIASES:
+        return LEGACY_ATLAS_ALIASES[name]
+    available = ', '.join(sorted(ATLAS_DEFINITIONS))
+    aliases = ', '.join(sorted(LEGACY_ATLAS_ALIASES))
+    raise ValueError(
+        f"Unknown atlas: {name}. Available: {available} "
+        f"(legacy aliases: {aliases})")
+
+
+def atlas_input_paths(name: str) -> Dict[str, str]:
+    """The ``inputs:`` path mapping for an atlas, resolving aliases."""
+    entry = ATLAS_DEFINITIONS[resolve_atlas_name(name)]
+    return dict(entry.get('inputs', entry))
 
 
 class Config:
@@ -110,21 +144,36 @@ class Config:
     def apply_atlas(self, atlas_name: str) -> None:
         """Override atlas input paths for a named atlas.
 
+        Only the registry entry's ``inputs:`` block reaches the config. Its
+        ``meta:`` block is descriptive (parcel counts, coverage, tier scheme) and
+        must not be copied — an earlier version copied every key, which put a
+        ``full_brain_coverage`` boolean into ``inputs`` alongside the file paths.
+
         Parameters
         ----------
         atlas_name : str
-            Atlas name (e.g., 'antwerp', 'allen').
-            See ATLAS_DEFINITIONS for available options.
+            Atlas name; see :data:`ATLAS_DEFINITIONS` for available options.
+            Currently 'antwerp', 'allen', 'allen32', 'allen64'.
         """
-        if atlas_name not in ATLAS_DEFINITIONS:
-            available = ', '.join(ATLAS_DEFINITIONS.keys())
-            raise ValueError(f"Unknown atlas: {atlas_name}. Available: {available}")
+        # Registry entries are {'inputs': {...}, 'meta': {...}}; the older flat
+        # form, where the entry was the path mapping itself, still works.
+        atlas_paths = atlas_input_paths(atlas_name)
 
-        atlas_paths = ATLAS_DEFINITIONS[atlas_name]
         if 'inputs' not in self._config:
             self._config['inputs'] = {}
         for key, path in atlas_paths.items():
+            if key == 'meta':
+                continue
             self._config['inputs'][key] = path
+
+    @staticmethod
+    def atlas_meta(atlas_name: str) -> Dict[str, Any]:
+        """Descriptive metadata for a registered atlas (parcel count, coverage).
+
+        Returns an empty dict for an entry that declares no ``meta:`` block.
+        """
+        entry = ATLAS_DEFINITIONS[resolve_atlas_name(atlas_name)]
+        return dict(entry.get('meta', {}))
 
     def _validate(self):
         """Validate configuration."""

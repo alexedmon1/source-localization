@@ -24,6 +24,25 @@ import nibabel as nib
 
 ATLAS_VOXEL_SCALE_FACTOR = 0.1  # Multiply header values by this
 
+# NOT every bundled atlas file carries the inflated header. Some are already
+# stored in true units, and applying the correction to those scales them down by
+# a further 10x — silently, since the result is still a valid affine:
+#
+#   inflated header  : Atlas_3DRois.nii, Atlas_3DRois_brain.nii.gz,
+#                      *.pre_symm.*, *.preregfix.*, *.ORIGINAL_SWAPPED.*
+#                      zooms ~ (2.03, 0.80, 2.00) mm
+#   already corrected: Atlas_3DRoisLeftRight.Labels.nii (and .preregfix)
+#                      zooms ~ (0.203, 0.080, 0.200) mm
+#
+# The two conventions describe the SAME geometry: get_true_affine() applied to
+# the inflated brain volume reproduces the Labels file's native affine to within
+# 4e-5 mm. The functions below therefore detect which convention a file uses
+# rather than assuming, so either file can be passed safely.
+#
+# A mouse-brain voxel is a few hundred micrometres at most, so a header claiming
+# >= this many mm cannot be in true units.
+_INFLATED_ZOOM_THRESHOLD_MM = 0.5
+
 
 def get_true_voxel_sizes(nifti_img):
     """
@@ -52,8 +71,30 @@ def get_true_voxel_sizes(nifti_img):
     (0.08, 0.08, 0.2)
     """
     header_zooms = nifti_img.header.get_zooms()[:3]  # First 3 dimensions only
-    true_zooms = tuple(z * ATLAS_VOXEL_SCALE_FACTOR for z in header_zooms)
-    return true_zooms
+    if not header_is_inflated(nifti_img):
+        # Already in true units (e.g. Atlas_3DRoisLeftRight.Labels.nii).
+        # Correcting again would shrink the geometry 10x and put every
+        # coordinate far outside the volume.
+        return tuple(float(z) for z in header_zooms)
+    return tuple(z * ATLAS_VOXEL_SCALE_FACTOR for z in header_zooms)
+
+
+def header_is_inflated(nifti_img) -> bool:
+    """
+    Does this atlas file carry the 10x-inflated header, or true units already?
+
+    Some bundled atlas files store the inflated voxel sizes and some do not
+    (see the module header). Applying the correction to an already-corrected
+    file is silent — the affine stays well-formed, coordinates just land 10x
+    away — so the convention is detected instead of assumed.
+
+    Returns
+    -------
+    bool
+        True if the header needs the 10x correction.
+    """
+    zooms = nifti_img.header.get_zooms()[:3]
+    return bool(max(float(z) for z in zooms) >= _INFLATED_ZOOM_THRESHOLD_MM)
 
 
 def get_true_affine(nifti_img):
@@ -78,7 +119,14 @@ def get_true_affine(nifti_img):
     -----
     This corrects both the diagonal elements (voxel sizes) and any
     off-diagonal elements in the 3×3 rotation/scaling submatrix.
-    The translation column (last column) is also scaled.
+    The translation column (last column) is also scaled — scaling only the 3×3
+    block leaves the origin 10× out and puts the volume nowhere near the source
+    coordinates.
+
+    Files that already store true units (``Atlas_3DRoisLeftRight.Labels.nii``)
+    are returned unchanged, so this is safe to call on any bundled atlas file.
+    Both conventions describe the same geometry: the corrected affine of the
+    inflated brain volume matches the Labels file's native affine to 4e-5 mm.
 
     Examples
     --------
@@ -88,6 +136,8 @@ def get_true_affine(nifti_img):
     >>> # Diagonal should be ~[0.08, 0.08, 0.2] instead of [0.8, 0.8, 2.0]
     """
     affine = nifti_img.affine.copy()
+    if not header_is_inflated(nifti_img):
+        return affine
     # Scale the entire 3×3 rotation/scaling submatrix
     affine[:3, :3] *= ATLAS_VOXEL_SCALE_FACTOR
     # Scale the translation vector (origin offset)

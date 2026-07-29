@@ -32,6 +32,9 @@ from datetime import datetime
 from dataclasses import dataclass, field, asdict
 import pickle
 
+from ..config import DEFAULT_ATLAS, atlas_input_paths, resolve_atlas_name
+from ..utils.atlas import get_true_affine
+
 __all__ = [
     'BatchValidationRunner',
     'ValidationOutputSchema',
@@ -300,8 +303,13 @@ class BatchValidationRunner:
                 start_time = datetime.now()
 
                 try:
-                    # Run pipeline to build forward model
-                    atlas_arg = self.atlas if self.atlas != 'full' else None
+                    # Run pipeline to build forward model. Resolve through the
+                    # shared registry: this used to pass the validation CLI's
+                    # own vocabulary straight into Pipeline.from_preset, so
+                    # 'coarse_22roi' raised "Unknown atlas" and 'allen32' worked
+                    # only because both schemes happened to share that name.
+                    canonical = resolve_atlas_name(self.atlas)
+                    atlas_arg = canonical if canonical != DEFAULT_ATLAS else None
                     pipeline = Pipeline.from_preset(
                         preset,
                         atlas=atlas_arg,
@@ -350,18 +358,24 @@ class BatchValidationRunner:
                         # Generate uniform grid of test positions independent of source grid
                         # This forces real localization (not snap-to-grid recovery)
                         import nibabel as nib
-                        if self.atlas == 'allen32':
-                            labels_file = str(Path(__file__).parent.parent / 'data' / 'atlas' / 'allen' / 'allen_labels.nii.gz')
-                        else:
-                            labels_file = str(Path(__file__).parent.parent / 'data' / 'atlas' / 'Atlas_3DRoisLeftRight.Labels.nii')
+                        # Resolve via the registry rather than an if/else that
+                        # knew only allen32 and silently fell back to Antwerp's
+                        # labels for every other atlas.
+                        labels_file = str(
+                            Path(__file__).parent.parent
+                            / atlas_input_paths(self.atlas)['brain_labels'])
                         atlas_nii = nib.load(labels_file)
                         atlas_data = atlas_nii.get_fdata().astype(int)
-                        # Get brain bounding box in mm using native affine (no 10x correction)
+                        # Bounding box in mm. get_true_affine() detects the
+                        # file's convention: a no-op for the true-unit label
+                        # volumes, and the 10x correction for coarse22, whose
+                        # raw affine would put this box at +/-49 mm.
+                        atlas_affine = get_true_affine(atlas_nii)
                         brain_voxels = np.argwhere(atlas_data > 0)
                         min_v = brain_voxels.min(axis=0)
                         max_v = brain_voxels.max(axis=0)
-                        min_mm = nib.affines.apply_affine(atlas_nii.affine, min_v)
-                        max_mm = nib.affines.apply_affine(atlas_nii.affine, max_v)
+                        min_mm = nib.affines.apply_affine(atlas_affine, min_v)
+                        max_mm = nib.affines.apply_affine(atlas_affine, max_v)
                         for i in range(3):
                             if min_mm[i] > max_mm[i]:
                                 min_mm[i], max_mm[i] = max_mm[i], min_mm[i]

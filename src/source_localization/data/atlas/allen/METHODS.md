@@ -2,7 +2,7 @@
 
 ## Overview
 
-This atlas provides an **anatomically constrained, depth-adaptive** whole-brain parcellation derived from the Allen Mouse Brain Common Coordinate Framework v3 (CCFv3), registered into the Antwerp (UAnterwerpen C57BL/6 MRI) coordinate space. It is designed for mouse EEG source localization with a 32-channel electrode array, where spatial resolution degrades with depth from the cortical surface.
+This atlas provides an **anatomically constrained, depth-adaptive** whole-brain parcellation derived from the Allen Mouse Brain Common Coordinate Framework v3 (CCFv3), registered into the Antwerp (UAnterwerpen C57BL/6 MRI) coordinate space. It is designed for mouse EEG source localization with a 30-channel electrode array, where spatial resolution degrades with depth from the cortical surface.
 
 **64 parcels** (32 per hemisphere) cover the grey matter brain volume, with finer parcellation near the electrodes (cortical surface) and coarser parcellation at depth, reflecting the physical limits of EEG spatial resolution. Parcellation respects major anatomical division boundaries (e.g., thalamus, hippocampus, cortex) — structures are never merged across divisions. Hemispheric symmetry is enforced: clustering is performed on the left hemisphere only, then mirrored to the right.
 

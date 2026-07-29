@@ -1,0 +1,42 @@
+site_name: source-localization
+site_description: EEG source reconstruction for rodent recordings
+repo_url: https://github.com/alexedmon1/source-localization
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections     # show the section groupings in the sidebar
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.superfences
+  - pymdownx.details
+
+# The nav IS the curation. A doc not listed here is not part of the site — which
+# is the mechanism that stops reference material getting lost among working notes.
+nav:
+  - Home: index.md
+  - Publishing this site: PUBLISHING.md
+  - Guides:
+      - Adding an atlas: guides/adding_an_atlas.md
+      - Electrode coordinate setup: guides/ELECTRODE_COORDINATE_SETUP.md
+  - Known issues:
+      - Shell ROI coverage (215 vertices): known-issues/SHELL_ROI_COVERAGE.md
+      - Regularization scaling: known-issues/REGULARIZATION_SCALING_ISSUE.md

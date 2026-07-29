@@ -31,6 +31,11 @@ A complete, validated Python package for mouse EEG source localization with two 
 
 ## Overview
 
+> **📖 Documentation site:** [`docs/`](docs/index.md) — guides (adding an atlas,
+> electrode setup) and **known issues** you should read before interpreting
+> output. Preview locally with
+> `uv run --no-project --with "mkdocs-material>=9.5,<10" mkdocs serve`.
+
 This package provides a complete, validated pipeline for performing source localization on mouse EEG data. It implements multiple head models (BEM), source space configurations, and inverse methods to estimate brain activity from scalp EEG recordings.
 
 ### What is Source Localization?
@@ -58,7 +63,7 @@ Source localization solves the EEG inverse problem: given electrode measurements
 - **2 bundled brain atlases** selectable via `--atlas` flag:
   - **Antwerp** (47 ROIs) — default, UAnterwerpen C57BL/6 MRI atlas
   - **Allen** (64 ROIs) — Allen Mouse Brain CCFv3, anatomically constrained depth-adaptive parcellation
-- **32-channel electrode array** coordinates included
+- **30-channel electrode array** coordinates included
 
 ### Multi-Subject Study Processing (NEW in v1.3.0)
 - **BIDS-inspired folder hierarchy** for organized data management
@@ -722,7 +727,7 @@ runner.save_results(metrics)
 ## Pipeline Architecture
 
 ```
-1. Electrode Registration  → MNE Info with 32 channel positions
+1. Electrode Registration  → MNE Info with 30 channel positions
 2. EEG Data Loading       → EEGLAB .set file → epochs
 3. BEM Model              → Sphere (analytical) or Ellipsoid (numerical)
 4. Source Space           → Surface / ROI-based / Cartesian / Shell

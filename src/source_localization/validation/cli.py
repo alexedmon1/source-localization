@@ -31,6 +31,29 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from ..config import ATLAS_DEFINITIONS, LEGACY_ATLAS_ALIASES
+
+
+def _atlas_choices_help() -> str:
+    """One-line summary per atlas, built from the registry.
+
+    Generated rather than hand-written: the previous hardcoded string described
+    'full (47 ROIs)' and 'allen32 (32 Allen CCFv3 ROIs)' with no way to notice
+    when either drifted from the shipped files.
+    """
+    parts = []
+    for name in sorted(ATLAS_DEFINITIONS):
+        meta = ATLAS_DEFINITIONS[name].get('meta', {})
+        if meta.get('alias_of'):
+            parts.append(f"{name} (= {meta['alias_of']})")
+        elif meta.get('parcels') is not None:
+            parts.append(f"{name} ({meta['parcels']} parcels)")
+        else:
+            parts.append(name)
+    legacy = ', '.join(f"{k} (= {v})"
+                       for k, v in sorted(LEGACY_ATLAS_ALIASES.items()))
+    return ', '.join(parts) + f". Legacy aliases: {legacy}"
+
 
 def create_parser() -> argparse.ArgumentParser:
     """
@@ -108,13 +131,18 @@ Directory Structure:
         help='ROI indices to test (default: all)'
     )
 
-    # Atlas selection
+    # Atlas selection. Choices come from the shared registry plus the legacy
+    # names this CLI used before the registry existed ('full', 'coarse_22roi'),
+    # which scripts/ still pass. Previously this list was hardcoded and diverged
+    # from the localization CLI's, so 'antwerp', 'allen' and 'allen64' could not
+    # be validated at all.
     parser.add_argument(
         '--atlas',
         type=str,
-        choices=['full', 'coarse_22roi', 'allen32'],
+        choices=sorted(ATLAS_DEFINITIONS) + sorted(LEGACY_ATLAS_ALIASES),
         default='full',
-        help='Atlas to use: full (47 ROIs), coarse_22roi (22 ROIs), or allen32 (32 Allen CCFv3 ROIs)'
+        help='Atlas parcellation to validate (default: full, an alias for '
+             'antwerp). Choices: ' + _atlas_choices_help()
     )
 
     # Test mode
