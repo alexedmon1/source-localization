@@ -178,7 +178,8 @@ class DipoleSimulator:
         noise_variance_uV2: float = 1.0,
         noise_type: str = "white",
         noise_spatial_scale_mm: float = 3.0,
-        noise_temporal_exponent: float = 1.0
+        noise_temporal_exponent: float = 1.0,
+        time_course: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, Dict]:
         """
         Simulate EEG from a single dipole source.
@@ -273,13 +274,25 @@ class DipoleSimulator:
         n_times = int(duration_s * sfreq)
         dipole_moment = np.zeros((self.n_dipoles * 3, n_times))
 
-        # Set dipole amplitude (constant over time)
+        # Set dipole amplitude (constant over time unless a waveform is given)
         # Convert nAm to Am (MNE uses SI units)
         amplitude_Am = amplitude_nAm * 1e-9
 
-        # Assign orientation components to the three dipole slots
-        for i in range(3):
-            dipole_moment[source_idx * 3 + i, :] = orientation[i] * amplitude_Am
+        if time_course is None:
+            # Unchanged constant-moment path. Deliberately a separate branch
+            # rather than multiplying by np.ones(n_times), so that every
+            # existing call reproduces its previous output bit-for-bit.
+            for i in range(3):
+                dipole_moment[source_idx * 3 + i, :] = orientation[i] * amplitude_Am
+        else:
+            tc = np.asarray(time_course, dtype=float).ravel()
+            if tc.shape[0] != n_times:
+                raise ValueError(
+                    f"time_course has {tc.shape[0]} samples but duration_s x sfreq "
+                    f"implies {n_times}"
+                )
+            for i in range(3):
+                dipole_moment[source_idx * 3 + i, :] = orientation[i] * amplitude_Am * tc
 
         # Generate clean EEG using forward model
         eeg_clean = self.leadfield @ dipole_moment
@@ -618,3 +631,272 @@ class DipoleSimulator:
         raw = mne.io.RawArray(eeg_data, info, verbose=False)
 
         return raw
+
+    # ------------------------------------------------------------------
+    # WP-4: multiple co-active sources and spatially extended patches.
+    #
+    # Added for the NIMG-26-1224 revision, answering R3-1b ("validation is
+    # limited to single point-like dipoles and does not test scenarios with
+    # multiple simultaneously active sources or spatially extended (patch-like)
+    # activations") and the time-series-fidelity part of R3-2b.
+    #
+    # Both are new entry points. `simulate_dipole` and `simulate_two_dipoles`
+    # are untouched apart from the additive `time_course` argument, whose
+    # default preserves their previous output bit-for-bit.
+    # ------------------------------------------------------------------
+
+    def _assemble_moment(
+        self,
+        source_indices,
+        orientations: np.ndarray,
+        amplitudes_Am: np.ndarray,
+        time_courses: np.ndarray,
+    ) -> np.ndarray:
+        """Build the (n_dipoles*3, n_times) moment matrix for several sources.
+
+        Sources sharing a snapped index are summed, which is what physically
+        happens when two requested positions land on the same grid point.
+        """
+        n_times = time_courses.shape[1]
+        moment = np.zeros((self.n_dipoles * 3, n_times))
+        for k, idx in enumerate(source_indices):
+            for i in range(3):
+                moment[idx * 3 + i, :] += (
+                    orientations[k, i] * amplitudes_Am[k] * time_courses[k]
+                )
+        return moment
+
+    def simulate_n_dipoles(
+        self,
+        positions_mm,
+        orientations=None,
+        amplitudes_nAm=None,
+        time_courses=None,
+        duration_s: float = 1.0,
+        sfreq: float = 500.0,
+        snr_db: float = 10.0,
+        noise_seed: Optional[int] = None,
+        noise_type: str = "white",
+        noise_spatial_scale_mm: float = 3.0,
+        noise_temporal_exponent: float = 1.0,
+    ) -> Tuple[np.ndarray, Dict]:
+        """
+        Simulate EEG from N simultaneously active dipoles.
+
+        Generalizes :meth:`simulate_two_dipoles` to any number of sources with
+        independent waveforms, which is what makes *controllable source
+        correlation* possible. Note that the pre-existing two-dipole path gives
+        perfectly correlated (r = 1) sources, because each dipole carries a
+        constant DC moment with no time course.
+
+        Parameters
+        ----------
+        positions_mm : array-like, shape (N, 3)
+            Requested dipole positions in mm. Each is snapped to the nearest
+            source, exactly as in :meth:`simulate_dipole`.
+        orientations : array-like, shape (N, 3), optional
+            Dipole orientations; normalized internally. Default: isotropic
+            random, drawn from a single RandomState seeded with ``noise_seed``.
+        amplitudes_nAm : array-like, shape (N,), optional
+            Per-source amplitudes. Default: 50 nAm each.
+        time_courses : array-like, shape (N, n_times), optional
+            Per-source waveforms. Default: constant (DC), i.e. fully correlated
+            sources -- the behaviour of the existing two-dipole path.
+        snr_db : float, default=10.0
+            SNR of the *combined* signal, matching `simulate_two_dipoles`.
+
+        Returns
+        -------
+        eeg_data : ndarray, shape (n_channels, n_times)
+        metadata : dict
+            ``dipoles`` (per-source metadata), ``requested_positions_mm``,
+            ``snapped_positions_mm``, ``snapping_error_mm``,
+            ``pairwise_requested_separation_mm``, ``pairwise_snapped_separation_mm``,
+            ``source_correlation`` (empirical, from the time courses),
+            ``collided`` (True when two sources snapped to the same grid point),
+            plus the usual power/SNR fields.
+        """
+        positions_mm = np.atleast_2d(np.asarray(positions_mm, dtype=float))
+        n_src = positions_mm.shape[0]
+        n_times = int(duration_s * sfreq)
+
+        if amplitudes_nAm is None:
+            amplitudes_nAm = np.full(n_src, 50.0)
+        amplitudes_nAm = np.asarray(amplitudes_nAm, dtype=float).ravel()
+
+        rng = np.random.RandomState(noise_seed)
+        if orientations is None:
+            orientations = rng.randn(n_src, 3)
+        orientations = np.atleast_2d(np.asarray(orientations, dtype=float))
+        orientations = orientations / np.linalg.norm(orientations, axis=1, keepdims=True)
+
+        if time_courses is None:
+            time_courses = np.ones((n_src, n_times))
+        time_courses = np.atleast_2d(np.asarray(time_courses, dtype=float))
+        if time_courses.shape != (n_src, n_times):
+            raise ValueError(
+                f"time_courses must have shape ({n_src}, {n_times}), got "
+                f"{time_courses.shape}"
+            )
+
+        # Snap each requested position to the nearest source point.
+        src_pos_m = self.source_positions / 1000.0
+        source_indices, snapped, snap_err = [], [], []
+        for p in positions_mm:
+            d = np.linalg.norm(src_pos_m - p / 1000.0, axis=1)
+            idx = int(np.argmin(d))
+            source_indices.append(idx)
+            snapped.append(self.source_positions[idx])
+            snap_err.append(float(np.linalg.norm(self.source_positions[idx] - p)))
+        snapped = np.asarray(snapped)
+
+        # Two requested positions can snap onto the same grid point. That is not
+        # an error, but it means the simulation no longer contains N distinct
+        # sources, so any resolvability claim about that trial is meaningless.
+        collided = len(set(source_indices)) < n_src
+
+        moment = self._assemble_moment(
+            source_indices, orientations, amplitudes_nAm * 1e-9, time_courses)
+        eeg_clean = self.leadfield @ moment
+
+        noise = generate_noise(
+            self.n_channels, n_times, np.random.RandomState(noise_seed),
+            noise_type=noise_type,
+            electrode_positions_mm=self.electrode_positions_mm,
+            spatial_scale_mm=noise_spatial_scale_mm,
+            temporal_exponent=noise_temporal_exponent,
+        )
+
+        signal_power = float(np.mean(eeg_clean ** 2))
+        noise_power_raw = float(np.mean(noise ** 2))
+        if np.isinf(snr_db):
+            noise_scale = 0.0
+        else:
+            snr_linear = 10 ** (snr_db / 10)
+            noise_scale = np.sqrt(signal_power / (snr_linear * noise_power_raw))
+        eeg_data = eeg_clean + noise_scale * noise
+
+        req_sep, snap_sep = {}, {}
+        for a in range(n_src):
+            for b in range(a + 1, n_src):
+                req_sep[f"{a}-{b}"] = float(
+                    np.linalg.norm(positions_mm[a] - positions_mm[b]))
+                snap_sep[f"{a}-{b}"] = float(
+                    np.linalg.norm(snapped[a] - snapped[b]))
+
+        corr = (np.corrcoef(time_courses) if n_src > 1 and
+                np.all(time_courses.std(axis=1) > 0) else None)
+
+        metadata = {
+            'n_sources': n_src,
+            'dipoles': [
+                {
+                    'requested_position_mm': positions_mm[k],
+                    'snapped_source_position_mm': snapped[k],
+                    'snapping_error_mm': snap_err[k],
+                    'source_index': source_indices[k],
+                    'orientation': orientations[k],
+                    'amplitude_nAm': float(amplitudes_nAm[k]),
+                }
+                for k in range(n_src)
+            ],
+            'requested_positions_mm': positions_mm,
+            'snapped_positions_mm': snapped,
+            'snapping_error_mm': snap_err,
+            'pairwise_requested_separation_mm': req_sep,
+            'pairwise_snapped_separation_mm': snap_sep,
+            'collided': bool(collided),
+            'source_correlation': corr,
+            'signal_power': signal_power,
+            'snr_db': snr_db,
+            'noise_type': noise_type,
+            'duration_s': duration_s,
+            'sfreq': sfreq,
+            'n_times': n_times,
+        }
+        return eeg_data, metadata
+
+    def simulate_patch(
+        self,
+        center_mm,
+        radius_mm: float = 1.0,
+        amplitude_nAm: float = 50.0,
+        orientation=None,
+        time_course=None,
+        coherent: bool = True,
+        **kwargs
+    ) -> Tuple[np.ndarray, Dict]:
+        """
+        Simulate a spatially extended (patch-like) activation.
+
+        Every source within ``radius_mm`` of ``center_mm`` is activated. The
+        total moment is held equal to ``amplitude_nAm`` regardless of how many
+        sources the patch covers, so a patch and a point source of the same
+        strength are comparable -- otherwise a larger patch would trivially win
+        by carrying more current.
+
+        Parameters
+        ----------
+        center_mm : array-like, shape (3,)
+        radius_mm : float, default=1.0
+            Patch radius. Sources within this distance of the centre are active.
+        coherent : bool, default=True
+            True: all sources share one waveform and one orientation (a
+            synchronously active patch, the physiologically standard case).
+            False: independent random waveforms per source.
+        time_course : array-like, optional
+            Waveform for the coherent case. Default: constant.
+
+        Returns
+        -------
+        eeg_data, metadata
+            ``metadata['n_patch_sources']`` and ``metadata['patch_extent_mm']``
+            (RMS spread of the activated sources about their centroid) record
+            what was actually simulated -- the requested radius is not
+            achievable exactly on a discrete grid.
+        """
+        center_mm = np.asarray(center_mm, dtype=float)
+        d = np.linalg.norm(self.source_positions - center_mm, axis=1)
+        members = np.flatnonzero(d <= radius_mm)
+        if members.size == 0:  # radius smaller than local grid spacing
+            members = np.array([int(np.argmin(d))])
+
+        n_mem = members.size
+        positions = self.source_positions[members]
+
+        duration_s = kwargs.get('duration_s', 1.0)
+        sfreq = kwargs.get('sfreq', 500.0)
+        n_times = int(duration_s * sfreq)
+        rng = np.random.RandomState(kwargs.get('noise_seed'))
+
+        if coherent:
+            tc = (np.ones(n_times) if time_course is None
+                  else np.asarray(time_course, dtype=float).ravel())
+            time_courses = np.tile(tc, (n_mem, 1))
+            orient = rng.randn(3) if orientation is None else np.asarray(orientation)
+            orientations = np.tile(orient, (n_mem, 1))
+        else:
+            time_courses = rng.randn(n_mem, n_times)
+            orientations = rng.randn(n_mem, 3)
+
+        eeg, meta = self.simulate_n_dipoles(
+            positions_mm=positions,
+            orientations=orientations,
+            amplitudes_nAm=np.full(n_mem, amplitude_nAm / n_mem),
+            time_courses=time_courses,
+            **kwargs
+        )
+
+        centroid = positions.mean(axis=0)
+        meta.update({
+            'patch_center_mm': center_mm,
+            'patch_radius_mm': float(radius_mm),
+            'n_patch_sources': int(n_mem),
+            'patch_source_indices': members,
+            'patch_centroid_mm': centroid,
+            'patch_extent_mm': float(
+                np.sqrt(((positions - centroid) ** 2).sum(axis=1).mean())),
+            'patch_coherent': bool(coherent),
+            'total_amplitude_nAm': float(amplitude_nAm),
+        })
+        return eeg, meta
