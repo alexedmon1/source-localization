@@ -221,11 +221,36 @@ def test_centroid_outside_roi_is_detected_and_reported():
 
     _, _, meta = load_atlas_roi_test_points(
         str(atlas), str(root / NAMES), placement="medoid")
-    assert meta["n_centroid_outside"] == 5, (
+
+    # The atlas property: 5 of 32 Allen-32 parcels have a centroid outside
+    # themselves. Independent of placement, of L/R symmetry, and of whether a
+    # names file was supplied. This is the number the manuscript cites.
+    assert meta["n_centroid_outside_atlas"] == 5, (
         f"expected 5 Allen-32 ROIs whose centroid falls outside themselves, "
-        f"got {meta['n_centroid_outside']}. If the atlas changed, re-verify "
-        f"which parcels are affected before updating this number."
+        f"got {meta['n_centroid_outside_atlas']}. If the atlas changed, "
+        f"re-verify which parcels are affected before updating this number."
     )
+    assert meta["centroid_outside_roi_atlas"] == [8, 14, 15, 24, 30], (
+        "affected parcels are Hippocampus_Post_L/R, Lateral_Cortex_L/R and "
+        f"Cerebellum_L; got {meta['centroid_outside_roi_atlas']}"
+    )
+    assert meta["n_rois_in_atlas"] == 32
+
+    # The coverage figure, pinned so the two can never be confused again. With
+    # L/R symmetry on, the 16 mirrored right-hemisphere parcels are skipped
+    # before their centroid is checked, so only the 3 left-hemisphere cases are
+    # seen. This is what previously made the count look atlas-dependent.
+    assert meta["n_centroid_outside"] == 3
+    assert meta["centroid_outside_roi"] == [8, 14, 15]
+    assert meta["n_rois_centroid_checked"] == 16
+
+    # Turning symmetry off examines every parcel, and the two figures agree.
+    _, _, meta_asym = load_atlas_roi_test_points(
+        str(atlas), str(root / NAMES), placement="medoid",
+        enforce_lr_symmetry=False)
+    assert meta_asym["n_centroid_outside"] == 5
+    assert meta_asym["n_centroid_outside_atlas"] == 5
+    assert meta_asym["n_rois_centroid_checked"] == 32
 
 
 def test_default_roi_placement_is_not_centroid():

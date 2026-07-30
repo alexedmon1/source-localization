@@ -489,8 +489,18 @@ def load_atlas_roi_test_points(
         ROI ID -> array of shape (n_points, 3) in mm.
     roi_names : dict[int, str]
     meta : dict
-        ``placement``, ``n_per_roi``, ``seed``, and ``centroid_outside_roi``
-        (the ROI IDs whose centroid was outside, i.e. what this fixes).
+        ``placement``, ``n_per_roi``, ``seed``, and two distinct centroid
+        diagnostics — keep them apart:
+
+        - ``centroid_outside_roi_atlas`` / ``n_centroid_outside_atlas`` — every
+          parcel in the label map whose centroid falls outside itself. **This is
+          the atlas property**; for Allen-32 it is 5 (IDs 8, 14, 15, 24, 30 =
+          Hippocampus_Post_L/R, Lateral_Cortex_L/R, Cerebellum_L). Cite this one.
+        - ``centroid_outside_roi`` / ``n_centroid_outside`` — the same check
+          restricted to the parcels this call actually places points in. With
+          ``enforce_lr_symmetry=True`` the mirrored right-hemisphere ROIs are
+          skipped, so it reports 3, not 5. It is a coverage figure and depends on
+          the arguments, not on the atlas.
     """
     if placement not in ("medoid", "sample", "centroid"):
         raise ValueError(f"placement must be medoid|sample|centroid, got {placement!r}")
@@ -513,6 +523,21 @@ def load_atlas_roi_test_points(
             if nm.endswith("_L") and nm[:-2] + "_R" in name2id:
                 lr_pairs[int(i)] = int(name2id[nm[:-2] + "_R"])
         mirrored_ids = set(lr_pairs.values())
+
+    # Atlas-wide centroid check, run BEFORE the placement loop so it covers every
+    # parcel. The loop below skips mirrored right-hemisphere ROIs (their points are
+    # derived from the left partner), which made the reported count depend on
+    # `enforce_lr_symmetry` and on whether a names file was supplied to pair L/R:
+    # 3 with symmetry on, 5 with it off, for the same label map. How many parcels
+    # have a centroid outside themselves is a property of the atlas, not of the
+    # placement strategy, so it is computed independently here.
+    centroid_outside_atlas = []
+    for roi_id in roi_ids:
+        vox_all = np.array(np.where(atlas_data == roi_id)).T
+        ci_all = np.round(vox_all.mean(axis=0)).astype(int)
+        in_b = all(0 <= ci_all[k] < atlas_data.shape[k] for k in range(3))
+        if not in_b or int(atlas_data[tuple(ci_all)]) != int(roi_id):
+            centroid_outside_atlas.append(int(roi_id))
 
     test_points = {}
     centroid_outside = []
@@ -598,15 +623,26 @@ def load_atlas_roi_test_points(
                 n_r_inside / n_r_total if n_r_total else None),
             "sample_strategy": sample_strategy if placement == "sample" else None,
             "seed": seed,
+            # Parcels examined by THIS call. Excludes mirrored right-hemisphere
+            # ROIs when enforce_lr_symmetry is on, so it is a coverage figure, not
+            # an atlas property. Cite `*_atlas` for any claim about the atlas.
             "centroid_outside_roi": sorted(centroid_outside),
-            "n_centroid_outside": len(centroid_outside)}
+            "n_centroid_outside": len(centroid_outside),
+            "centroid_outside_roi_atlas": sorted(centroid_outside_atlas),
+            "n_centroid_outside_atlas": len(centroid_outside_atlas),
+            "n_rois_centroid_checked": len(roi_ids) - len(mirrored_ids),
+            "n_rois_in_atlas": len(roi_ids)}
 
     print(f"  ROI test points: placement={placement}, "
           f"{sum(len(v) for v in test_points.values())} points across "
           f"{len(test_points)} ROIs")
-    if centroid_outside:
-        print(f"    (legacy centroid placement would have put {len(centroid_outside)} "
-              f"ROI(s) outside their own parcel: {sorted(centroid_outside)})")
+    if centroid_outside_atlas:
+        print(f"    (legacy centroid placement would have put "
+              f"{len(centroid_outside_atlas)} of {len(roi_ids)} ROI(s) outside "
+              f"their own parcel: {sorted(centroid_outside_atlas)}"
+              + (f"; {len(centroid_outside)} among the "
+                 f"{len(roi_ids) - len(mirrored_ids)} parcels this call places "
+                 f"points in)" if mirrored_ids else ")"))
 
     return test_points, roi_names, meta
 
