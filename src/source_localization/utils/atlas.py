@@ -530,3 +530,41 @@ if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("Validation complete!")
     print("=" * 70)
+
+
+def resolve_source_brain_mask(config: dict | None = None) -> "Path":
+    """Path to the brain mask used for **source placement**.
+
+    Distinct from the mask the BEM is fitted to, deliberately. The shipped
+    ``Atlas_3DRois_brain.nii.gz`` measures 563.7 mm3 against a published adult
+    C57BL/6 whole-brain volume of ~450-520 mm3; the excess is a thin surface rim
+    of non-brain tissue (meninges, CSF, partial-volume edge) that is essentially
+    all unlabeled by Allen-32. The shell source space placed 14.4% of its
+    sources inside that rim, the Cartesian grid 8.8%.
+
+    ``Atlas_3DRois_brain_srcmask.nii.gz`` removes it -- dropping only *unlabeled*
+    voxels shallower than 0.4 mm, never a labeled voxel at any depth, so every
+    parcel is preserved intact (32/32 verified). Built by
+    ``scripts/make_brain_mask_corrected.py``; provenance in the sidecar
+    ``Atlas_3DRois_brain_srcmask.json``.
+
+    The BEM continues to be fitted to the original mask. The two uses have
+    different requirements: the BEM needs the outer boundary of the conducting
+    compartment, where a generous surface is conservative and is smoothed by the
+    ellipsoid margin anyway; the source space needs to know where neural sources
+    can physically be. Changing the BEM input would alter the forward model and
+    therefore every result the pipeline produces.
+
+    Resolution order: ``config['inputs']['source_brain_mask']`` if set, else the
+    packaged corrected mask, else the original mask.
+    """
+    from pathlib import Path
+
+    if config:
+        explicit = (config.get('inputs') or {}).get('source_brain_mask')
+        if explicit:
+            return Path(explicit)
+
+    atlas_dir = Path(__file__).parent.parent / "data" / "atlas"
+    corrected = atlas_dir / "Atlas_3DRois_brain_srcmask.nii.gz"
+    return corrected if corrected.exists() else atlas_dir / "Atlas_3DRois_brain.nii.gz"

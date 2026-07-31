@@ -1,0 +1,31 @@
+{
+  "purpose": "source placement only; the BEM is still fitted to the original mask",
+  "input_mask": "Atlas_3DRois_brain.nii.gz",
+  "labels": "allen/allen_labels.nii.gz",
+  "output_mask": "Atlas_3DRois_brain_srcmask.nii.gz",
+  "method": "remove unlabeled voxels shallower than the threshold; never remove a labeled voxel at any depth",
+  "threshold_mm": 0.4,
+  "voxel_size_mm": [
+    0.203125,
+    0.080078,
+    0.2
+  ],
+  "voxels_before": 173271,
+  "voxels_after": 142458,
+  "voxels_removed": 30813,
+  "volume_mm3_before": 563.7,
+  "volume_mm3_after": 463.4,
+  "literature_range_mm3": [
+    450.0,
+    520.0
+  ],
+  "within_literature_range": true,
+  "unlabeled_fraction_before": 0.343,
+  "unlabeled_fraction_after": 0.2008,
+  "connected_components": 1,
+  "labeled_voxels_removed": 0,
+  "parcels_unchanged": "32/32",
+  "min_labeled_depth_mm": 0.08,
+  "median_unlabeled_depth_mm": 0.373,
+  "median_labeled_depth_mm": 1.151
+}

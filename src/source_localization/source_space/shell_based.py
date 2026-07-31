@@ -151,9 +151,13 @@ def create_source_space(config, previous_outputs):
             from pathlib import Path
             import nibabel as nib
 
-            # Load brain mask (skull-stripped brain volume)
-            package_dir = Path(__file__).parent.parent
-            brain_mask_path = package_dir / 'data' / 'atlas' / 'Atlas_3DRois_brain.nii.gz'
+            # Brain mask for SOURCE PLACEMENT. Deliberately not the mask the BEM
+            # is fitted to: the shipped mask carries a ~0.4 mm non-brain surface
+            # rim, and this shell space put 14.4% of its sources inside it. See
+            # utils.atlas.resolve_source_brain_mask.
+            from ..utils.atlas import resolve_source_brain_mask
+            brain_mask_path = resolve_source_brain_mask(config)
+            print(f"    Source-placement brain mask: {brain_mask_path.name}")
 
             if brain_mask_path.exists():
                 brain_img = nib.load(brain_mask_path)

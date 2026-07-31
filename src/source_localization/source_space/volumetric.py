@@ -88,10 +88,13 @@ def create_source_space(config, previous_outputs):
             print(f"    Using full atlas for sphere (more cubic bounds): Atlas_3DRois.nii")
         else:
             # Ellipsoid/other BEM: use skull-stripped brain for ellipsoidal bounds
-            brain_mask_file = package_dir / "data/atlas/Atlas_3DRois_brain.nii.gz"
+            # Source-placement mask, not the BEM's. See
+            # utils.atlas.resolve_source_brain_mask for why they differ.
+            from ..utils.atlas import resolve_source_brain_mask
+            brain_mask_file = resolve_source_brain_mask(config)
             mask_nii = nib.load(brain_mask_file)
             brain_mask = mask_nii.get_fdata() > 0  # Binary brain mask
-            print(f"    Using skull-stripped brain mask: Atlas_3DRois_brain.nii.gz")
+            print(f"    Source-placement brain mask: {brain_mask_file.name}")
     else:
         # If brain mask disabled, still need a mask for grid bounds
         brain_mask = brain_data > 0
