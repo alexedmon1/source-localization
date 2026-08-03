@@ -77,24 +77,28 @@ def create_source_space(config, previous_outputs):
     from ..utils.atlas import get_true_affine
     affine = get_true_affine(nii)
 
-    # Create brain mask based on BEM type (matches adv_test approach)
-    # Sphere: Use full atlas (Atlas_3DRois.nii) for cubic grid bounds
-    # Ellipsoid: Use skull-stripped brain (Atlas_3DRois_brain.nii.gz) for ellipsoidal bounds
+    # Source placement is constrained anatomically for every BEM type.
+    #
+    # Until 2026-08-03 the sphere took a separate branch that used the full atlas
+    # (`brain_data > 0`, skull and exterior included) on the rationale that it
+    # gave "more cubic grid bounds", leaving the spherical inset to cut it back.
+    # That rationale does not hold: `shape` is taken from this volume purely to
+    # generate the voxel grid, and the full atlas and the brain mask share the
+    # same shape, so the grid produced is identical either way. The only effect
+    # of the branch was to skip anatomical filtering entirely -- measured, it
+    # left 98 of sphere_cartesian's 180 sources (54.4%) outside the brain, while
+    # the ellipsoid equivalent was 141/141 inside. The spherical inset bounds
+    # distance from the centre; it cannot know where tissue is.
+    #
+    # See revision-1-NIMG-26-1224/artifacts/wp10_cartesian_counts/.
     if use_brain_mask:
-        if bem_type == 'sphere':
-            # Sphere BEM: use full atlas for more cubic grid bounds
-            # Spherical constraint will cut this to a sphere
-            brain_mask = brain_data > 0
-            print(f"    Using full atlas for sphere (more cubic bounds): Atlas_3DRois.nii")
-        else:
-            # Ellipsoid/other BEM: use skull-stripped brain for ellipsoidal bounds
-            # Source-placement mask, not the BEM's. See
-            # utils.atlas.resolve_source_brain_mask for why they differ.
-            from ..utils.atlas import resolve_source_brain_mask
-            brain_mask_file = resolve_source_brain_mask(config)
-            mask_nii = nib.load(brain_mask_file)
-            brain_mask = mask_nii.get_fdata() > 0  # Binary brain mask
-            print(f"    Source-placement brain mask: {brain_mask_file.name}")
+        # Source-placement mask, not the BEM's. See
+        # utils.atlas.resolve_source_brain_mask for why they differ.
+        from ..utils.atlas import resolve_source_brain_mask
+        brain_mask_file = resolve_source_brain_mask(config)
+        mask_nii = nib.load(brain_mask_file)
+        brain_mask = mask_nii.get_fdata() > 0  # Binary brain mask
+        print(f"    Source-placement brain mask: {brain_mask_file.name}")
     else:
         # If brain mask disabled, still need a mask for grid bounds
         brain_mask = brain_data > 0
@@ -118,9 +122,9 @@ def create_source_space(config, previous_outputs):
 
     print(f"    Initial grid: {len(grid_coords_voxel):,} points")
 
-    # Filter grid to brain mask (both sphere and ellipsoid use brain mask)
-    # Sphere: full atlas → spherical constraint cuts to sphere
-    # Ellipsoid: skull-stripped brain → keeps entire brain
+    # Filter the grid to the brain mask. Applies to every BEM type as of
+    # 2026-08-03; the BEM/inset constraint below is applied in addition, not
+    # instead.
     grid_coords_int = np.round(grid_coords_voxel).astype(int)
 
     # Check bounds
