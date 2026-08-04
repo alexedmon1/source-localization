@@ -115,14 +115,38 @@ Source localization solves the EEG inverse problem: given electrode measurements
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and install
-git clone https://github.com/drpedapati/AlexProjects.git
-cd AlexProjects/mouse-eeg-source-localization/source_localization
+git clone https://github.com/alexedmon1/source-localization.git
+cd source-localization
 uv venv && source .venv/bin/activate
 uv pip install -e .
 
 # For connectivity analysis (optional)
 uv pip install -e ".[connectivity]"
 ```
+
+### Reproducing a published analysis
+
+A plain install resolves whatever versions are current, which is **not** what
+produced any published result — MNE in particular resolves to 1.12.1 rather than
+the 1.11.0 used throughout. Install against a lockfile instead:
+
+```bash
+uv venv .venv
+uv pip install --python .venv -r <lockfile>
+uv pip install --python .venv --no-deps "source-localization @ git+https://github.com/alexedmon1/source-localization.git@<tag>"
+```
+
+`--no-deps` is deliberate: the lockfile is the authority on versions, and letting
+the package re-resolve its own dependencies is what drifts the environment.
+
+Release tags used by published work:
+
+| tag | what it is |
+|---|---|
+| `v0.2.1` | the reconstruction cited by the Fmr1 KO vs WT manuscript |
+| `v0.2.3` | **v0.2.1 plus one line of packaging metadata** — declares `scikit-learn`, which `source_space/roi_based.py` imports but v0.2.1 never declared. `git diff v0.2.1 v0.2.3` touches `pyproject.toml` and nothing else, so every analysis path is byte-identical. Install this; cite v0.2.1 |
+| `v0.4.1` | corrected brain mask — sources are placed inside the brain rather than the meningeal rim |
+| `v0.4.2` | v0.4.1 plus the same packaging fix. Install this; cite v0.4.1 |
 
 ### Verify Installation
 
