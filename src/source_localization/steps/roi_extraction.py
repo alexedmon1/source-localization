@@ -44,7 +44,13 @@ def run(config, previous_outputs):
         - 'roi_labels': list - ROI names
         - 'roi_source_mapping': dict - Sources assigned to each ROI
     """
-    use_proximity = config['roi'].get('use_proximity', True)
+    # Default false: a source belongs to the parcel it lands in. Proximity
+    # assignment spreads each source over every parcel within a radius, which
+    # is a free parameter and acts in opposite directions on different source
+    # spaces (it raised Cartesian concordance 0.387 -> 0.742 while dropping
+    # shell 0.818 -> 0.292). It existed for sparse label volumes; Allen-32 with
+    # the corrected placement mask does not need it. Scheduled for removal.
+    use_proximity = config['roi'].get('use_proximity', False)
     proximity_radius_mm = config['roi'].get('proximity_radius_mm', 2.0)
 
     print(f"  Extracting ROI-level source activity:")

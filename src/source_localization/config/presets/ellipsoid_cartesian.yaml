@@ -77,7 +77,7 @@ spectral:
   primary_band: low_gamma
 
 roi:
-  use_proximity: true
+  use_proximity: false  # nearest-voxel atlas lookup; see ADR below
   proximity_radius_mm: 2.0
 
 outputs:
