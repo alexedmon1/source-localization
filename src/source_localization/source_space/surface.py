@@ -39,6 +39,19 @@ def create_source_space(config, previous_outputs):
     n_sources : int
         Number of sources
     """
+    # `method` selects between the geometric icosphere below and the anatomical
+    # mid-ribbon surface derived from the Allen parcellation. It lives here
+    # rather than as a new source_space type so that switching the default
+    # later is a one-line change instead of a config migration.
+    method = config['source_space'].get('surface', {}).get('method', 'icosphere')
+    if method == 'anatomical':
+        from . import surface_anatomical
+        return surface_anatomical.create_source_space(config, previous_outputs)
+    if method != 'icosphere':
+        raise ValueError(
+            f"Unknown surface method: {method}. Valid: icosphere, anatomical"
+        )
+
     # Get BEM parameters and configuration
     bem_params = previous_outputs['bem_params']
     bem_type = config['pipeline']['bem_type']
