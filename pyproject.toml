@@ -37,6 +37,11 @@ dependencies = [
     # v0.4.1, so a clean install from this file failed at source-space
     # construction; earlier runs masked it with `uv run --with scikit-learn`.
     "scikit-learn>=1.0",
+    # Imported opportunistically (inside try/except) by
+    # source_analysis/visualization_roi.py and utils/electrode_registration.py,
+    # and required outright by the anatomical surface source space, which
+    # extracts a cortical isosurface with skimage.measure.marching_cubes.
+    "scikit-image>=0.19",
 ]
 
 [project.optional-dependencies]
