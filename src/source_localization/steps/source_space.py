@@ -2,11 +2,12 @@
 
 Create source space for source estimation.
 
-Source types:
-- cartesian: 3D Cartesian grid (formerly 'volumetric')
-- surface: Icosphere surface mesh
-- roi_based: Sources at ROI centroids
-- shell: Concentric geometry-matched shells
+Source types. The first three are volumetric; only `surface` places sources on
+a sheet:
+- cartesian: 3D Cartesian grid (`cartesian_based.py`, formerly 'volumetric')
+- roi_based: Sources at ROI centroids (`roi_based.py`)
+- shell: Concentric geometry-matched shells (`shell_based.py`)
+- surface: Icosphere or anatomical mid-ribbon mesh (`surface.py`)
 
 All source types support a universal electrode proximity filter via:
   source_space.max_electrode_distance_mm: <float>
@@ -45,8 +46,8 @@ def run(config, previous_outputs):
     # Delegate to appropriate module
     # Support both old and new names for backward compatibility
     if source_type in ('cartesian', 'volumetric'):
-        from ..source_space import volumetric
-        src, source_coords_mm, n_sources = volumetric.create_source_space(config, previous_outputs)
+        from ..source_space import cartesian_based
+        src, source_coords_mm, n_sources = cartesian_based.create_source_space(config, previous_outputs)
     elif source_type == 'surface':
         from ..source_space import surface
         src, source_coords_mm, n_sources = surface.create_source_space(config, previous_outputs)

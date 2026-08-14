@@ -10,6 +10,7 @@ import numpy as np
 import nibabel as nib
 from pathlib import Path
 from mne.surface import complete_surface_info, _get_ico_surface
+from mne.io.constants import FIFF
 
 
 def create_numerical_sphere_surfaces(center_mm, radii_mm, conductivities, n_vertices=642):
@@ -45,8 +46,15 @@ def create_numerical_sphere_surfaces(center_mm, radii_mm, conductivities, n_vert
     # Get MNE's standard icosphere
     ico = _get_ico_surface(subdivision)
 
-    # MNE surface IDs: brain=4, skull=3, scalp=1 (inner to outer)
-    surface_ids = [4, 3, 1]
+    # MNE surface IDs, inner to outer. FIFFV_BEM_SURF_ID_BRAIN is 1 and
+    # FIFFV_BEM_SURF_ID_HEAD is 4, not the reverse. `_bem_find_surface` resolves
+    # surfaces by id, so getting these backwards hands the source-containment
+    # check in `_prepare_for_forward` the scalp instead of the inner skull.
+    surface_ids = [
+        FIFF.FIFFV_BEM_SURF_ID_BRAIN,
+        FIFF.FIFFV_BEM_SURF_ID_SKULL,
+        FIFF.FIFFV_BEM_SURF_ID_HEAD,
+    ]
 
     surfaces = []
     for layer_idx, (radius_mm, sigma) in enumerate(zip(radii_mm, conductivities)):

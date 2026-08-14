@@ -138,6 +138,25 @@ def validate_bem_cache(config, params_file):
     return True
 
 
+def surface_ids_are_stale(bem_model):
+    """True if a cached BEM carries the pre-correction layer ids.
+
+    Surfaces are stored inner to outer, so their ids must read BRAIN, SKULL,
+    HEAD (1, 3, 4). Older caches hold [4, 3, 1], which makes
+    `_bem_find_surface(bem, 'inner_skull')` return the scalp and the source
+    containment check in `_prepare_for_forward` far too permissive.
+    """
+    surfs = bem_model.get('surfs') if isinstance(bem_model, dict) else None
+    if not surfs:
+        return False  # analytical sphere BEM has no surfaces to check
+    expected = [
+        mne.io.constants.FIFF.FIFFV_BEM_SURF_ID_BRAIN,
+        mne.io.constants.FIFF.FIFFV_BEM_SURF_ID_SKULL,
+        mne.io.constants.FIFF.FIFFV_BEM_SURF_ID_HEAD,
+    ]
+    return [s.get('id') for s in surfs] != expected[:len(surfs)]
+
+
 def save_bem_cache(config, bem_model, bem_params):
     """
     Save BEM model and parameters to cache.
@@ -214,13 +233,25 @@ def run(config, previous_outputs):
     model_file, params_file = get_bem_cache_files(config)
 
     # Try to load from cache
+    cached = None
     if use_cache and not force_recreate and model_file.exists() and validate_bem_cache(config, params_file):
-        # Load from cache
         print(f"Loading cached BEM model from {model_file.name}...")
 
         with open(model_file, 'rb') as f:
-            bem_model = pickle.load(f)
+            candidate = pickle.load(f)
 
+        if surface_ids_are_stale(candidate):
+            # Caches written before the layer ids were corrected hold them in
+            # the old [4, 3, 1] order, which sends `_bem_find_surface` to the
+            # wrong surface. The metadata does not record ids, so the check has
+            # to read the model itself. Rebuilding is safe: the leadfield is
+            # bitwise identical either way, only the id lookup changes.
+            print("  ⚠️  Cached BEM has outdated layer ids, rebuilding")
+        else:
+            cached = candidate
+
+    if cached is not None:
+        bem_model = cached
         with open(params_file, 'r') as f:
             cached_metadata = json.load(f)
             bem_params = cached_metadata['parameters']

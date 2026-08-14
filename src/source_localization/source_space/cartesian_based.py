@@ -1,4 +1,12 @@
-"""Volumetric source space implementation."""
+"""Cartesian-based source space implementation.
+
+One of the three volumetric source spaces, alongside `roi_based` and
+`shell_based`. Sources sit on a regular 3D grid constrained by BEM geometry and
+the brain mask.
+
+The config key is still `source_space.volumetric` in the older presets; both
+that and `source_space.cartesian` are accepted below.
+"""
 
 import mne
 import numpy as np
