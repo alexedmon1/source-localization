@@ -386,10 +386,22 @@ def create_source_space(config, previous_outputs):
         spacing_mm, iso_mm, cache_dir
     )
 
-    src = mne.SourceSpaces([
-        _hemi_dict(lh_pts, lh_nn, lh_tris, 101),
-        _hemi_dict(rh_pts, rh_nn, rh_tris, 102),
-    ])
+    lh_dict = _hemi_dict(lh_pts, lh_nn, lh_tris, 101)
+    rh_dict = _hemi_dict(rh_pts, rh_nn, rh_tris, 102)
+
+    parcels = np.concatenate([lh_parcel, rh_parcel])
+
+    # roi_extraction reads `roi_assignments` off src[0] and treats its presence
+    # as "sources are already assigned", which also disables proximity
+    # assignment — exactly the land-in-parcel rule this surface is built on. The
+    # array spans both hemispheres because stc data is ordered lh then rh.
+    lh_dict["roi_assignments"] = parcels
+    # Per-hemisphere copies so an entry stays self-describing if one is used
+    # alone; the electrode-proximity filter slices these per entry.
+    lh_dict["hemi_roi_assignments"] = lh_parcel
+    rh_dict["hemi_roi_assignments"] = rh_parcel
+
+    src = mne.SourceSpaces([lh_dict, rh_dict])
 
     coords_mm = np.vstack([lh_pts, rh_pts])
     n_sources = len(coords_mm)
@@ -397,7 +409,7 @@ def create_source_space(config, previous_outputs):
     # Parcel assignment travels with the source space so downstream ROI
     # extraction does not have to re-derive it from coordinates.
     previous_outputs.setdefault("surface_meta", {}).update(meta)
-    previous_outputs["surface_parcels"] = np.concatenate([lh_parcel, rh_parcel])
+    previous_outputs["surface_parcels"] = parcels
 
     print(f"    ✓ Created anatomical surface with {n_sources:,} sources "
           f"(lh {len(lh_pts):,} / rh {len(rh_pts):,})")

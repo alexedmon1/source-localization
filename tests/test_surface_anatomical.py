@@ -124,3 +124,60 @@ def test_anatomical_source_space_shape_and_units():
     assert np.allclose(np.linalg.norm(nn, axis=1), 1.0)
 
     assert len(prev["surface_parcels"]) == n
+
+    # roi_extraction reads assignments off src[0] and takes their presence as
+    # "already assigned", which is the land-in-parcel rule this surface uses
+    assert "roi_assignments" in src[0]
+    assert len(src[0]["roi_assignments"]) == n
+    assert len(src[0]["hemi_roi_assignments"]) == src[0]["np"]
+    assert len(src[1]["hemi_roi_assignments"]) == src[1]["np"]
+
+
+@pytest.mark.slow
+def test_electrode_proximity_filter_keeps_both_hemispheres():
+    """The filter rebuilt only src[0], which would silently drop the right hemisphere.
+
+    Dormant today because no preset sets max_electrode_distance_mm, but the
+    step's docstring advertises the filter as universal.
+    """
+    from source_localization.steps.source_space import _rebuild_source_space
+
+    cfg = {
+        "source_space": {"surface": {"method": "anatomical", "spacing_mm": 0.8}},
+        "pipeline": {"bem_type": "ellipsoid"},
+    }
+    src, _, n = surface.create_source_space(cfg, {})
+    lh_n = src[0]["np"]
+
+    keep = np.ones(n, dtype=bool)
+    keep[::7] = False
+    out = _rebuild_source_space(src, keep)
+
+    assert len(out) == 2
+    assert [s["id"] for s in out] == [101, 102]
+    assert out[0]["np"] == int(keep[:lh_n].sum())
+    assert out[1]["np"] == int(keep[lh_n:].sum())
+    assert sum(s["np"] for s in out) == int(keep.sum())
+
+    # whole-space assignments filter with the full mask, per-hemi with theirs
+    assert len(out[0]["roi_assignments"]) == int(keep.sum())
+    assert len(out[0]["hemi_roi_assignments"]) == out[0]["np"]
+    assert len(out[1]["hemi_roi_assignments"]) == out[1]["np"]
+
+    for s in out:
+        if s["ntri"]:
+            assert s["tris"].max() < s["np"]
+
+
+def test_electrode_proximity_filter_single_entry_unchanged():
+    from source_localization.steps.source_space import _rebuild_source_space
+
+    src, _, n = surface.create_source_space(
+        _icosphere_config(), {"bem_params": BEM}
+    )
+    keep = np.ones(n, dtype=bool)
+    keep[::5] = False
+    out = _rebuild_source_space(src, keep)
+
+    assert len(out) == 1
+    assert out[0]["np"] == int(keep.sum())

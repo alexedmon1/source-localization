@@ -65,8 +65,98 @@ def combine_orientations(source_activity_3d):
     return magnitude, signed
 
 
+def apply_orientation_constraint(fwd, orientation='free', loose=0.2, verbose=True):
+    """Constrain source orientation to the cortical normal, or not.
+
+    Until this existed, per-vertex normals were computed by the source spaces
+    and never consumed: the forward stayed free-orientation and orientation was
+    collapsed downstream by SVD or L2 norm, so anatomy never entered the
+    inverse. That is the defect this addresses.
+
+    Parameters
+    ----------
+    fwd : mne.Forward
+        Forward solution.
+    orientation : {'free', 'loose', 'fixed'}
+        ``free`` leaves the leadfield untouched, three components per source,
+        and is bit-identical to the behaviour that produced every published
+        number. ``fixed`` keeps only the normal component. ``loose`` keeps all
+        three but penalises the tangential ones.
+    loose : float
+        Tangential penalty for ``loose``, in (0, 1]. MNE's convention: the
+        source covariance of the two tangential components is scaled by this,
+        which is a weight of ``sqrt(loose)`` on the leadfield columns.
+
+    Returns
+    -------
+    fwd_out : mne.Forward
+        Orientation-converted forward.
+    n_comp : int
+        Components per source: 1 for ``fixed``, 3 otherwise.
+    weights : ndarray or None
+        Per-column leadfield weights for ``loose``, else None. These must be
+        applied to the leadfield *columns* and then to the operator *rows*;
+        see :func:`compute_inverse_operator`.
+    """
+    import mne
+
+    orientation = (orientation or 'free').lower()
+    if orientation not in ('free', 'loose', 'fixed'):
+        raise ValueError(
+            f"Unknown orientation: {orientation}. Valid: free, loose, fixed"
+        )
+
+    if orientation == 'free':
+        if verbose:
+            print("    Orientation: free (3 components per source, leadfield unchanged)")
+        return fwd, 3, None
+
+    # fixed and loose both need meaningful normals. Six of the ten presets use
+    # source spaces that write nn = zeros, so fail loudly rather than silently
+    # constraining every source to the zero vector.
+    nn = np.vstack([s['nn'] for s in fwd['src']])
+    norms = np.linalg.norm(nn, axis=1)
+    if not np.all(norms > 1e-6):
+        n_bad = int((norms <= 1e-6).sum())
+        raise ValueError(
+            f"orientation='{orientation}' needs source normals, but "
+            f"{n_bad}/{len(norms)} sources have none. Source spaces that "
+            "write nn = zeros (cartesian, roi_based) support only "
+            "orientation='free'."
+        )
+
+    if orientation == 'fixed':
+        fwd_out = mne.convert_forward_solution(
+            fwd, surf_ori=True, force_fixed=True, use_cps=False, verbose=False
+        )
+        if verbose:
+            print("    Orientation: fixed (1 component per source, along the "
+                  "cortical normal)")
+        return fwd_out, 1, None
+
+    if not 0.0 < loose <= 1.0:
+        raise ValueError(f"loose must be in (0, 1], got {loose}")
+
+    # surf_ori rotates each triplet so component 0 is the normal and 1, 2 are
+    # tangential; only then does penalising "the tangential components" mean
+    # anything.
+    fwd_out = mne.convert_forward_solution(
+        fwd, surf_ori=True, force_fixed=False, use_cps=False, verbose=False
+    )
+    n_dipoles = fwd_out['sol']['data'].shape[1]
+    weights = np.ones(n_dipoles, dtype=float)
+    weights[1::3] = np.sqrt(loose)
+    weights[2::3] = np.sqrt(loose)
+
+    if verbose:
+        print(f"    Orientation: loose {loose} (tangential components weighted "
+              f"{np.sqrt(loose):.4f})")
+    return fwd_out, 3, weights
+
+
 def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth=0.8,
-                             max_iter=20, tol=1e-6, verbose=True):
+                             max_iter=20, tol=1e-6, verbose=True,
+                             orientation='free', loose=0.2):
     """
     Compute inverse operator W for a given forward solution.
 
@@ -97,17 +187,42 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
         Inverse operator, shape (n_dipoles, n_channels)
     normalizer : ndarray or None
         Normalization factors for dSPM/sLORETA/eLORETA, shape (n_dipoles,)
+    n_comp : int
+        Components per source: 1 under fixed orientation, else 3. Callers need
+        this to reshape source activity.
     """
     if lambda2 is None:
         lambda2 = 1.0 / snr ** 2
 
-    G = fwd['sol']['data']
-    n_channels, n_dipoles = G.shape
-    n_sources = n_dipoles // 3
+    fwd, n_comp, ori_weights = apply_orientation_constraint(
+        fwd, orientation=orientation, loose=loose, verbose=verbose
+    )
+
+    G_ori = fwd['sol']['data']
+    n_channels, n_dipoles = G_ori.shape
+    n_sources = n_dipoles // n_comp
+
+    # Loose orientation is a source-covariance scaling. With R = diag(r),
+    # W = R G' (G R G' + lam C)^-1 factors as: weight the leadfield columns by
+    # sqrt(r), solve as usual, then weight the operator rows by sqrt(r). This
+    # is the same shape as the depth weighting already applied below.
+    if ori_weights is None:
+        G = G_ori
+    else:
+        G = G_ori * ori_weights[np.newaxis, :]
 
     if verbose:
         print(f"    Computing inverse operator ({method})")
         print(f"    SNR: {snr}, Lambda2: {lambda2:.6f}")
+        # D20: fixed orientation drops the leadfield from 3 columns per source
+        # to 1, which changes trace(GG') and so the absolute size of the
+        # regularisation term. Logged so the side effect is visible rather than
+        # silently absorbed.
+        trace_ggt = float(np.trace(G @ G.T))
+        print(f"    Components/source: {n_comp}  (n_sources={n_sources:,}, "
+              f"n_dipoles={n_dipoles:,})")
+        print(f"    trace(GG')/n_ch: {trace_ggt / n_channels:.6e}  "
+              f"effective reg: {lambda2 * trace_ggt / n_channels:.6e}")
 
     method_upper = method.upper()
 
@@ -150,7 +265,8 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
         if verbose:
             print(f"    eLORETA max iterations: {max_iter}, tolerance: {tol}")
 
-        # Initialize source weights (one per 3-component source location)
+        # Initialize source weights (one per source location, whatever its
+        # component count)
         D = np.ones(n_sources)
 
         # Iterative eLORETA weight estimation
@@ -160,7 +276,7 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
             # Apply current weights to leadfield
             G_weighted = G.copy()
             for i in range(n_sources):
-                G_weighted[:, i*3:(i+1)*3] *= D[i]
+                G_weighted[:, i*n_comp:(i+1)*n_comp] *= D[i]
 
             # Compute inverse operator with weighted leadfield
             GGT = G_weighted @ G_weighted.T
@@ -170,11 +286,11 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
 
             # Update weights based on resolution matrix
             for i in range(n_sources):
-                W_i = W_temp[i*3:(i+1)*3, :]
-                G_i = G[:, i*3:(i+1)*3]
+                W_i = W_temp[i*n_comp:(i+1)*n_comp, :]
+                G_i = G[:, i*n_comp:(i+1)*n_comp]
                 R_i = W_i @ G_i
                 trace_R = np.trace(R_i)
-                D[i] = 1.0 / (np.sqrt(trace_R / 3.0) + 1e-10)
+                D[i] = 1.0 / (np.sqrt(trace_R / n_comp) + 1e-10)
 
             # Check convergence
             change = np.max(np.abs(D - D_old) / (np.abs(D_old) + 1e-10))
@@ -189,7 +305,7 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
         # Compute final inverse operator with converged weights
         G_weighted = G.copy()
         for i in range(n_sources):
-            G_weighted[:, i*3:(i+1)*3] *= D[i]
+            G_weighted[:, i*n_comp:(i+1)*n_comp] *= D[i]
 
         GGT = G_weighted @ G_weighted.T
         GGT_reg = GGT + lambda2 * np.trace(GGT) / n_channels * np.eye(n_channels)
@@ -198,24 +314,29 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
 
         # Apply source weights to inverse operator
         for i in range(n_sources):
-            W[i*3:(i+1)*3, :] *= D[i]
+            W[i*n_comp:(i+1)*n_comp, :] *= D[i]
 
         # Compute eLORETA normalizer (resolution-based, per dipole)
         normalizer = np.zeros(n_dipoles)
         for i in range(n_sources):
-            W_i = W[i*3:(i+1)*3, :]
-            G_i = G[:, i*3:(i+1)*3]
+            W_i = W[i*n_comp:(i+1)*n_comp, :]
+            G_i = G[:, i*n_comp:(i+1)*n_comp]
             R_i = W_i @ G_i
-            norm_val = np.sqrt(np.trace(R_i) / 3.0) + 1e-10
-            normalizer[i*3:(i+1)*3] = norm_val
+            norm_val = np.sqrt(np.trace(R_i) / n_comp) + 1e-10
+            normalizer[i*n_comp:(i+1)*n_comp] = norm_val
 
     else:
         raise ValueError(f"Unknown method: {method}. Supported: MNE, dSPM, sLORETA, eLORETA")
 
-    return W, normalizer
+    # Undo the leadfield column weighting on the operator rows (see above).
+    # No-op under free orientation, which keeps that path bit-identical.
+    if ori_weights is not None:
+        W = W * ori_weights[:, np.newaxis]
+
+    return W, normalizer, n_comp
 
 
-def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources):
+def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources, n_comp=3):
     """
     Apply precomputed inverse operator to a single epoch.
 
@@ -230,7 +351,9 @@ def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources):
     epoch_data : ndarray
         EEG data for one epoch, shape (n_channels, n_times)
     n_sources : int
-        Number of sources (n_dipoles / 3)
+        Number of sources (n_dipoles / n_comp)
+    n_comp : int
+        Components per source: 1 under fixed orientation, else 3.
 
     Returns
     -------
@@ -247,19 +370,27 @@ def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources):
         source_activity = source_activity / (normalizer[:, np.newaxis] + 1e-10)
 
     # Combine orientations
-    source_activity_3d = source_activity.reshape(n_sources, 3, -1)
+    source_activity_nc = source_activity.reshape(n_sources, n_comp, -1)
 
     # Magnitude: L2 norm (fast, vectorized)
-    magnitude = np.linalg.norm(source_activity_3d, axis=1).astype(np.float32)
+    magnitude = np.linalg.norm(source_activity_nc, axis=1).astype(np.float32)
+
+    if n_comp == 1:
+        # Under fixed orientation the single component IS the projection onto
+        # the cortical normal, so its sign is anatomically meaningful rather
+        # than an arbitrary SVD convention. This is what makes signed measures
+        # such as ERP polarity interpretable.
+        signed = source_activity_nc[:, 0, :].astype(np.float32)
+        return magnitude, signed
 
     # Signed: use first component weighted by sign of max variance direction
     # This is faster than full SVD and gives similar results for single epochs
     signed = np.zeros((n_sources, epoch_data.shape[1]), dtype=np.float32)
     for i in range(n_sources):
         # Find dominant orientation from variance
-        variances = np.var(source_activity_3d[i], axis=1)
+        variances = np.var(source_activity_nc[i], axis=1)
         dominant_idx = np.argmax(variances)
-        signed[i, :] = source_activity_3d[i, dominant_idx, :]
+        signed[i, :] = source_activity_nc[i, dominant_idx, :]
 
     return magnitude, signed
 
@@ -810,7 +941,12 @@ def run(config, previous_outputs):
     weight_norm = config['inverse'].get('weight_norm', 'unit-noise-gain')
     freq_band = config['inverse'].get('freq_band', None)
 
-    # Determine number of sources
+    # Orientation constraint (default free keeps every published number)
+    orientation = config['inverse'].get('orientation', 'free')
+    loose = float(config['inverse'].get('loose', 0.2))
+
+    # Determine number of sources. Fixed orientation collapses each source to a
+    # single component, so the divisor is not always 3.
     n_dipoles = fwd['sol']['data'].shape[1]
     n_sources = n_dipoles // 3
 
@@ -839,10 +975,12 @@ def run(config, previous_outputs):
         print(f"    Using memory-efficient epoch-wise processing")
 
         # Compute inverse operator once (this is small and reusable)
-        W, normalizer = compute_inverse_operator(
+        W, normalizer, n_comp = compute_inverse_operator(
             fwd, method=method, snr=snr, lambda2=lambda2,
-            depth=depth_weighting, verbose=True
+            depth=depth_weighting, verbose=True,
+            orientation=orientation, loose=loose
         )
+        n_sources = n_dipoles // n_comp
 
         # Get epochs data
         epochs_data = epochs.get_data()  # (n_epochs, n_channels, n_times)
@@ -865,7 +1003,7 @@ def run(config, previous_outputs):
 
             # Apply inverse to this epoch
             mag_epoch, signed_epoch = apply_inverse_to_epoch(
-                W, normalizer, epoch_data, n_sources
+                W, normalizer, epoch_data, n_sources, n_comp=n_comp
             )
 
             # Store in output arrays

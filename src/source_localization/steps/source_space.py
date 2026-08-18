@@ -185,6 +185,36 @@ def _rebuild_source_space(src, keep_mask):
     src_new : mne.SourceSpaces
         New source space with only kept sources
     """
+    # A surface source space has one entry per hemisphere, and keep_mask spans
+    # them in order. Rebuilding only src[0] would drop the right hemisphere
+    # entirely and mis-index the mask, so split it per entry and rebuild each.
+    if len(src) > 1:
+        # `roi_assignments` on the first entry spans the whole source space by
+        # convention, not just that entry, so it cannot be sliced with a
+        # per-entry mask. Hold it out of the recursion and filter it with the
+        # full mask afterwards.
+        whole_space_rois = src[0].get('roi_assignments')
+
+        out = []
+        offset = 0
+        for entry in src:
+            n_entry = len(entry['rr'])
+            sub_mask = keep_mask[offset:offset + n_entry]
+            offset += n_entry
+            entry_copy = entry.copy()
+            entry_copy.pop('roi_assignments', None)
+            out.extend(_rebuild_source_space([entry_copy], sub_mask))
+
+        if offset != len(keep_mask):
+            raise ValueError(
+                f"keep_mask covers {len(keep_mask)} sources but the source "
+                f"space holds {offset}"
+            )
+
+        if whole_space_rois is not None:
+            out[0]['roi_assignments'] = np.asarray(whole_space_rois)[keep_mask]
+        return mne.SourceSpaces(out)
+
     # Get the original source space dict
     src_dict = src[0].copy()
 
@@ -199,9 +229,14 @@ def _rebuild_source_space(src, keep_mask):
     src_dict['inuse'] = np.ones(n_new, dtype=np.int32)
     src_dict['vertno'] = np.arange(n_new, dtype=np.int32)
 
-    # Handle ROI assignments if present
+    # Handle ROI assignments if present. `roi_assignments` spans the whole
+    # source space; `hemi_roi_assignments` spans only this entry.
     if 'roi_assignments' in src_dict and src_dict['roi_assignments'] is not None:
         src_dict['roi_assignments'] = np.asarray(src_dict['roi_assignments'])[keep_mask]
+    if src_dict.get('hemi_roi_assignments') is not None:
+        src_dict['hemi_roi_assignments'] = np.asarray(
+            src_dict['hemi_roi_assignments']
+        )[keep_mask]
 
     # Handle triangles for surface source spaces (remove invalid triangles)
     if src_dict.get('ntri', 0) > 0 and 'tris' in src_dict:
