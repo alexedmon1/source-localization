@@ -64,8 +64,69 @@ def _default_cache_dir() -> Path:
     return Path.home() / ".cache" / "source-localization" / "surfaces"
 
 
-def build_depth_field(iso_mm=DEFAULT_ISO_MM):
-    """Cortical mask, resampled to isotropic, plus the ribbon depth field."""
+def close_cortical_holes(cortex, labels, cortical_ids, iterations=3):
+    """Absorb unlabelled voxels enclosed by cortex into their nearest parcel.
+
+    The Allen32 cortical parcellation is not a solid sheet. 8.1% of the volume
+    enclosed by cortex carries no cortical label — 87% of it unlabelled
+    background, the rest amygdala and hippocampus bleeding in. The mid-ribbon
+    level set genuinely does not exist in those voxels, so they perforate the
+    surface, and the face filter then erodes a triangle's width around every
+    perforation.
+
+    This closes the mask and gives each newly included voxel the label of its
+    nearest cortical voxel.
+
+    Note the resemblance to the proximity assignment retired in 66abe69, and
+    the difference: that spread one *source* across every parcel within a
+    radius, making parcel membership many-to-one and radius-dependent. This
+    repairs the *mask* before any source exists, and each voxel still ends up
+    in exactly one parcel. It is bounded to voxels morphologically enclosed by
+    cortex, so it cannot grow the sheet outward.
+
+    Returns
+    -------
+    cortex_out, labels_out, stats
+    """
+    from scipy import ndimage
+
+    closed = ndimage.binary_closing(cortex, iterations=iterations)
+    closed = ndimage.binary_fill_holes(closed)
+    added = closed & ~cortex
+    if not added.any():
+        return cortex, labels, {"added_voxels": 0}
+
+    # nearest cortical voxel for every added voxel, then inherit its label
+    _, idx = ndimage.distance_transform_edt(
+        ~cortex, return_distances=True, return_indices=True
+    )
+    labels_out = labels.copy()
+    ax, ay, az = idx[0][added], idx[1][added], idx[2][added]
+    labels_out[added] = labels[ax, ay, az]
+
+    # anything that still failed to inherit a cortical label is left out
+    valid = np.isin(labels_out, list(cortical_ids))
+    cortex_out = cortex | (added & valid)
+    labels_out[added & ~valid] = labels[added & ~valid]
+
+    stats = {
+        "added_voxels": int((added & valid).sum()),
+        "rejected_voxels": int((added & ~valid).sum()),
+        "cortex_before": int(cortex.sum()),
+        "cortex_after": int(cortex_out.sum()),
+    }
+    return cortex_out, labels_out, stats
+
+
+def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0):
+    """Cortical mask, resampled to isotropic, plus the ribbon depth field.
+
+    Parameters
+    ----------
+    close_holes : int, default 0
+        Iterations of hole closing on the cortical mask before the depth field
+        is computed. 0 keeps the parcellation exactly as shipped.
+    """
     import nibabel as nib
     from scipy import ndimage
 
@@ -92,6 +153,12 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM):
     brain_iso = ndimage.zoom(brain.astype(np.uint8), zoom, order=0) > 0
     cortex_iso = np.isin(labels_iso, cortical_ids)
 
+    hole_stats = {"added_voxels": 0}
+    if close_holes:
+        cortex_iso, labels_iso, hole_stats = close_cortical_holes(
+            cortex_iso, labels_iso, cortical_ids, iterations=close_holes
+        )
+
     exterior = ~brain_iso
     interior_noncortex = brain_iso & ~cortex_iso
 
@@ -115,6 +182,8 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM):
         "affine": iso_affine,
         "iso_mm": iso_mm,
         "cortical_ids": cortical_ids,
+        "hole_stats": hole_stats,
+        "close_holes": close_holes,
     }
 
 
@@ -193,12 +262,12 @@ def _orient_normals(mesh, field):
 
 
 def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
-                      field=None, verbose=True):
+                      field=None, verbose=True, close_holes=0):
     """Return (lh, rh, meta). rh is a mirror of lh, so geometry is symmetric."""
     import pyvista as pv
 
     if field is None:
-        field = build_depth_field(iso_mm=iso_mm)
+        field = build_depth_field(iso_mm=iso_mm, close_holes=close_holes)
 
     raw = extract_midribbon(field)
     smoothed = raw.smooth_taubin(
@@ -263,6 +332,8 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     meta = {
         "spacing_mm": spacing_mm,
         "iso_mm": iso_mm,
+        "close_holes": field.get("close_holes", 0),
+        "hole_stats": field.get("hole_stats", {}),
         "n_per_hemi": int(lh.n_points),
         "n_total": int(lh.n_points + rh.n_points),
         "area_per_hemi_mm2": float(lh.area),
@@ -288,12 +359,15 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     return lh, rh, meta
 
 
-def _cache_path(cache_dir, spacing_mm, iso_mm):
+def _cache_path(cache_dir, spacing_mm, iso_mm, close_holes=0):
     tag = f"midribbon_s{spacing_mm:.3f}_i{iso_mm:.3f}".replace(".", "p")
+    if close_holes:
+        tag += f"_c{int(close_holes)}"
     return Path(cache_dir) / f"{tag}.npz"
 
 
-def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True):
+def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
+                  close_holes=0):
     """Build the template surface once and reuse it across subjects.
 
     The BEM is fitted to the atlas brain mask rather than to each animal, so
@@ -302,7 +376,7 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True):
     """
     import pyvista as pv
 
-    path = _cache_path(cache_dir, spacing_mm, iso_mm)
+    path = _cache_path(cache_dir, spacing_mm, iso_mm, close_holes)
     if path.exists():
         d = np.load(path, allow_pickle=True)
         meta = json.loads(str(d["meta"]))
@@ -315,7 +389,8 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True):
             meta,
         )
 
-    lh, rh, meta = build_hemispheres(spacing_mm, iso_mm, verbose=verbose)
+    lh, rh, meta = build_hemispheres(spacing_mm, iso_mm, verbose=verbose,
+                                     close_holes=close_holes)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def tri(mesh):
@@ -377,13 +452,14 @@ def create_source_space(config, previous_outputs):
     spacing_mm = float(surface_cfg.get("spacing_mm", DEFAULT_SPACING_MM))
     iso_mm = float(surface_cfg.get("iso_mm", DEFAULT_ISO_MM))
     cache_dir = surface_cfg.get("cache_dir") or _default_cache_dir()
+    close_holes = int(surface_cfg.get("close_holes", 0))
 
     print("  Creating anatomical surface source space:")
     print(f"    Target spacing: {spacing_mm} mm")
 
     (lh_pts, lh_nn, lh_tris, lh_parcel,
      rh_pts, rh_nn, rh_tris, rh_parcel, meta) = load_or_build(
-        spacing_mm, iso_mm, cache_dir
+        spacing_mm, iso_mm, cache_dir, close_holes=close_holes
     )
 
     lh_dict = _hemi_dict(lh_pts, lh_nn, lh_tris, 101)
