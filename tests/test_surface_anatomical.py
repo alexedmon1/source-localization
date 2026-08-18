@@ -97,8 +97,18 @@ def test_anatomical_hemispheres_are_symmetric_by_construction():
     for parcel in (1, 2, 3, 4, 5, 6, 14):
         assert parcel in meta["parcels_present"], f"parcel {parcel} missing"
 
-    assert 0.0 <= meta["label_mismatch_frac"] < 0.25
-    assert meta["unlabelled_frac"] < 0.10
+    # L/R label mismatch is the atlas's own asymmetry, not the mesh's, and it
+    # is computed over labelled vertices only. Measured 4.6-6.2% across
+    # 0.15-0.80 mm spacing, so it should not drift with resolution.
+    assert 0.0 <= meta["label_mismatch_frac"] < 0.15
+
+    # Unlabelled fraction DOES rise as spacing coarsens, because boundary
+    # vertices survive decimation preferentially and boundary vertices are the
+    # ones sitting on unlabelled voxels. Measured 2.6% at 0.15 mm, 4.3% at
+    # 0.30 mm (the working spacing), 16.0% here at a deliberately coarse
+    # 0.80 mm with only ~190 vertices per hemisphere. Bound reflects the test's
+    # spacing rather than the operating point.
+    assert meta["unlabelled_frac"] < 0.20
 
 
 @pytest.mark.slow

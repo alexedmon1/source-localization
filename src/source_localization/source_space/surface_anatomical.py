@@ -386,10 +386,33 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
         return labels[idx[:, 0], idx[:, 1], idx[:, 2]]
 
     lab_l, lab_r = sample(lh.points), sample(rh.points)
+
+    # Vertices snapped onto x=0 mirror to themselves, so the right hemisphere
+    # samples the very same voxel as the left and inherits a left-hemisphere
+    # label. A vertex in the right hemisphere's mesh cannot belong to a left
+    # structure by construction, so the seam is relabelled by side. Allen32
+    # numbering is left 1-16, right 17-32.
+    seam_l = np.asarray(lh.points)[:, 0] == 0.0
+    seam_r = np.asarray(rh.points)[:, 0] == 0.0
+    flip_r = seam_r & (lab_r >= 1) & (lab_r <= 16)
+    lab_r[flip_r] = lab_r[flip_r] + 16
+    flip_l = seam_l & (lab_l >= 17) & (lab_l <= 32)
+    lab_l[flip_l] = lab_l[flip_l] - 16
+
     lh.point_data["parcel"] = lab_l.astype(np.int16)
     rh.point_data["parcel"] = lab_r.astype(np.int16)
 
-    mismatch = float((lab_r != lab_l + 16).mean())
+    # Only meaningful where both sides carry a label. An unlabelled vertex has
+    # lab 0 on both sides, and 0 != 0 + 16 counted as a disagreement, so the
+    # metric was reporting "the atlas disagrees L/R" for vertices the atlas
+    # simply does not label — which the midline seam is full of.
+    both_labelled = (lab_l > 0) & (lab_r > 0)
+    if both_labelled.any():
+        mismatch = float(
+            (lab_r[both_labelled] != lab_l[both_labelled] + 16).mean()
+        )
+    else:
+        mismatch = float("nan")
 
     # Decimation moves vertices off the ribbon, so a few land on unlabelled
     # voxels or, rarely, on a non-cortical parcel. The raw isosurface has none
