@@ -997,7 +997,12 @@ def run(config, previous_outputs):
             depth=depth_weighting, verbose=True,
             orientation=orientation, loose=loose
         )
-        n_sources = n_dipoles // n_comp
+        # Derive the source count from the OPERATOR, not from the original
+        # leadfield. n_dipoles here is the free-orientation column count; under
+        # fixed orientation the forward is converted inside
+        # compute_inverse_operator, so n_dipoles // n_comp overcounts threefold
+        # (10,440 instead of 3,480) and the epoch reshape then fails.
+        n_sources = W.shape[0] // n_comp
 
         # Get epochs data
         epochs_data = epochs.get_data()  # (n_epochs, n_channels, n_times)

@@ -34,7 +34,17 @@ bem:
 source_space:
   surface:
     method: anatomical        # cortical mid-ribbon from the Allen32 parcellation
-    spacing_mm: 0.30          # ~2,500 sources; see the density sweep
+    # 0.50 mm, ~1,310 sources. Chosen on evidence, not on accuracy: the
+    # inverse's own contribution to localisation error is flat at ~0.52-0.67 mm
+    # across a 20x range of source counts, because 30 sensors cap the effective
+    # rank at 30 however many sources there are. Denser grids only shrink the
+    # discretisation floor — the distance from a target to its nearest source —
+    # which is not resolution. The same conclusion the volumetric work reached.
+    #
+    # What density does bind is parcel occupancy. 0.50 mm is the coarsest
+    # spacing where every carried parcel still holds >= 10 sources; at 0.65 mm
+    # Auditory and Frontal_Anterior fall into single digits on both sides.
+    spacing_mm: 0.50
     iso_mm: 0.08              # isotropic resample before marching cubes
     # Which Allen32 categories carry sources. Cerebellum and the olfactory
     # bulbs are on the outer brain surface and generate EEG that would
