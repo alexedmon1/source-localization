@@ -1,0 +1,82 @@
+pipeline:
+  name: "Ellipsoidal BEM + Surface Sources"
+  bem_type: ellipsoid
+  source_type: surface
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
+  roi_mapping: "data/atlas/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null
+
+electrode:
+  projection_method: "intensity"  # 'intensity', 'rbf', or 'none'
+  skull_offset_mm: 0.0  # Distance from skull surface (0.0 = at surface)
+  bregma_vox: [30, 149, 41]  # Bregma voxel coordinates (0-indexed) for validation
+  lambda_vox: [30, 97, 41]  # Lambda voxel coordinates (0-indexed) for validation
+  create_visualization: true  # Create electrode registration visualization
+
+bem:
+  ellipsoid:
+    n_layers: 3
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]
+    # EXTENDED: shift the centre anteriorly and lengthen the Y semi-axis so the
+    # olfactory bulbs fall inside the conductor. Without this the standard fit
+    # leaves 30% of olfactory-bulb sources outside the inner skull, and MNE
+    # drops them from the forward solution without saying so.
+    center_offset_mm: [0.0, 0.8, 0.0]
+    axis_extensions_mm: [0.0, 1.5, 0.0]
+    use_cache: true
+    force_recreate: true
+
+source_space:
+  surface:
+    method: anatomical        # cortical mid-ribbon from the Allen32 parcellation
+    spacing_mm: 0.30          # ~2,500 sources; see the density sweep
+    iso_mm: 0.08              # isotropic resample before marching cubes
+    # Which Allen32 categories carry sources. Cerebellum and the olfactory
+    # bulbs are on the outer brain surface and generate EEG that would
+    # otherwise be absorbed by cortex. Both have laminar dipole geometry, so a
+    # normal constraint means there what it means in neocortex. Brainstem
+    # (tectum) is deliberately absent: the inferior colliculus matters for
+    # ASSR, but it has no laminar organisation to justify a fixed normal.
+    categories: [cortical, cerebellum, olfactory]
+    close_holes: 0            # see the plan: does not fix the gaps, shifts parcels
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA  # Recommended: sLORETA for best localization accuracy
+  snr: 3.0
+  lambda2: null
+  depth_weighting: 0.8
+  # The anatomy only pays off with the constraint: measured, an anatomical
+  # surface under free orientation is no better than the icosphere, and the
+  # constraint on the icosphere is no better either. Together they are ~3x.
+  orientation: fixed
+  loose: 0.2
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: false  # nearest-voxel atlas lookup; see ADR below
+  proximity_radius_mm: 2.0
+
+outputs:
+  dir: "outputs/ellipsoid_surface"
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
