@@ -74,6 +74,27 @@ DEFAULT_DEPTH_BINS_MM = [
     (5, float('inf'), '5+mm')
 ]
 
+# Depth bins for SURFACE source spaces.
+#
+# DEFAULT_DEPTH_BINS_MM drops the 0-1 mm bin, on the grounds that almost no
+# brain source sits within 1 mm of an electrode. That holds for volumetric and
+# shell source spaces, which is what it was written for. It does not hold for a
+# cortical surface: 9.6% of mid-ribbon vertices are closer than 1 mm to their
+# nearest electrode, and folding them into the 1-2 mm bin hides the most
+# superficial tenth of the sheet — the part the array sees best.
+#
+# Kept separate rather than changing the default, because the published Table 2
+# bins are the default and moving them would break comparability with every
+# number already reported.
+SURFACE_DEPTH_BINS_MM = [
+    (0, 1, '0-1mm'),
+    (1, 2, '1-2mm'),
+    (2, 3, '2-3mm'),
+    (3, 4, '3-4mm'),
+    (4, 5, '4-5mm'),
+    (5, float('inf'), '5+mm')
+]
+
 
 def compute_localization_error(
     true_position_mm: np.ndarray,
