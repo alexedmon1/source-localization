@@ -46,6 +46,22 @@ import numpy as np
 
 from ..utils.atlas import get_true_affine, get_true_voxel_sizes
 
+# Which Allen32 categories carry sources. "cortical" alone reproduces the
+# original behaviour. Cerebellum is a defensible addition: it is 6.4% of the
+# outer shell, it is real EEG signal that otherwise gets misattributed to
+# cortex, and Purkinje dendrites run perpendicular to the folial surface, so an
+# orientation constraint means the same thing there as in neocortex.
+#
+# NOT included by default: "brainstem" (Allen32's Brainstem_Tectum, i.e.
+# superior and inferior colliculus) — the IC is a primary 40 Hz ASSR generator
+# so it is worth having for auditory work, but it has no laminar dipole
+# geometry, so a fixed-orientation constraint asserts something untrue there.
+# And nothing unlabelled: half the outer shell carries no Allen32 label at all,
+# being ventral brainstem and white matter the 32-parcel scheme does not name.
+# Those sit a median 4.65 mm from the nearest electrode and cannot be
+# attributed to any ROI.
+DEFAULT_CATEGORIES = ("cortical",)
+
 DEFAULT_ISO_MM = 0.08
 DEFAULT_SPACING_MM = 0.30
 DEFAULT_MIN_THICKNESS_MM = 0.16
@@ -118,14 +134,17 @@ def close_cortical_holes(cortex, labels, cortical_ids, iterations=3):
     return cortex_out, labels_out, stats
 
 
-def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0):
-    """Cortical mask, resampled to isotropic, plus the ribbon depth field.
+def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
+                      categories=DEFAULT_CATEGORIES):
+    """Source-tissue mask, resampled to isotropic, plus the ribbon depth field.
 
     Parameters
     ----------
     close_holes : int, default 0
-        Iterations of hole closing on the cortical mask before the depth field
-        is computed. 0 keeps the parcellation exactly as shipped.
+        Iterations of hole closing on the mask before the depth field is
+        computed. 0 keeps the parcellation exactly as shipped.
+    categories : sequence of str
+        Allen32 categories that carry sources. See DEFAULT_CATEGORIES.
     """
     import nibabel as nib
     from scipy import ndimage
@@ -134,7 +153,14 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0):
     allen = adir / "allen"
 
     mapping = json.loads((allen / "roi_mapping.json").read_text())
-    cortical_ids = list(mapping["categories"]["cortical"])
+    categories = tuple(categories) if categories else DEFAULT_CATEGORIES
+    unknown = [c for c in categories if c not in mapping["categories"]]
+    if unknown:
+        raise ValueError(
+            f"unknown Allen32 categories {unknown}; available: "
+            f"{sorted(mapping['categories'])}"
+        )
+    cortical_ids = [i for c in categories for i in mapping["categories"][c]]
 
     labels_img = nib.load(allen / "allen_labels.nii.gz")
     labels = np.asarray(labels_img.dataobj).astype(np.int16)
@@ -184,6 +210,7 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0):
         "cortical_ids": cortical_ids,
         "hole_stats": hole_stats,
         "close_holes": close_holes,
+        "categories": list(categories),
     }
 
 
@@ -262,12 +289,14 @@ def _orient_normals(mesh, field):
 
 
 def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
-                      field=None, verbose=True, close_holes=0):
+                      field=None, verbose=True, close_holes=0,
+                      categories=DEFAULT_CATEGORIES):
     """Return (lh, rh, meta). rh is a mirror of lh, so geometry is symmetric."""
     import pyvista as pv
 
     if field is None:
-        field = build_depth_field(iso_mm=iso_mm, close_holes=close_holes)
+        field = build_depth_field(iso_mm=iso_mm, close_holes=close_holes,
+                                  categories=categories)
 
     raw = extract_midribbon(field)
     smoothed = raw.smooth_taubin(
@@ -333,6 +362,7 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
         "spacing_mm": spacing_mm,
         "iso_mm": iso_mm,
         "close_holes": field.get("close_holes", 0),
+        "categories": field.get("categories", list(DEFAULT_CATEGORIES)),
         "hole_stats": field.get("hole_stats", {}),
         "n_per_hemi": int(lh.n_points),
         "n_total": int(lh.n_points + rh.n_points),
@@ -359,15 +389,19 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     return lh, rh, meta
 
 
-def _cache_path(cache_dir, spacing_mm, iso_mm, close_holes=0):
+def _cache_path(cache_dir, spacing_mm, iso_mm, close_holes=0,
+                categories=DEFAULT_CATEGORIES):
     tag = f"midribbon_s{spacing_mm:.3f}_i{iso_mm:.3f}".replace(".", "p")
     if close_holes:
         tag += f"_c{int(close_holes)}"
+    cats = tuple(categories) if categories else DEFAULT_CATEGORIES
+    if tuple(cats) != DEFAULT_CATEGORIES:
+        tag += "_" + "-".join(sorted(c[:4] for c in cats))
     return Path(cache_dir) / f"{tag}.npz"
 
 
 def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
-                  close_holes=0):
+                  close_holes=0, categories=DEFAULT_CATEGORIES):
     """Build the template surface once and reuse it across subjects.
 
     The BEM is fitted to the atlas brain mask rather than to each animal, so
@@ -376,7 +410,8 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
     """
     import pyvista as pv
 
-    path = _cache_path(cache_dir, spacing_mm, iso_mm, close_holes)
+    path = _cache_path(cache_dir, spacing_mm, iso_mm, close_holes,
+                       categories)
     if path.exists():
         d = np.load(path, allow_pickle=True)
         meta = json.loads(str(d["meta"]))
@@ -390,7 +425,8 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
         )
 
     lh, rh, meta = build_hemispheres(spacing_mm, iso_mm, verbose=verbose,
-                                     close_holes=close_holes)
+                                     close_holes=close_holes,
+                                     categories=categories)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def tri(mesh):
@@ -453,13 +489,15 @@ def create_source_space(config, previous_outputs):
     iso_mm = float(surface_cfg.get("iso_mm", DEFAULT_ISO_MM))
     cache_dir = surface_cfg.get("cache_dir") or _default_cache_dir()
     close_holes = int(surface_cfg.get("close_holes", 0))
+    categories = tuple(surface_cfg.get("categories", DEFAULT_CATEGORIES))
 
     print("  Creating anatomical surface source space:")
     print(f"    Target spacing: {spacing_mm} mm")
 
     (lh_pts, lh_nn, lh_tris, lh_parcel,
      rh_pts, rh_nn, rh_tris, rh_parcel, meta) = load_or_build(
-        spacing_mm, iso_mm, cache_dir, close_holes=close_holes
+        spacing_mm, iso_mm, cache_dir, close_holes=close_holes,
+        categories=categories
     )
 
     lh_dict = _hemi_dict(lh_pts, lh_nn, lh_tris, 101)
