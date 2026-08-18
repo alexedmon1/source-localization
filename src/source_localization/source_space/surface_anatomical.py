@@ -258,6 +258,47 @@ def extract_midribbon(field, min_thickness_mm=DEFAULT_MIN_THICKNESS_MM,
     return pv.PolyData(verts_mm, pv_faces).clean()
 
 
+MIDLINE_SNAP_TOL_MM = 0.12
+
+
+def _snap_midline(mesh, tol_mm=MIDLINE_SNAP_TOL_MM):
+    """Pull boundary vertices near x=0 onto x=0 exactly.
+
+    The hemispheres are cut at x=0 and the right is the left mirrored, so the
+    two only close if the cut edge sits exactly on the plane. Decimation moves
+    it: measured, the left hemisphere reached only x=-0.035 mm, leaving a
+    0.07 mm seam down the middle of the merged surface.
+
+    Constrained to vertices already on an open boundary, so interior geometry
+    is untouched — snapping every vertex within the tolerance would flatten
+    real medial-wall curvature onto the plane.
+    """
+    boundary = mesh.extract_feature_edges(
+        boundary_edges=True, feature_edges=False,
+        manifold_edges=False, non_manifold_edges=False,
+    )
+    if boundary.n_points == 0:
+        return mesh
+
+    pts = np.asarray(mesh.points, dtype=float)
+    tree = None
+    try:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(pts)
+        _, idx = tree.query(np.asarray(boundary.points, dtype=float))
+    except Exception:
+        return mesh
+
+    on_boundary = np.zeros(len(pts), dtype=bool)
+    on_boundary[idx] = True
+    snap = on_boundary & (np.abs(pts[:, 0]) <= tol_mm)
+    if snap.any():
+        pts[snap, 0] = 0.0
+        mesh = mesh.copy()
+        mesh.points = pts
+    return mesh
+
+
 def _orient_normals(mesh, field):
     """Point every normal to the pial side, using -grad(t)."""
     depth, affine, iso_mm = field["depth"], field["affine"], field["iso_mm"]
@@ -315,7 +356,12 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     per_vertex_area = (np.sqrt(3) / 2) * spacing_mm ** 2
     target_n = max(int(left.area / per_vertex_area), 24)
     reduction = float(np.clip(1.0 - target_n / left.n_points, 0.0, 0.999))
-    lh = left.decimate(reduction, volume_preservation=True).clean()
+    # boundary_constraints keeps the midline cut from being eaten: without it
+    # decimation pulls the cut edge inward and the mirrored hemispheres no
+    # longer meet.
+    lh = left.decimate(reduction, volume_preservation=True,
+                       boundary_constraints=True).clean()
+    lh = _snap_midline(lh)
     lh, agree = _orient_normals(lh, field)
 
     rh = lh.copy()
