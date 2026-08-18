@@ -333,6 +333,23 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
     if ori_weights is not None:
         W = W * ori_weights[:, np.newaxis]
 
+        # dSPM and sLORETA normalise each component by its own resolution,
+        # which divides the penalised tangential components by a
+        # correspondingly smaller number and re-inflates exactly what the
+        # loose constraint suppressed. Measured: the constraint takes the
+        # tangential/normal amplitude ratio from 5.21 to 0.88, and
+        # per-component normalisation puts it back to 1.73, against free's
+        # 1.90 — so loose was doing almost nothing.
+        #
+        # Normalise per source instead, applying one value to all three
+        # components, which is what MNE does for non-fixed orientations and
+        # what the eLORETA branch above already does. Only reached when
+        # ori_weights is set, so the free path stays bit-identical.
+        if normalizer is not None:
+            per_source = normalizer.reshape(n_sources, n_comp)
+            combined = np.sqrt((per_source ** 2).sum(axis=1) / n_comp)
+            normalizer = np.repeat(combined, n_comp)
+
     return W, normalizer, n_comp
 
 
