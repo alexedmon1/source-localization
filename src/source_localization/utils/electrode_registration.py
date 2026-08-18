@@ -422,6 +422,63 @@ def validate_projection_raycasting(
 # BREGMA VALIDATION (P110 METHOD)
 # ============================================================================
 
+def check_bregma_convention(
+    electrodes_csv: Path,
+    bregma_vox: Optional[Tuple[int, int, int]] = None,
+) -> Dict[str, Any]:
+    """Cross-check the configured bregma against the one in the electrode CSV.
+
+    The CSV stores 1-indexed voxels and the loader subtracts 1, while
+    ``electrode.bregma_vox`` in config is already 0-indexed. Those two
+    conventions have to be reconciled by hand, and nothing checked that they
+    agreed: config ``[30, 149, 41]`` against the CSV's ``Bregma`` row of
+    ``(30, 149, 41)`` 1-indexed, i.e. ``(29, 148, 40)`` 0-indexed, is a
+    one-voxel disagreement.
+
+    It is reporting-only. Electrode placement reads absolute ``X-MRI``/``Y-MRI``
+    and never routes through bregma, and the bregma-lambda distance check is
+    unaffected because both landmarks shift together. What it does change is
+    every bregma-referenced coordinate in the QC report.
+
+    Returns
+    -------
+    dict
+        ``csv_bregma_vox_0indexed``, ``config_bregma_vox``, ``offset_vox``,
+        ``agrees``. ``csv_bregma_vox_0indexed`` is None when the CSV carries no
+        ``Bregma`` row.
+    """
+    result: Dict[str, Any] = {
+        "csv_bregma_vox_0indexed": None,
+        "config_bregma_vox": list(bregma_vox) if bregma_vox is not None else None,
+        "offset_vox": None,
+        "agrees": None,
+    }
+
+    df = pd.read_csv(electrodes_csv)
+    rows = df[df["Label"].astype(str).str.upper() == "BREGMA"]
+    if rows.empty or bregma_vox is None:
+        return result
+
+    csv_vox = (
+        rows[["X-MRI", "Y-MRI", "Z-MRI"]].to_numpy(dtype=float)[0] - 1.0
+    )
+    result["csv_bregma_vox_0indexed"] = csv_vox.tolist()
+
+    offset = np.asarray(bregma_vox, dtype=float) - csv_vox
+    result["offset_vox"] = offset.tolist()
+    result["agrees"] = bool(np.allclose(offset, 0.0))
+
+    if not result["agrees"]:
+        print(
+            "    ⚠️  bregma convention mismatch: config "
+            f"{list(bregma_vox)} vs CSV {csv_vox.tolist()} (0-indexed), "
+            f"offset {offset.tolist()} voxels. Reporting-only: electrode "
+            "placement and the bregma-lambda distance are unaffected."
+        )
+
+    return result
+
+
 def validate_bregma_position(
     atlas_img: nib.Nifti1Image,
     brain_mask: np.ndarray,
