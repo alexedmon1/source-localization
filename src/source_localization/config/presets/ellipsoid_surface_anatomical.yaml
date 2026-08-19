@@ -86,7 +86,14 @@ roi:
   proximity_radius_mm: 2.0
 
 outputs:
-  dir: "outputs/ellipsoid_surface"
+  dir: "outputs/ellipsoid_surface_anatomical"
   save_intermediate: true
   figure_format: png
   figure_dpi: 100
+  # Signed only. The magnitude variant duplicates the signed one at ~1 GB per
+  # subject on full-length recordings, and nothing this surface is built for
+  # needs it: ITC is a phase measure, ERP amplitude needs polarity, and power
+  # measures are computed from the TFR of the signed series. Set to "both" if a
+  # downstream analysis genuinely wants rectified amplitudes.
+  output_variants: "signed"
+
