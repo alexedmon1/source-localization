@@ -17,6 +17,101 @@ def fig_to_base64(fig):
     return img_b64
 
 
+def _fmt_setting(value):
+    """Render a config value for a report table."""
+    if value is None:
+        return "<em>auto</em>"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def _generate_config_section(config):
+    """Record the settings that decided this localization.
+
+    A report that names only the pipeline and the inverse method cannot answer
+    the question people actually ask of a finished output directory: which
+    source space was this, and was the orientation constrained. Those live in
+    `source_space` and `inverse` and were previously nowhere in the report, so
+    an anatomical-surface run and an icosphere run rendered identically.
+    """
+    try:
+        from .. import __version__
+    except Exception:  # pragma: no cover - version is cosmetic
+        __version__ = 'unknown'
+
+    prov = config.get('provenance', {}) or {}
+    source_type = config['pipeline']['source_type']
+    bem_type = config['pipeline']['bem_type']
+
+    rows = []
+
+    def add(group, label, value):
+        rows.append((group, label, _fmt_setting(value)))
+
+    add('Provenance', 'Preset', prov.get('preset', prov.get('config_file', 'built from bem/source type')))
+    add('Provenance', 'Atlas', prov.get('atlas', 'preset default'))
+    add('Provenance', 'Package version', __version__)
+    add('Provenance', 'EEG file', config.get('inputs', {}).get('eeg_file'))
+
+    electrode = config.get('electrode', {}) or {}
+    add('Electrodes', 'Projection method', electrode.get('projection_method'))
+    add('Electrodes', 'Skull offset (mm)', electrode.get('skull_offset_mm'))
+
+    add('Conductor', 'BEM type', bem_type)
+    for key, value in (config.get('bem', {}).get(bem_type, {}) or {}).items():
+        add('Conductor', key, value)
+
+    # Every source-space family keys its settings under its own name, so render
+    # whatever this one declares rather than a fixed list that goes stale.
+    add('Source space', 'Type', source_type)
+    for key, value in (config.get('source_space', {}).get(source_type, {}) or {}).items():
+        add('Source space', key, value)
+
+    forward = config.get('forward', {}) or {}
+    add('Forward', 'mindist (mm)', forward.get('mindist'))
+
+    inverse = config.get('inverse', {}) or {}
+    orientation = inverse.get('orientation', 'free')
+    add('Inverse', 'Method', inverse.get('method'))
+    add('Inverse', 'Orientation', orientation)
+    if orientation == 'loose':
+        add('Inverse', 'Loose factor', inverse.get('loose'))
+    add('Inverse', 'SNR', inverse.get('snr'))
+    add('Inverse', 'lambda2', inverse.get('lambda2'))
+    add('Inverse', 'Depth weighting', inverse.get('depth_weighting'))
+
+    roi = config.get('roi', {}) or {}
+    add('ROI', 'Proximity assignment', roi.get('use_proximity'))
+    if roi.get('use_proximity'):
+        add('ROI', 'Proximity radius (mm)', roi.get('proximity_radius_mm'))
+
+    add('Outputs', 'Variants', (config.get('outputs', {}) or {}).get('output_variants', 'both'))
+
+    body = []
+    last_group = None
+    for group, label, value in rows:
+        shown = group if group != last_group else ''
+        last_group = group
+        body.append(
+            f"<tr><td><strong>{shown}</strong></td><td>{label}</td><td>{value}</td></tr>"
+        )
+
+    return f"""
+    <div class="step-section">
+        <h2>Configuration</h2>
+        <p>The settings this run used. Also written machine-readable to
+        <code>data/config_resolved.yaml</code>.</p>
+        <table>
+            <tr><th>Group</th><th>Setting</th><th>Value</th></tr>
+            {''.join(body)}
+        </table>
+    </div>
+"""
+
+
 def generate_pipeline_report(config, step_outputs, output_path):
     """
     Generate comprehensive HTML report of pipeline results.
@@ -130,6 +225,9 @@ def generate_pipeline_report(config, step_outputs, output_path):
         <p><span class="metric-label">Output Directory:</span> {config['outputs']['dir']}</p>
     </div>
 """)
+
+    # Configuration actually used (provenance)
+    html_sections.append(_generate_config_section(config))
 
     # Step 1: Electrode Registration
     if 'electrode_registration' in step_outputs:

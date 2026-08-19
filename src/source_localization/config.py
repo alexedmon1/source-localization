@@ -83,6 +83,10 @@ class Config:
         with open(preset_file) as f:
             config = yaml.safe_load(f)
 
+        config.setdefault('provenance', {}).update(
+            {'config_source': 'preset', 'preset': preset_name}
+        )
+
         return cls(config)
 
     @classmethod
@@ -101,6 +105,10 @@ class Config:
         """
         with open(config_file) as f:
             config = yaml.safe_load(f)
+
+        config.setdefault('provenance', {}).update(
+            {'config_source': 'file', 'config_file': str(config_file)}
+        )
 
         return cls(config)
 
@@ -139,6 +147,10 @@ class Config:
                 d = d[k]
             d[keys[-1]] = value
 
+        config.setdefault('provenance', {}).update(
+            {'config_source': 'bem_source'}
+        )
+
         return cls(config)
 
     def apply_atlas(self, atlas_name: str) -> None:
@@ -165,6 +177,10 @@ class Config:
             if key == 'meta':
                 continue
             self._config['inputs'][key] = path
+
+        # The atlas is applied over whatever the preset declared, so the
+        # `inputs:` paths alone no longer say which atlas was asked for by name.
+        self._config.setdefault('provenance', {})['atlas'] = atlas_name
 
     @staticmethod
     def atlas_meta(atlas_name: str) -> Dict[str, Any]:
