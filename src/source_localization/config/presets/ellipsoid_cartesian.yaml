@@ -85,6 +85,13 @@ outputs:
   save_intermediate: true
   figure_format: png
   figure_dpi: 100
+  # Signed only. The magnitude variant duplicates the signed one at roughly
+  # 1 GB per subject on full-length recordings, and every deployed study
+  # already overrides this key to "signed" by hand (FORGE disease, treatment
+  # and the WP-14 arms all do). Making it the default stops that override
+  # being something a study has to remember. Set to "both" if a downstream
+  # analysis genuinely wants rectified amplitudes.
+  output_variants: "signed"
 
 # Configuration Notes:
 # --------------------
