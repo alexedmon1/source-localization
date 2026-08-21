@@ -47,9 +47,21 @@ def create_source_space(config, previous_outputs):
     # Get shell configuration (support both 'shell' and 'shell_based' for compatibility)
     shell_config = config['source_space'].get('shell', config['source_space'].get('shell_based', {}))
     n_shells = shell_config.get('n_shells', 3)
+
+    # Under Monte Carlo sampling this source space is the *pool* that draws are
+    # taken from, not the deployed grid, so it is built dense: more shells, more
+    # points per shell. The deployed density is a property of each draw
+    # (monte_carlo.n_sources).
+    _mc = config['source_space'].get('monte_carlo') or {}
+    _is_mc = config['source_space'].get('source_sampling') == 'monte_carlo'
+    if _is_mc:
+        n_shells = int(_mc.get('pool_n_shells', 12))
     shell_scales = shell_config.get('shell_scales', None)
     min_points = shell_config.get('min_points_per_shell', 20)
     max_points = shell_config.get('max_points_per_shell', 100)
+    if _is_mc:
+        max_points = int(_mc.get('pool_points_per_shell', 400))
+        print(f'    Monte Carlo pool: {n_shells} shells x {max_points} points')
     scale_by_area = shell_config.get('scale_by_area', True)
     distribution = shell_config.get('distribution', 'fibonacci')  # 'fibonacci' or 'latlon'
 

@@ -15,6 +15,7 @@ from .steps import (
     forward_solution,
     inverse_solution,
     roi_extraction,
+    monte_carlo_roi,
     spectral_analysis,
     visualization
 )
@@ -230,6 +231,28 @@ class Pipeline:
 
         # Determine which steps to run
         steps_to_run = self.STEPS
+
+        # Monte Carlo sampling integrates over source-grid placement instead of
+        # solving one arbitrary grid, so it replaces the inverse and extraction
+        # steps with a single operator build. It is ROI-only by construction --
+        # no single grid is solved, so there is no vertex set for a vertex-level
+        # analysis to refer to.
+        sampling = (self.config['source_space'].get('source_sampling', 'fixed')
+                    or 'fixed')
+        if sampling not in ('fixed', 'monte_carlo'):
+            raise ValueError(
+                f"Unknown source_sampling: {sampling}. Valid: fixed, monte_carlo")
+        if sampling == 'monte_carlo':
+            if skip_roi_extraction:
+                raise ValueError(
+                    "source_sampling='monte_carlo' produces ROI output only, so "
+                    "skip_roi_extraction leaves it with nothing to produce. Use "
+                    "source_sampling='fixed' for vertex-level work.")
+            steps_to_run = [
+                (name, mod) for name, mod in self.STEPS
+                if name not in ('inverse_solution', 'roi_extraction')
+            ] + [('monte_carlo_roi', monte_carlo_roi)]
+
         if skip_roi_extraction:
             steps_to_run = [
                 (name, mod) for name, mod in self.STEPS

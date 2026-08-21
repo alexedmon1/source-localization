@@ -591,6 +591,14 @@ def create_source_space(config, previous_outputs):
     """
     surface_cfg = config["source_space"].get("surface", {})
     spacing_mm = float(surface_cfg.get("spacing_mm", DEFAULT_SPACING_MM))
+
+    # Under Monte Carlo sampling this source space is the *pool* that draws are
+    # taken from, not the deployed grid, so it is built dense. The deployed
+    # density is a property of each draw (monte_carlo.n_sources) instead.
+    if (config["source_space"].get("source_sampling") == "monte_carlo"):
+        mc = config["source_space"].get("monte_carlo") or {}
+        spacing_mm = float(mc.get("pool_spacing_mm", 0.20))
+        print(f"    Monte Carlo pool: building at {spacing_mm} mm")
     iso_mm = float(surface_cfg.get("iso_mm", DEFAULT_ISO_MM))
     cache_dir = surface_cfg.get("cache_dir") or _default_cache_dir()
     close_holes = int(surface_cfg.get("close_holes", 0))
