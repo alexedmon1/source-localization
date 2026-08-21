@@ -146,7 +146,8 @@ def close_cortical_holes(cortex, labels, cortical_ids, iterations=3):
 
 
 def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
-                      categories=DEFAULT_CATEGORIES):
+                      categories=DEFAULT_CATEGORIES,
+                      labels_path=None, mapping_path=None):
     """Source-tissue mask, resampled to isotropic, plus the ribbon depth field.
 
     Parameters
@@ -163,17 +164,23 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
     adir = _atlas_dir()
     allen = adir / "allen"
 
-    mapping = json.loads((allen / "roi_mapping.json").read_text())
+    # The atlas is a parameter, not a constant. This module used to load
+    # allen/roi_mapping.json and allen/allen_labels.nii.gz unconditionally, so
+    # the anatomical surface was built from Allen32 whatever `--atlas` said, and
+    # the parcel ids it cached meant whatever Allen32 meant by them (X41).
+    mapping_path = Path(mapping_path) if mapping_path else allen / "roi_mapping.json"
+    labels_path = Path(labels_path) if labels_path else allen / "allen_labels.nii.gz"
+    mapping = json.loads(mapping_path.read_text())
     categories = tuple(categories) if categories else DEFAULT_CATEGORIES
     unknown = [c for c in categories if c not in mapping["categories"]]
     if unknown:
         raise ValueError(
-            f"unknown Allen32 categories {unknown}; available: "
+            f"unknown categories {unknown} for {mapping_path.name}; available: "
             f"{sorted(mapping['categories'])}"
         )
     cortical_ids = [i for c in categories for i in mapping["categories"][c]]
 
-    labels_img = nib.load(allen / "allen_labels.nii.gz")
+    labels_img = nib.load(labels_path)
     labels = np.asarray(labels_img.dataobj).astype(np.int16)
     vox_mm = np.asarray(get_true_voxel_sizes(labels_img), dtype=float)
     affine = get_true_affine(labels_img)
@@ -342,13 +349,16 @@ def _orient_normals(mesh, field):
 
 def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
                       field=None, verbose=True, close_holes=0,
-                      categories=DEFAULT_CATEGORIES):
+                      categories=DEFAULT_CATEGORIES,
+                      labels_path=None, mapping_path=None):
     """Return (lh, rh, meta). rh is a mirror of lh, so geometry is symmetric."""
     import pyvista as pv
 
     if field is None:
         field = build_depth_field(iso_mm=iso_mm, close_holes=close_holes,
-                                  categories=categories)
+                                  categories=categories,
+                                  labels_path=labels_path,
+                                  mapping_path=mapping_path)
 
     raw = extract_midribbon(field)
     smoothed = raw.smooth_taubin(
@@ -470,18 +480,31 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
 
 
 def _cache_path(cache_dir, spacing_mm, iso_mm, close_holes=0,
-                categories=DEFAULT_CATEGORIES):
+                categories=DEFAULT_CATEGORIES, atlas_tag=None):
+    """Cache filename. `atlas_tag` is part of the key, and must be.
+
+    The cached arrays include `lh_parcel`/`rh_parcel`, which are *atlas label
+    ids*. The same id means different structures in different atlases -- 14 is
+    Lateral_Cortex_L in Allen32 and Hippocampus_Ant_R in Allen26, and Allen32's
+    30 and 31 do not exist in Allen26 at all. Keying the cache on geometry alone
+    therefore silently mislabels every source when the atlas changes, and drops
+    the sources whose ids the new atlas does not define (X41). Nothing raised;
+    the run simply reported the wrong parcels.
+    """
     tag = f"midribbon_s{spacing_mm:.3f}_i{iso_mm:.3f}".replace(".", "p")
     if close_holes:
         tag += f"_c{int(close_holes)}"
     cats = tuple(categories) if categories else DEFAULT_CATEGORIES
     if tuple(cats) != DEFAULT_CATEGORIES:
         tag += "_" + "-".join(sorted(c[:4] for c in cats))
+    if atlas_tag:
+        tag += f"_{atlas_tag}"
     return Path(cache_dir) / f"{tag}.npz"
 
 
 def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
-                  close_holes=0, categories=DEFAULT_CATEGORIES):
+                  close_holes=0, categories=DEFAULT_CATEGORIES,
+                  atlas_tag=None, labels_path=None, mapping_path=None):
     """Build the template surface once and reuse it across subjects.
 
     The BEM is fitted to the atlas brain mask rather than to each animal, so
@@ -491,7 +514,7 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
     import pyvista as pv
 
     path = _cache_path(cache_dir, spacing_mm, iso_mm, close_holes,
-                       categories)
+                       categories, atlas_tag)
     if path.exists():
         d = np.load(path, allow_pickle=True)
         meta = json.loads(str(d["meta"]))
@@ -506,7 +529,9 @@ def load_or_build(spacing_mm, iso_mm, cache_dir, verbose=True,
 
     lh, rh, meta = build_hemispheres(spacing_mm, iso_mm, verbose=verbose,
                                      close_holes=close_holes,
-                                     categories=categories)
+                                     categories=categories,
+                                     labels_path=labels_path,
+                                     mapping_path=mapping_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def tri(mesh):
@@ -574,10 +599,21 @@ def create_source_space(config, previous_outputs):
     print("  Creating anatomical surface source space:")
     print(f"    Target spacing: {spacing_mm} mm")
 
+    # The cached parcel arrays are atlas label ids, so the atlas belongs in the
+    # cache key (X41). Identify it by the labels file actually configured rather
+    # than by a name, since --atlas rewrites the paths and a preset may point
+    # anywhere.
+    pkg = Path(__file__).resolve().parent.parent
+    inputs = config.get("inputs") or {}
+    labels_path = pkg / inputs["brain_labels"] if inputs.get("brain_labels") else None
+    mapping_path = pkg / inputs["roi_mapping"] if inputs.get("roi_mapping") else None
+    atlas_tag = labels_path.name.split(".")[0] if labels_path else None
+
     (lh_pts, lh_nn, lh_tris, lh_parcel,
      rh_pts, rh_nn, rh_tris, rh_parcel, meta) = load_or_build(
         spacing_mm, iso_mm, cache_dir, close_holes=close_holes,
-        categories=categories
+        categories=categories, atlas_tag=atlas_tag,
+        labels_path=labels_path, mapping_path=mapping_path
     )
 
     lh_dict = _hemi_dict(lh_pts, lh_nn, lh_tris, 101)

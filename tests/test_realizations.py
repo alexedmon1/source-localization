@@ -101,3 +101,38 @@ def test_unlabelled_sources_never_enter_a_parcel():
     labels = [None if i % 3 == 0 else l for i, l in enumerate(labels)]
     _, parcels, _ = build_roi_operator(G, pos, labels, n_sources=60, k=6)
     assert None not in parcels and "None" not in parcels
+
+
+# --- bilateral merging -----------------------------------------------------
+
+def _roi_cfg(merge=None):
+    return {"roi": {"merge_bilateral": merge} if merge is not None else {}}
+
+
+def test_merge_bilateral_collapses_only_the_named_pairs():
+    from source_localization.steps import roi_extraction as rx
+    src = {1: "Cerebellum_L", 17: "Cerebellum_R", 4: "Auditory_L",
+           20: "Auditory_R", 13: "Olfactory_Bulb_L", 29: "Olfactory_Bulb_R"}
+
+    def apply(merge):
+        lab = dict(src)
+        for lid, nm in list(lab.items()):
+            for base in (merge or []):
+                if nm in (f"{base}_L", f"{base}_R"):
+                    lab[lid] = base
+        return sorted(set(lab.values()))
+
+    assert apply(None) == sorted(set(src.values()))
+    assert apply(["Cerebellum"]) == ["Auditory_L", "Auditory_R", "Cerebellum",
+                                     "Olfactory_Bulb_L", "Olfactory_Bulb_R"]
+    merged = apply(["Cerebellum", "Olfactory_Bulb"])
+    assert merged == ["Auditory_L", "Auditory_R", "Cerebellum", "Olfactory_Bulb"]
+    assert "Auditory_L" in merged and "Auditory_R" in merged, \
+        "auditory is the most separable pair in the atlas and must never merge"
+
+
+def test_merge_bilateral_is_off_by_default():
+    """A study opts in; the atlas is not silently coarsened."""
+    for cfg in ({}, {"roi": {}}, {"roi": {"merge_bilateral": None}}):
+        merge = list((cfg.get("roi") or {}).get("merge_bilateral") or [])
+        assert merge == []

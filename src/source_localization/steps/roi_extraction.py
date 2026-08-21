@@ -155,6 +155,38 @@ def run(config, previous_outputs):
             continue
         label_to_roi[label_id] = roi_name
 
+    # Bilateral merging. `roi.merge_bilateral: [Cerebellum, Olfactory_Bulb, ...]`
+    # maps <base>_L and <base>_R onto a single <base>, so their sources are
+    # averaged together rather than split between two parcels.
+    #
+    # This is not tidying. A 30-channel dorsal array cannot separate these pairs:
+    # the cosine between their dominant sensor topographies is 0.999 for the
+    # olfactory bulbs and cerebellum and 0.992 for the thalamus, against 0.099
+    # for auditory and 0.184 for somatosensory. When two parcels are that
+    # collinear the inverse splits their shared signal on arbitrary grounds, so
+    # reporting them separately invents a lateralisation the data cannot support
+    # -- and the split is unstable, swinging with nothing more than the source
+    # placement.
+    #
+    # Merging is deliberately opt-in and per-structure rather than derived from a
+    # collinearity threshold, because "how collinear is too collinear" has no
+    # montage-independent answer: a denser or more lateral array would separate
+    # pairs this one cannot. The list belongs to a study's config, not to the
+    # atlas.
+    merge = list((config.get('roi') or {}).get('merge_bilateral') or [])
+    if merge:
+        merged_count = {}
+        for label_id, roi_name in list(label_to_roi.items()):
+            for base in merge:
+                if roi_name in (f"{base}_L", f"{base}_R"):
+                    label_to_roi[label_id] = base
+                    merged_count[base] = merged_count.get(base, 0) + 1
+        for base in merge:
+            if base not in merged_count:
+                print(f"    ⚠️  merge_bilateral: no {base}_L/{base}_R in this atlas")
+            else:
+                print(f"    Merged {base}_L + {base}_R -> {base}")
+
     # Get unique ROI names
     roi_labels = sorted(set(label_to_roi.values()))
     print(f"    Found {len(roi_labels)} unique ROIs")
