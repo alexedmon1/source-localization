@@ -39,11 +39,23 @@ def create_source_space(config, previous_outputs):
     n_sources : int
         Number of sources
     """
-    # `method` selects between the geometric icosphere below and the anatomical
-    # mid-ribbon surface derived from the Allen parcellation. It lives here
-    # rather than as a new source_space type so that switching the default
-    # later is a one-line change instead of a config migration.
-    method = config['source_space'].get('surface', {}).get('method', 'icosphere')
+    # `method` selects between the anatomical mid-ribbon surface derived from
+    # the Allen parcellation and the geometric icosphere below. The default was
+    # `icosphere` while the anatomical path was being built (D21); it is now
+    # `anatomical`, which is the whole point of the exercise — a source space
+    # whose orientations are cortical normals rather than radial vectors.
+    #
+    # The flip is paired with `inverse.orientation` defaulting to `fixed`, and
+    # the pairing is not optional. Measured, anatomical geometry under a *free*
+    # inverse is 2.473 mm against the icosphere's 2.347 mm — slightly worse,
+    # because a free inverse never consults the normals the anatomy provides.
+    # Only together are they 1.026 mm. Flipping one default without the other
+    # lands on the worst cell of that table.
+    #
+    # The icosphere remains reachable by explicit config and stays locked
+    # bit-identical by tests/test_surface_anatomical.py, because Phase 3's
+    # anatomy-vs-radial contrast depends on being able to build one.
+    method = config['source_space'].get('surface', {}).get('method', 'anatomical')
     if method == 'anatomical':
         from . import surface_anatomical
         return surface_anatomical.create_source_space(config, previous_outputs)

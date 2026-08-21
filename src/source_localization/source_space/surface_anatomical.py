@@ -63,7 +63,18 @@ from ..utils.atlas import get_true_affine, get_true_voxel_sizes
 DEFAULT_CATEGORIES = ("cortical",)
 
 DEFAULT_ISO_MM = 0.08
-DEFAULT_SPACING_MM = 0.30
+# D31: 0.50 mm, chosen on evidence rather than on accuracy. The inverse's own
+# contribution to localisation error is flat at 0.52-0.67 mm across a 20x range
+# of source counts, because 30 sensors cap the effective rank regardless; denser
+# grids only shrink the discretisation floor, which is not resolution. What
+# density does bind is parcel occupancy, and 0.50 mm is the coarsest spacing
+# keeping every carried parcel at >= 10 sources.
+#
+# This was 0.30 while the preset carried 0.50 explicitly. Harmless then, because
+# `icosphere` was the default and nothing reached here without a preset; wrong
+# now that `anatomical` is the default, since a bare surface request would have
+# silently got the density D31 rejected (2,546 sources rather than 1,310).
+DEFAULT_SPACING_MM = 0.50
 DEFAULT_MIN_THICKNESS_MM = 0.16
 DEFAULT_CORTEX_DILATION_VOX = 1
 TAUBIN_ITER = 30

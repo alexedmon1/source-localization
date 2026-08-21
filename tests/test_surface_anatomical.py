@@ -22,7 +22,12 @@ BEM = {
 
 
 def _icosphere_config(**extra):
-    cfg = {"ico_level": 3, "inset_factor": 0.80, "filter_dorsal": True}
+    # `method` is stated explicitly because the default is now `anatomical`
+    # (D36). These tests exist to lock the icosphere path bit-identical, and
+    # that path is opt-in from here on — Phase 3's anatomy-vs-radial contrast
+    # depends on still being able to build one.
+    cfg = {"method": "icosphere", "ico_level": 3, "inset_factor": 0.80,
+           "filter_dorsal": True}
     cfg.update(extra)
     return {
         "source_space": {"surface": cfg},
@@ -30,21 +35,38 @@ def _icosphere_config(**extra):
     }
 
 
-def test_default_method_is_icosphere_and_unchanged():
-    """No `method` key must behave exactly as before the switch existed."""
-    default = surface.create_source_space(_icosphere_config(), {"bem_params": BEM})
-    explicit = surface.create_source_space(
+def test_default_method_is_anatomical():
+    """No `method` key now selects the anatomical mid-ribbon surface (D36).
+
+    The default was `icosphere` while the anatomical path was being built, so
+    that the replacement would land as a one-line flip rather than a config
+    migration. This is that flip. The signature is unambiguous: the anatomical
+    path emits two hemispheres (ids 101/102), the icosphere one entry.
+    """
+    cfg = {"ico_level": 3, "inset_factor": 0.80, "filter_dorsal": True}
+    src, _, n = surface.create_source_space(
+        {"source_space": {"surface": cfg}, "pipeline": {"bem_type": "ellipsoid"}},
+        {"bem_params": BEM},
+    )
+    assert len(src) == 2
+    assert [s["id"] for s in src] == [101, 102]
+    assert n != 305, "305 is the icosphere count; the default should not be it"
+
+
+def test_explicit_icosphere_is_bit_identical_to_the_legacy_path():
+    """Asking for the icosphere gives exactly what it always gave."""
+    a = surface.create_source_space(_icosphere_config(), {"bem_params": BEM})
+    b = surface.create_source_space(
         _icosphere_config(method="icosphere"), {"bem_params": BEM}
     )
+    src_a, coords_a, n_a = a
+    src_b, coords_b, n_b = b
 
-    src_d, coords_d, n_d = default
-    src_e, coords_e, n_e = explicit
-
-    assert n_d == n_e
-    assert np.array_equal(coords_d, coords_e)
-    assert np.array_equal(src_d[0]["rr"], src_e[0]["rr"])
-    assert np.array_equal(src_d[0]["nn"], src_e[0]["nn"])
-    assert np.array_equal(src_d[0]["tris"], src_e[0]["tris"])
+    assert n_a == n_b == 305
+    assert np.array_equal(coords_a, coords_b)
+    assert np.array_equal(src_a[0]["rr"], src_b[0]["rr"])
+    assert np.array_equal(src_a[0]["nn"], src_b[0]["nn"])
+    assert np.array_equal(src_a[0]["tris"], src_b[0]["tris"])
 
 
 def test_icosphere_still_yields_the_published_source_count():

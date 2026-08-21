@@ -108,6 +108,25 @@ def run(config, previous_outputs):
 
     print(f"    ✓ Forward solution: {n_channels} channels × {n_sources} sources")
 
+    # MNE silently discards sources that fall outside the inner-skull surface,
+    # so a source space and the forward built from it can disagree with nothing
+    # in the log to say so. That is how 868dea9's olfactory-bulb problem went
+    # unnoticed — 30% of bulb sources outside the standard ellipsoid — and how
+    # the sphere BEM was found to drop 25% of the anatomical surface (X40).
+    #
+    # Anything downstream that indexes source-space arrays by forward column
+    # (parcel assignments, per-vertex normals) is silently misaligned when this
+    # happens, so it is worth saying loudly.
+    n_requested = int(sum(s['nuse'] for s in src))
+    if n_sources < n_requested:
+        dropped = n_requested - n_sources
+        print(f"    ⚠️  BEM CONTAINMENT: {dropped:,} of {n_requested:,} sources "
+              f"({dropped / n_requested:.1%}) fall outside the inner skull and "
+              f"were dropped from the forward.")
+        print(f"        The source space and the forward now disagree. Either "
+              f"the conductor is too small for this source space, or the source "
+              f"space extends beyond the brain.")
+
     # Save intermediate data and create visualizations
     if config['outputs'].get('save_intermediate', True):
         from ..utils.io_utils import save_pickle, get_data_dir, get_figures_dir

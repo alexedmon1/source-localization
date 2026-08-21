@@ -958,8 +958,35 @@ def run(config, previous_outputs):
     weight_norm = config['inverse'].get('weight_norm', 'unit-noise-gain')
     freq_band = config['inverse'].get('freq_band', None)
 
-    # Orientation constraint (default free keeps every published number)
-    orientation = config['inverse'].get('orientation', 'free')
+    # Orientation constraint. Paired with the anatomical surface default in
+    # source_space/surface.py — see the note there for why the two have to move
+    # together.
+    #
+    # The default is resolved against the source space rather than fixed as a
+    # constant, because `fixed` is only meaningful where normals exist. Six of
+    # the ten presets use source spaces that write nn = zeros (cartesian,
+    # roi_based, shell), and `apply_orientation_constraint` refuses those
+    # loudly and correctly. Refusing a value the *user* asked for is right;
+    # refusing a value they never mentioned is not, so an unset default resolves
+    # to `fixed` where the anatomy supports it and `free` where it does not.
+    # An explicit `orientation:` in config is passed through untouched and still
+    # raises if the source space cannot honour it.
+    orientation = config['inverse'].get('orientation')
+    if orientation is None:
+        # Keyed off the source space, not off whether `nn` happens to be
+        # non-zero. The icosphere also carries normals — radial ones — and they
+        # differ from true cortical normals by 49.36 degrees on average, so
+        # constraining to them asserts close to noise. Measured, that is the one
+        # cell where fixed loses: icosphere fixed 2.370 mm against free's
+        # 2.347 mm, where anatomical fixed is 1.026 mm against free's 2.473 mm.
+        _surf = (config.get('source_space') or {}).get('surface') or {}
+        _anatomical = (
+            config.get('pipeline', {}).get('source_type') == 'surface'
+            and _surf.get('method', 'anatomical') == 'anatomical'
+        )
+        orientation = 'fixed' if _anatomical else 'free'
+        print(f"    Orientation: {orientation} (default for "
+              f"{'the anatomical surface' if _anatomical else 'this source space'})")
     loose = float(config['inverse'].get('loose', 0.2))
 
     # Determine number of sources. Fixed orientation collapses each source to a
