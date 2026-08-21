@@ -20,6 +20,7 @@ and the known limitations you should read before trusting a number.
 |---|---|
 | [Adding an atlas](guides/adding_an_atlas.md) | Registering a new atlas for the verification benchmark (a data task, not a code change) |
 | [Electrode coordinate setup](guides/ELECTRODE_COORDINATE_SETUP.md) | Aligning an electrode array to a mouse brain atlas |
+| [Monte Carlo source sampling](guides/monte_carlo_sampling.md) | Integrating over source-grid placement instead of picking one — what it buys, and what it does not |
 
 ## Known issues
 
