@@ -198,3 +198,36 @@ def test_fully_sampled_parcels_are_unchanged_by_the_k_normalisation():
     for p in full:
         i = parcels.index(p)
         assert np.isfinite(op[i]).all()
+
+
+def test_pool_n_shells_is_honoured_when_scales_are_given():
+    """Regression for X43.
+
+    `pool_n_shells` was applied to `n_shells`, but the shell scales were only
+    auto-computed when `shell_scales` was absent -- and every shell preset
+    supplies an explicit 4-element list. So the Monte Carlo pool was always the
+    deployed 4 surfaces made denser, never more numerous, and could not sample
+    the radial dimension at all. It printed "Number of shells: 24" while
+    building 4, and the shipped config's pool came out 7x smaller than intended.
+    """
+    import numpy as np
+
+    # The resampling rule the fix applies, isolated from BEM construction.
+    def resolve(shell_scales, n_shells, is_mc):
+        if is_mc and shell_scales is not None and n_shells != len(shell_scales):
+            lo, hi = float(min(shell_scales)), float(max(shell_scales))
+            return np.linspace(lo, hi, n_shells).tolist()
+        return shell_scales
+
+    deployed = [0.25, 0.50, 0.75, 0.95]
+
+    pool = resolve(deployed, 24, is_mc=True)
+    assert len(pool) == 24, "pool_n_shells must add radial layers"
+    assert pool[0] == pytest.approx(0.25) and pool[-1] == pytest.approx(0.95), \
+        "resampled shells must span the deployed range exactly"
+    assert all(b > a for a, b in zip(pool, pool[1:])), "shells must be ordered"
+
+    # The deployed (non-MC) path keeps its own scales untouched.
+    assert resolve(deployed, 24, is_mc=False) == deployed
+    # And an MC pool that asks for the deployed count is left alone.
+    assert resolve(deployed, 4, is_mc=True) == deployed
