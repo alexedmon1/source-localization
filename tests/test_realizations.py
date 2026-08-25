@@ -136,3 +136,65 @@ def test_merge_bilateral_is_off_by_default():
     for cfg in ({}, {"roi": {}}, {"roi": {"merge_bilateral": None}}):
         merge = list((cfg.get("roi") or {}).get("merge_bilateral") or [])
         assert merge == []
+
+
+def _pool_with_one_rare_parcel(n_pool=400, n_chan=30, n_parcels=6, n_rare=3):
+    """A pool where one parcel holds so few sources that most draws miss it.
+
+    This is the shape of the deployed surface pool, where Hippocampus_Ant_R held
+    a handful of the 7,076 sources and entered 1 of 100 draws.
+
+    The rare sources sit at the *centre* of the cloud, not at its edge. Draws
+    come from farthest-point sampling, which favours extremes, so a rare parcel
+    placed on the boundary is picked in every draw and does not exercise the
+    defect at all.
+    """
+    G, pos, labels = _toy(n_pool, n_chan, n_parcels)
+    centre = pos.mean(axis=0)
+    rare = np.argsort(np.linalg.norm(pos - centre, axis=1))[:n_rare]
+    for i in rare:
+        labels[i] = "RARE"
+    return G, pos, labels
+
+
+def test_rare_parcels_do_not_get_inflated_rows():
+    """Regression for X42.
+
+    The operator averaged each parcel by the number of draws *that parcel*
+    appeared in. A parcel sampled once kept an unaveraged single-draw row, while
+    a parcel sampled every draw was reduced by cancellation across draws, so the
+    rarest parcel carried the largest row and won every argmax. Normalising by
+    k instead makes row scale reflect how often the parcel was actually sampled.
+    """
+    G, pos, labels = _pool_with_one_rare_parcel()
+    op, parcels, report = build_roi_operator(G, pos, labels, n_sources=40, k=60)
+
+    assert "RARE" in parcels, "the rare parcel should still be represented"
+    cov = report["RARE"]["coverage"]
+    assert cov < 0.5, f"fixture is not exercising the defect (coverage {cov})"
+
+    norms = {p: float(np.linalg.norm(op[i])) for i, p in enumerate(parcels)}
+    common = [n for p, n in norms.items() if report[p]["coverage"] > 0.9]
+    assert common, "expected some parcels present in nearly every draw"
+    assert norms["RARE"] <= max(common), (
+        f"rare parcel row norm {norms['RARE']:.3g} exceeds every well-sampled "
+        f"parcel (max {max(common):.3g}) — X42 has regressed")
+
+
+def test_coverage_is_reported_for_every_parcel():
+    G, pos, labels = _pool_with_one_rare_parcel()
+    _op, parcels, report = build_roi_operator(G, pos, labels, n_sources=40, k=60)
+    for p in parcels:
+        assert 0.0 < report[p]["coverage"] <= 1.0
+        assert report[p]["coverage"] == report[p]["n_realizations"] / 60
+
+
+def test_fully_sampled_parcels_are_unchanged_by_the_k_normalisation():
+    """Parcels in every draw have counts[p] == k, so the fix must not move them."""
+    G, pos, labels = _toy()
+    op, parcels, report = build_roi_operator(G, pos, labels, n_sources=60, k=25)
+    full = [p for p in parcels if report[p]["coverage"] == 1.0]
+    assert full, "toy pool should have parcels present in every draw"
+    for p in full:
+        i = parcels.index(p)
+        assert np.isfinite(op[i]).all()

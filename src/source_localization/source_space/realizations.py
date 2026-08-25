@@ -143,7 +143,27 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
                 float(np.linalg.norm(c[own[p]]) / np.linalg.norm(row)))
 
     parcels = sorted(total)
-    operator = np.vstack([total[p] / counts[p] for p in parcels])
+    # Divide by k, not by counts[p].
+    #
+    # counts[p] is the number of draws *that parcel* was sampled in, and it is
+    # not the same for every parcel: a small parcel can enter only a handful of
+    # draws. Normalising each parcel by its own count leaves a parcel drawn once
+    # as an unaveraged single-draw row, while a parcel drawn k times becomes an
+    # average whose norm is reduced by cancellation across draws. Row scales are
+    # then not comparable between parcels, and the rarest parcel carries the
+    # largest row.
+    #
+    # Measured on the deployed allen32 chirp surface run (n=160, k=100):
+    # Hippocampus_Ant_R appeared in 1 of 100 draws against 83-100 for every
+    # other parcel, and its row norm was 2.6x the next largest -- enough to win
+    # the argmax for nearly every simulated source.
+    #
+    # Dividing by k is the estimator the docstring describes: a mean over
+    # placements, in which a placement that never sampled the parcel contributes
+    # nothing to it. Parcels present in every draw are unchanged; rare parcels
+    # shrink toward zero, so row scale now reflects how reliably the parcel was
+    # sampled at all. `coverage` in the report makes that explicit.
+    operator = np.vstack([total[p] / k for p in parcels])
 
     # Degeneracy: a parcel whose topography is near-collinear with another's has
     # no stable individual solution, so its per-parcel gain is not meaningful.
@@ -163,7 +183,22 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
         report[p] = {
             "gain": avg / float(np.mean(single_snr[p])),
             "n_realizations": counts[p],
+            # Fraction of draws that sampled this parcel at all. Below ~1.0 the
+            # parcel's row is an average over fewer placements than the others,
+            # and its amplitude is scaled down to match; a parcel at 0.01 has
+            # essentially no estimate and should not be read as a quiet source.
+            "coverage": counts[p] / k,
             "max_collinearity": best,
             "collinear_with": partner if best >= collinear_threshold else None,
         }
+
+    sparse = [(p, report[p]["coverage"]) for p in parcels
+              if report[p]["coverage"] < 0.5]
+    if sparse:
+        print(f"    ⚠️  {len(sparse)} parcel(s) sampled in under half the "
+              f"draws; their rows are scaled down accordingly and should not "
+              f"be compared as amplitudes:")
+        for p, cov in sorted(sparse, key=lambda t: t[1]):
+            print(f"          {p} ({cov:.0%} of draws)")
+
     return operator, parcels, report
