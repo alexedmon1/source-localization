@@ -180,6 +180,24 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
         )
     cortical_ids = [i for c in categories for i in mapping["categories"][c]]
 
+    # Left/right correspondence, derived from parcel *names* rather than from a
+    # fixed id offset. The seam relabel and the L/R mismatch metric both used to
+    # assume Allen32's "left 1-16, right 17-32", which allen26 does not use
+    # (Auditory_L=2/Auditory_R=12, Lateral_Cortex_L=6/Lateral_Cortex_R=16). On
+    # allen26 the +16 moved cortical seam vertices onto Cerebellum and
+    # Olfactory_Bulb, and drove label_mismatch_frac to 0.98 (X45).
+    _rois = mapping.get("rois", mapping)
+    _id_by_name = {}
+    for k, v in _rois.items():
+        nm = v.get("name") if isinstance(v, dict) else None
+        if nm:
+            _id_by_name[nm] = int(k)
+    lr_map = {
+        _id_by_name[nm]: _id_by_name[nm[:-2] + "_R"]
+        for nm in _id_by_name
+        if nm.endswith("_L") and nm[:-2] + "_R" in _id_by_name
+    }
+
     labels_img = nib.load(labels_path)
     labels = np.asarray(labels_img.dataobj).astype(np.int16)
     vox_mm = np.asarray(get_true_voxel_sizes(labels_img), dtype=float)
@@ -226,6 +244,7 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
         "affine": iso_affine,
         "iso_mm": iso_mm,
         "cortical_ids": cortical_ids,
+        "lr_map": lr_map,
         "hole_stats": hole_stats,
         "close_holes": close_holes,
         "categories": list(categories),
@@ -415,10 +434,44 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     # numbering is left 1-16, right 17-32.
     seam_l = np.asarray(lh.points)[:, 0] == 0.0
     seam_r = np.asarray(rh.points)[:, 0] == 0.0
-    flip_r = seam_r & (lab_r >= 1) & (lab_r <= 16)
-    lab_r[flip_r] = lab_r[flip_r] + 16
-    flip_l = seam_l & (lab_l >= 17) & (lab_l <= 32)
-    lab_l[flip_l] = lab_l[flip_l] - 16
+    lr_map = field.get("lr_map") or {}
+    rl_map = {r: l for l, r in lr_map.items()}
+
+    def _remap(lab, seam, table):
+        """Send seam labels through `table`; leave unlateralized parcels alone.
+
+        A parcel with no counterpart (Cerebellum, Olfactory_Bulb,
+        Frontal_Anterior) spans the midline and is correct on both sides, so it
+        must not be touched. The old code could not tell those apart from
+        lateralized ones because it keyed on an id range, not on the atlas.
+        """
+        if not table:
+            return
+        hit = seam & np.isin(lab, list(table))
+        if hit.any():
+            lab[hit] = np.array([table[int(v)] for v in lab[hit]], dtype=lab.dtype)
+
+    _remap(lab_r, seam_r, lr_map)
+    _remap(lab_l, seam_l, rl_map)
+
+    # Decimation moves a vertex off the ribbon by a fraction of a voxel, and it
+    # can land on a structure this surface was never built from — one vertex on
+    # Hippocampus_Ant_R at the 0.20 mm pool. Carrying that label promotes a
+    # whole phantom parcel: downstream ROI extraction sees the id and emits a
+    # first-class time series for it, so a 1-vertex hippocampus appeared beside
+    # real parcels in every Monte Carlo surface table and on the scoring ballot.
+    # Out-of-category vertices are set unlabelled rather than snapped to a
+    # neighbour: declining to assign is not the proximity assignment retired in
+    # 66abe69, and unlabelled sources are already excluded everywhere (X46).
+    in_build = np.asarray(field["cortical_ids"], dtype=lab_l.dtype)
+    drift_l = (lab_l != 0) & ~np.isin(lab_l, in_build)
+    drift_r = (lab_r != 0) & ~np.isin(lab_r, in_build)
+    # Counted before zeroing: `noncortical_frac` is the X17 drift diagnostic and
+    # must keep reporting how many vertices left the ribbon, not how many are
+    # left carrying a foreign label (which is now zero by construction).
+    n_drift = int(drift_l.sum() + drift_r.sum())
+    lab_l[drift_l] = 0
+    lab_r[drift_r] = 0
 
     lh.point_data["parcel"] = lab_l.astype(np.int16)
     rh.point_data["parcel"] = lab_r.astype(np.int16)
@@ -429,9 +482,13 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     # simply does not label — which the midline seam is full of.
     both_labelled = (lab_l > 0) & (lab_r > 0)
     if both_labelled.any():
-        mismatch = float(
-            (lab_r[both_labelled] != lab_l[both_labelled] + 16).mean()
+        # Expected right-hemisphere id for each left label: its named
+        # counterpart, or itself when the parcel is unlateralized.
+        expect = np.array(
+            [lr_map.get(int(v), int(v)) for v in lab_l[both_labelled]],
+            dtype=lab_r.dtype,
         )
+        mismatch = float((lab_r[both_labelled] != expect).mean())
     else:
         mismatch = float("nan")
 
@@ -441,12 +498,12 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
     # rule a source belongs where it sits, and snapping would reintroduce the
     # proximity assignment that was retired in 66abe69. For scale, gridded
     # source spaces put ~25% of sources on unlabelled voxels.
-    cortical = set(field["cortical_ids"])
     both = np.concatenate([lab_l, lab_r])
-    unlabelled = float((both == 0).mean())
-    noncortical = float(
-        (~np.isin(both, list(cortical)) & (both != 0)).mean()
-    )
+    # Drifted vertices are unlabelled now, so they count in `unlabelled` too;
+    # subtract them so the two fractions stay disjoint and comparable with the
+    # values recorded before the out-of-category mask existed.
+    noncortical = float(n_drift / both.size)
+    unlabelled = float((both == 0).mean()) - noncortical
 
     meta = {
         "spacing_mm": spacing_mm,
@@ -462,6 +519,7 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
         "label_mismatch_frac": mismatch,
         "unlabelled_frac": unlabelled,
         "noncortical_frac": noncortical,
+        "noncortical_dropped": n_drift,
         "parcels_present": sorted(set(int(v) for v in np.unique(lab_l))),
     }
 

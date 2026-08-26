@@ -213,3 +213,106 @@ def test_electrode_proximity_filter_single_entry_unchanged():
 
     assert len(out) == 1
     assert out[0]["np"] == int(keep.sum())
+
+
+def _allen26_paths():
+    """allen26 paths, or skip. Its ids are NOT allen32's left 1-16/right 17-32."""
+    from pathlib import Path
+
+    from source_localization.config import atlas_input_paths
+    from source_localization.source_space import surface_anatomical
+
+    pkg = Path(surface_anatomical.__file__).resolve().parent.parent
+    try:
+        inputs = atlas_input_paths("allen26")
+    except Exception:  # pragma: no cover - atlas not installed
+        pytest.skip("allen26 atlas unavailable")
+    lp, mp = pkg / inputs["brain_labels"], pkg / inputs["roi_mapping"]
+    if not (lp.exists() and mp.exists()):  # pragma: no cover
+        pytest.skip("allen26 atlas files missing")
+    return lp, mp
+
+
+def test_midline_seam_uses_atlas_correspondence_not_a_fixed_offset():
+    """The seam relabel must read the atlas, not assume allen32's numbering.
+
+    A vertex snapped to x = 0 is sampled by both hemispheres from the same
+    voxel, so the right side inherits a left label and has to be sent to its
+    right-hand counterpart. That was done as ``+16`` / ``-16``, which is only
+    true for allen32. On allen26 (Auditory_L=2/Auditory_R=12,
+    Lateral_Cortex_L=6/Lateral_Cortex_R=16) the ``-16`` branch fired on
+    *midline* parcels instead: Cerebellum (22) became Lateral_Cortex_L (6),
+    Olfactory_Bulb (25) became Somatosensory_L (9) and Frontal_Anterior (23)
+    became Motor_L (7), on the left hemisphere only. (X45)
+    """
+    import json
+
+    from source_localization.source_space import surface_anatomical
+
+    lp, mp = _allen26_paths()
+    lh, rh, meta = surface_anatomical.build_hemispheres(
+        spacing_mm=0.8, verbose=False,
+        categories=("cortical", "cerebellum", "olfactory"),
+        labels_path=lp, mapping_path=mp,
+    )
+
+    rois = json.loads(mp.read_text())
+    rois = rois.get("rois", rois)
+    id_by_name = {v["name"]: int(k) for k, v in rois.items() if v.get("name")}
+    lateral = {i for n, i in id_by_name.items() if n.endswith(("_L", "_R"))}
+
+    lab_l = np.asarray(lh.point_data["parcel"])
+    lab_r = np.asarray(rh.point_data["parcel"])
+    seam_l = np.asarray(lh.points)[:, 0] == 0.0
+    seam_r = np.asarray(rh.points)[:, 0] == 0.0
+    assert seam_l.sum() > 0, "no midline seam to test"
+    assert np.array_equal(seam_l, seam_r), "hemispheres are mirrored vertex-wise"
+
+    # A parcel with no _L/_R counterpart spans the midline and is correct on
+    # both sides, so the seam must carry the same id on each. Under the old
+    # offset the left side of every such vertex was shifted down by 16.
+    for i in np.flatnonzero(seam_r):
+        if int(lab_r[i]) and int(lab_r[i]) not in lateral:
+            assert int(lab_l[i]) == int(lab_r[i]), (
+                f"midline parcel {lab_r[i]} became {lab_l[i]} on the left"
+            )
+
+    # and the metric that shares the assumption reports atlas asymmetry again,
+    # not the ~98% the fixed offset produced on allen26
+    assert 0.0 <= meta["label_mismatch_frac"] < 0.15
+
+
+def test_no_source_carries_a_parcel_outside_the_build_categories():
+    """Off-ribbon drift must not promote a phantom parcel. (X46)
+
+    Decimation moves a vertex by a fraction of a voxel and it can land on a
+    structure the surface was never built from. Carrying that id gives it a
+    first-class ROI time series downstream — a 1-vertex ``Hippocampus_Ant_R``
+    sat beside real parcels in every Monte Carlo surface table. Such vertices
+    are set unlabelled, and the drift is still *reported* so X17 stays visible.
+    """
+    from source_localization.source_space import surface_anatomical
+
+    lp, mp = _allen26_paths()
+    cats = ("cortical", "cerebellum", "olfactory")
+    field = surface_anatomical.build_depth_field(
+        0.08, categories=cats, labels_path=lp, mapping_path=mp
+    )
+    build_ids = set(int(i) for i in field["cortical_ids"])
+
+    lh, rh, meta = surface_anatomical.build_hemispheres(
+        spacing_mm=0.8, verbose=False, categories=cats,
+        labels_path=lp, mapping_path=mp,
+    )
+    present = set(
+        int(v) for v in np.unique(
+            np.concatenate([np.asarray(lh.point_data["parcel"]),
+                            np.asarray(rh.point_data["parcel"])])
+        )
+    )
+    stray = present - build_ids - {0}
+    assert not stray, f"parcels outside the build categories survived: {stray}"
+
+    # the diagnostic survives the fix: drift is counted before it is zeroed
+    assert "noncortical_dropped" in meta
+    assert meta["noncortical_frac"] >= 0.0
