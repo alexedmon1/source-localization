@@ -47,9 +47,36 @@ def create_source_space(config, previous_outputs):
     # Get shell configuration (support both 'shell' and 'shell_based' for compatibility)
     shell_config = config['source_space'].get('shell', config['source_space'].get('shell_based', {}))
     n_shells = shell_config.get('n_shells', 3)
+
+    # Under Monte Carlo sampling this source space is the *pool* that draws are
+    # taken from, not the deployed grid, so it is built dense: more shells, more
+    # points per shell. The deployed density is a property of each draw
+    # (monte_carlo.n_sources).
+    _mc = config['source_space'].get('monte_carlo') or {}
+    _is_mc = config['source_space'].get('source_sampling') == 'monte_carlo'
+    if _is_mc:
+        n_shells = int(_mc.get('pool_n_shells', 12))
     shell_scales = shell_config.get('shell_scales', None)
     min_points = shell_config.get('min_points_per_shell', 20)
     max_points = shell_config.get('max_points_per_shell', 100)
+    if _is_mc:
+        max_points = int(_mc.get('pool_points_per_shell', 400))
+        # `pool_n_shells` was silently ignored whenever the config supplied an
+        # explicit `shell_scales` list -- which every shell preset does. The
+        # auto-compute below only fires when shell_scales is None, so the pool
+        # was always the deployed 4 surfaces made denser, never more numerous,
+        # and could not sample the radial dimension at all. It still printed
+        # "Number of shells: 24" while building 4.
+        #
+        # Under Monte Carlo the pool is resampled radially across the span the
+        # deployed scales cover, so `pool_n_shells` means what it says. The
+        # deployed (non-MC) path is untouched: it keeps its own scales exactly.
+        if shell_scales is not None and n_shells != len(shell_scales):
+            lo, hi = float(min(shell_scales)), float(max(shell_scales))
+            shell_scales = np.linspace(lo, hi, n_shells).tolist()
+            print(f'    Monte Carlo pool: resampled {n_shells} shells across '
+                  f'the deployed span {lo:.2f}-{hi:.2f}')
+        print(f'    Monte Carlo pool: {n_shells} shells x {max_points} points')
     scale_by_area = shell_config.get('scale_by_area', True)
     distribution = shell_config.get('distribution', 'fibonacci')  # 'fibonacci' or 'latlon'
 

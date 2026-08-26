@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+import yaml
+
 from .config import Config
 from .steps import (
     electrode_registration,
@@ -13,6 +15,7 @@ from .steps import (
     forward_solution,
     inverse_solution,
     roi_extraction,
+    monte_carlo_roi,
     spectral_analysis,
     visualization
 )
@@ -139,6 +142,40 @@ class Pipeline:
         config = Config.from_file(config_file)
         return cls(config)
 
+    @staticmethod
+    def _plain(value):
+        """Make a config value YAML-safe: Paths and tuples become str and list."""
+        if isinstance(value, dict):
+            return {str(k): Pipeline._plain(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Pipeline._plain(v) for v in value]
+        if isinstance(value, Path):
+            return str(value)
+        return value
+
+    def _write_resolved_config(self, output_path: Path) -> Path:
+        """Snapshot the fully resolved config next to the outputs it produced.
+
+        The HTML report shows the settings that decide a run, but a report is
+        rendered for people. This file is the machine-readable record: preset,
+        atlas, source-space method and spacing, orientation, every override the
+        CLI applied. Without it a finished output directory cannot say what
+        built it, and reruns cannot be shown to be reruns.
+        """
+        # Imported here, not at module scope: `__init__` imports this module, so
+        # a top-level `from . import __version__` is a circular import.
+        from . import __version__
+
+        snapshot = {
+            'source_localization_version': __version__,
+            'written': datetime.now().isoformat(timespec='seconds'),
+            'config': self._plain(self.config.to_dict()),
+        }
+        target = output_path / 'data' / 'config_resolved.yaml'
+        with open(target, 'w') as f:
+            yaml.safe_dump(snapshot, f, sort_keys=False, default_flow_style=False)
+        return target
+
     def run(self, eeg_file: Optional[str] = None, output_dir: Optional[str] = None,
             include_spectral: bool = False, include_visualization: bool = False,
             skip_roi_extraction: bool = False) -> Dict[str, Any]:
@@ -180,6 +217,8 @@ class Pipeline:
         (output_path / 'data').mkdir(exist_ok=True)
         (output_path / 'figures').mkdir(exist_ok=True)
 
+        self._write_resolved_config(output_path)
+
         print("="*80)
         print(f"SOURCE LOCALIZATION PIPELINE: {self.config['pipeline']['name']}")
         print("="*80)
@@ -192,6 +231,28 @@ class Pipeline:
 
         # Determine which steps to run
         steps_to_run = self.STEPS
+
+        # Monte Carlo sampling integrates over source-grid placement instead of
+        # solving one arbitrary grid, so it replaces the inverse and extraction
+        # steps with a single operator build. It is ROI-only by construction --
+        # no single grid is solved, so there is no vertex set for a vertex-level
+        # analysis to refer to.
+        sampling = (self.config['source_space'].get('source_sampling', 'fixed')
+                    or 'fixed')
+        if sampling not in ('fixed', 'monte_carlo'):
+            raise ValueError(
+                f"Unknown source_sampling: {sampling}. Valid: fixed, monte_carlo")
+        if sampling == 'monte_carlo':
+            if skip_roi_extraction:
+                raise ValueError(
+                    "source_sampling='monte_carlo' produces ROI output only, so "
+                    "skip_roi_extraction leaves it with nothing to produce. Use "
+                    "source_sampling='fixed' for vertex-level work.")
+            steps_to_run = [
+                (name, mod) for name, mod in self.STEPS
+                if name not in ('inverse_solution', 'roi_extraction')
+            ] + [('monte_carlo_roi', monte_carlo_roi)]
+
         if skip_roi_extraction:
             steps_to_run = [
                 (name, mod) for name, mod in self.STEPS

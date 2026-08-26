@@ -4,6 +4,7 @@ import mne
 import numpy as np
 import nibabel as nib
 from pathlib import Path
+from mne.io.constants import FIFF
 
 
 def fit_ellipsoid_to_brain(brain_coords_mm, method='axis_aligned', margin=1.23,
@@ -284,8 +285,15 @@ def create_ellipsoid_surfaces_from_axes(center_mm, layer_semi_axes_list, rotatio
     # Create unit sphere with icosahedron subdivision
     rr, tris = _create_icosphere(n_subdivisions)
 
-    # MNE surface IDs: brain=4, skull=3, scalp=1 (inner to outer)
-    surface_ids = [4, 3, 1]
+    # MNE surface IDs, inner to outer. FIFFV_BEM_SURF_ID_BRAIN is 1 and
+    # FIFFV_BEM_SURF_ID_HEAD is 4, not the reverse. `_bem_find_surface` resolves
+    # surfaces by id, so getting these backwards hands the source-containment
+    # check in `_prepare_for_forward` the scalp instead of the inner skull.
+    surface_ids = [
+        FIFF.FIFFV_BEM_SURF_ID_BRAIN,
+        FIFF.FIFFV_BEM_SURF_ID_SKULL,
+        FIFF.FIFFV_BEM_SURF_ID_HEAD,
+    ]
 
     for layer_idx, layer_semi_axes in enumerate(layer_semi_axes_list):
         # Use specified semi-axes for this layer

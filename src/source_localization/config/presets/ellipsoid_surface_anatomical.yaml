@@ -1,15 +1,5 @@
-# The anatomical cortical mid-ribbon, not the geometric icosphere. The icosphere
-# was this preset's source space while the anatomical path was being built; the
-# default flipped in D36 and this preset now states the anatomical configuration
-# explicitly rather than relying on module defaults. `ellipsoid_surface_anatomical`
-# is the same configuration and is kept as its name.
-#
-# The BEM block is the extended ellipsoid (868dea9): the centre is shifted
-# anteriorly and the Y semi-axis lengthened so the olfactory bulbs fall inside the
-# conductor. Without it the standard fit leaves 30% of bulb sources outside the
-# inner skull, and MNE drops them from the forward without saying so.
 pipeline:
-  name: "Ellipsoidal BEM + Anatomical Surface Sources"
+  name: "Ellipsoidal BEM + Surface Sources"
   bem_type: ellipsoid
   source_type: surface
 
@@ -96,14 +86,14 @@ roi:
   proximity_radius_mm: 2.0
 
 outputs:
-  dir: "outputs/ellipsoid_surface"
+  dir: "outputs/ellipsoid_surface_anatomical"
   save_intermediate: true
   figure_format: png
   figure_dpi: 100
-  # Signed only. The magnitude variant duplicates the signed one at roughly
-  # 1 GB per subject on full-length recordings, and every deployed study
-  # already overrides this key to "signed" by hand (FORGE disease, treatment
-  # and the WP-14 arms all do). Making it the default stops that override
-  # being something a study has to remember. Set to "both" if a downstream
-  # analysis genuinely wants rectified amplitudes.
+  # Signed only. The magnitude variant duplicates the signed one at ~1 GB per
+  # subject on full-length recordings, and nothing this surface is built for
+  # needs it: ITC is a phase measure, ERP amplitude needs polarity, and power
+  # measures are computed from the TFR of the signed series. Set to "both" if a
+  # downstream analysis genuinely wants rectified amplitudes.
   output_variants: "signed"
+

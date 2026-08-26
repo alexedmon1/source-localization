@@ -74,6 +74,27 @@ DEFAULT_DEPTH_BINS_MM = [
     (5, float('inf'), '5+mm')
 ]
 
+# Depth bins for SURFACE source spaces.
+#
+# DEFAULT_DEPTH_BINS_MM drops the 0-1 mm bin, on the grounds that almost no
+# brain source sits within 1 mm of an electrode. That holds for volumetric and
+# shell source spaces, which is what it was written for. It does not hold for a
+# cortical surface: 9.6% of mid-ribbon vertices are closer than 1 mm to their
+# nearest electrode, and folding them into the 1-2 mm bin hides the most
+# superficial tenth of the sheet — the part the array sees best.
+#
+# Kept separate rather than changing the default, because the published Table 2
+# bins are the default and moving them would break comparability with every
+# number already reported.
+SURFACE_DEPTH_BINS_MM = [
+    (0, 1, '0-1mm'),
+    (1, 2, '1-2mm'),
+    (2, 3, '2-3mm'),
+    (3, 4, '3-4mm'),
+    (4, 5, '4-5mm'),
+    (5, float('inf'), '5+mm')
+]
+
 
 def compute_localization_error(
     true_position_mm: np.ndarray,
@@ -100,6 +121,115 @@ def compute_localization_error(
     error_mm = np.linalg.norm(true_pos - est_pos)
 
     return error_mm
+
+
+def compute_orientation_error(
+    true_orientation: np.ndarray,
+    estimated_orientation: np.ndarray,
+    degrees: bool = True
+) -> float:
+    """
+    Angle between a true and a recovered dipole moment direction.
+
+    Dipole polarity is not identifiable: a source pointing one way with a
+    positive time course and one pointing the opposite way with a negative
+    time course produce the same sensor data. So the angle is taken between
+    *axes*, not vectors, via the absolute value of the dot product. This
+    matches the convention already used for signed source fidelity, where
+    |r| is reported rather than r for the same reason.
+
+    The consequence is that the error is bounded at 90 degrees, and chance
+    performance is not 90 but the mean angle between random axes in 3-D,
+    which is 57.3 degrees. Compare against that, not against 90.
+
+    Parameters
+    ----------
+    true_orientation : array-like, shape (3,)
+        Ground-truth dipole moment direction. Normalised internally.
+    estimated_orientation : array-like, shape (3,)
+        Recovered dipole moment direction. Normalised internally.
+    degrees : bool, default=True
+        Return degrees rather than radians.
+
+    Returns
+    -------
+    error : float
+        Angle in [0, 90] degrees (or [0, pi/2] radians). NaN if either
+        vector has effectively zero length, which happens for source spaces
+        that carry no normals.
+
+    Examples
+    --------
+    >>> compute_orientation_error([1, 0, 0], [1, 0, 0])
+    0.0
+    >>> compute_orientation_error([1, 0, 0], [-1, 0, 0])  # polarity ignored
+    0.0
+    >>> round(compute_orientation_error([1, 0, 0], [0, 1, 0]), 6)
+    90.0
+    """
+    true_vec = np.asarray(true_orientation, dtype=float).ravel()
+    est_vec = np.asarray(estimated_orientation, dtype=float).ravel()
+
+    true_norm = np.linalg.norm(true_vec)
+    est_norm = np.linalg.norm(est_vec)
+    if true_norm < 1e-12 or est_norm < 1e-12:
+        return float('nan')
+
+    cos_angle = np.dot(true_vec / true_norm, est_vec / est_norm)
+    # abs() folds the antipodal direction onto the same axis
+    cos_angle = np.clip(abs(cos_angle), 0.0, 1.0)
+
+    angle = np.arccos(cos_angle)
+    return float(np.degrees(angle)) if degrees else float(angle)
+
+
+# Mean angle between two random axes in 3-D, in degrees. This is the chance
+# level for compute_orientation_error, and the number any orientation result
+# has to beat to mean anything.
+RANDOM_AXIS_ANGLE_DEG = 57.2958
+
+
+def extract_dipole_orientation(
+    source_activity: np.ndarray,
+    n_comp: int = 3
+) -> np.ndarray:
+    """
+    Recover a dipole moment direction from a 3-component source time course.
+
+    Uses the dominant left singular vector, i.e. the direction explaining the
+    most variance over time, which is what the pipeline already uses to
+    collapse free-orientation estimates to a signed scalar.
+
+    Parameters
+    ----------
+    source_activity : ndarray, shape (n_comp, n_times) or (n_comp,)
+        Source activity at one location.
+    n_comp : int, default=3
+        Components per source. With 1 the orientation is fixed by
+        construction and cannot be recovered from the data, so NaNs are
+        returned.
+
+    Returns
+    -------
+    orientation : ndarray, shape (3,)
+        Unit vector, or NaNs when it is not recoverable.
+    """
+    if n_comp != 3:
+        return np.full(3, np.nan)
+
+    activity = np.asarray(source_activity, dtype=float)
+    if activity.ndim == 1:
+        activity = activity[:, np.newaxis]
+    if activity.shape[0] != 3:
+        raise ValueError(
+            f"expected 3 components, got {activity.shape[0]}"
+        )
+
+    if not np.any(np.abs(activity) > 0):
+        return np.full(3, np.nan)
+
+    U, _, _ = np.linalg.svd(activity, full_matrices=False)
+    return U[:, 0]
 
 
 # Exterior ROI ID - sources here are outside the brain and should be excluded

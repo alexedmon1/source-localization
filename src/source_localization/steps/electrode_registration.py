@@ -56,6 +56,11 @@ def run(config, previous_outputs):
     print(f"  Projection method: {projection_method}")
     print(f"  Skull offset: {skull_offset_mm} mm")
 
+    # The CSV is 1-indexed and the loader subtracts 1; config bregma_vox is
+    # already 0-indexed. Nothing checked that the two agreed.
+    from ..utils.electrode_registration import check_bregma_convention
+    bregma_convention = check_bregma_convention(electrodes_csv, bregma_vox)
+
     # Load electrodes using validated P100 method
     info, electrode_results = load_electrodes_from_p100(
         electrodes_csv=electrodes_csv,
@@ -100,5 +105,6 @@ def run(config, previous_outputs):
         'info': info,
         'electrodes_mri': electrodes_mri,
         'ch_names': info['ch_names'],
-        'electrode_results': electrode_results
+        'electrode_results': electrode_results,
+        'bregma_convention': bregma_convention,
     }

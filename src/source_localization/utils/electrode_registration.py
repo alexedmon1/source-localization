@@ -422,6 +422,64 @@ def validate_projection_raycasting(
 # BREGMA VALIDATION (P110 METHOD)
 # ============================================================================
 
+def check_bregma_convention(
+    electrodes_csv: Path,
+    bregma_vox: Optional[Tuple[int, int, int]] = None,
+) -> Dict[str, Any]:
+    """Cross-check the configured bregma against the one in the electrode CSV.
+
+    Both the CSV and ``electrode.bregma_vox`` are 0-indexed, so the two should
+    agree exactly, and for the shipped montage they do: config
+    ``[30, 149, 41]`` against the CSV's ``Bregma`` row of ``(30, 149, 41)``.
+
+    This check used to compare them after subtracting 1 from the CSV, which
+    manufactured a one-voxel disagreement and then classed it advisory. The
+    loader made the same subtraction, so the disagreement was real and the
+    "reporting-only" verdict was wrong — every electrode was displaced by a
+    voxel on every axis. Both the subtraction and the verdict are gone; see the
+    comment at the load site in :func:`load_electrodes_from_p100`.
+
+    A non-zero offset now means the montage CSV and the configured bregma
+    genuinely disagree, which is a real registration problem worth surfacing
+    rather than a convention artifact.
+
+    Returns
+    -------
+    dict
+        ``csv_bregma_vox_0indexed``, ``config_bregma_vox``, ``offset_vox``,
+        ``agrees``. ``csv_bregma_vox_0indexed`` is None when the CSV carries no
+        ``Bregma`` row.
+    """
+    result: Dict[str, Any] = {
+        "csv_bregma_vox_0indexed": None,
+        "config_bregma_vox": list(bregma_vox) if bregma_vox is not None else None,
+        "offset_vox": None,
+        "agrees": None,
+    }
+
+    df = pd.read_csv(electrodes_csv)
+    rows = df[df["Label"].astype(str).str.upper() == "BREGMA"]
+    if rows.empty or bregma_vox is None:
+        return result
+
+    csv_vox = rows[["X-MRI", "Y-MRI", "Z-MRI"]].to_numpy(dtype=float)[0]
+    result["csv_bregma_vox_0indexed"] = csv_vox.tolist()
+
+    offset = np.asarray(bregma_vox, dtype=float) - csv_vox
+    result["offset_vox"] = offset.tolist()
+    result["agrees"] = bool(np.allclose(offset, 0.0))
+
+    if not result["agrees"]:
+        print(
+            "    ⚠️  bregma mismatch: config "
+            f"{list(bregma_vox)} vs CSV {csv_vox.tolist()} (both 0-indexed), "
+            f"offset {offset.tolist()} voxels. Reporting-only: electrode "
+            "placement and the bregma-lambda distance are unaffected."
+        )
+
+    return result
+
+
 def validate_bregma_position(
     atlas_img: nib.Nifti1Image,
     brain_mask: np.ndarray,
@@ -819,7 +877,7 @@ def load_electrodes_from_p100(
     Parameters
     ----------
     electrodes_csv : Path
-        Path to electrode CSV file with columns: Label, X-MRI, Y-MRI, Z-MRI (1-indexed)
+        Path to electrode CSV file with columns: Label, X-MRI, Y-MRI, Z-MRI (0-indexed)
         Typically from P100 output or manual coordinate calculation
     atlas_nii : Path
         Path to atlas NIfTI (UAnterwerpen Atlas_3DRois.nii)
@@ -924,10 +982,32 @@ def load_electrodes_from_p100(
     df = df[df['Label'] != 'Bregma'].copy()  # Filter Bregma if present
     ch_names = df['Label'].tolist()
 
-    # Get MRI voxel coordinates (1-indexed in CSV, convert to 0-indexed)
-    x_vox = df['X-MRI'].to_numpy(dtype=float) - 1.0
-    y_vox = df['Y-MRI'].to_numpy(dtype=float) - 1.0
-    z_vox_flat = df['Z-MRI'].to_numpy(dtype=float) - 1.0
+    # MRI voxel coordinates, already 0-indexed in the CSV.
+    #
+    # This used to subtract 1, on the assumption that the CSV was 1-indexed.
+    # It is not, and the CSV says so itself: its `Bregma` row is (30, 149, 41),
+    # identical to `electrode.bregma_vox` in config, which is documented and
+    # used as 0-indexed (and whose bregma-lambda separation of 52 voxels x
+    # 0.080078 mm = 4.16 mm matches the anatomical ~4.2 mm). Subtracting 1
+    # displaced every electrode by one voxel on every axis: -0.203 mm in x,
+    # -0.080 mm in y, and -0.200 mm in z before the surface projection
+    # overwrites it.
+    #
+    # The x component is the damaging one. The array is symmetric about its own
+    # centre to 28 um, so a rigid x shift makes it asymmetric about the atlas
+    # midline, and asymmetric electrodes make the leadfield asymmetric for
+    # anatomy that is symmetric by construction. Measured on the corrected
+    # atlas: loading with the -1 puts the array centre 0.2008 mm from the atlas
+    # label symmetry axis; loading without it puts it 0.0023 mm away.
+    #
+    # `df450d6` detected this exact one-voxel disagreement and classed it
+    # reporting-only, reasoning that "electrode placement reads absolute
+    # X-MRI/Y-MRI and never routes through bregma". That is true and beside the
+    # point: placement applied the same -1, so it was displaced whether or not
+    # it consulted bregma.
+    x_vox = df['X-MRI'].to_numpy(dtype=float)
+    y_vox = df['Y-MRI'].to_numpy(dtype=float)
+    z_vox_flat = df['Z-MRI'].to_numpy(dtype=float)
 
     # Load atlas
     atlas_img = nib.load(str(atlas_nii))

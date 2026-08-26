@@ -22,6 +22,7 @@ from source_localization.config import ATLAS_DEFINITIONS, Config
 PACKAGE_DATA = None  # resolved lazily in _package_dir()
 
 EXPECTED_PARCELS = {'antwerp': 46, 'allen': 32, 'allen32': 32, 'allen64': 64,
+                    'allen26': 26,
                     'coarse22': 22}
 
 

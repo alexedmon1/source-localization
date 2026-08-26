@@ -30,6 +30,15 @@ bem:
 
 source_space:
   surface:
+    # Explicitly the icosphere. The default is now `anatomical` (D36), but the
+    # sphere BEM does not contain the anatomical surface: measured, 638 of 2,546
+    # sources (25.1%) fall outside its inner skull and MNE drops them from the
+    # forward silently (X40). That is the same defect 868dea9 fixed for the
+    # ellipsoid by extending it, and no equivalent fit has been derived for the
+    # sphere. Until one is, this preset keeps the geometric surface it has always
+    # had -- which also preserves the icosphere comparator Phase 3's
+    # anatomy-vs-radial contrast is built on.
+    method: icosphere
     ico_level: 3  # Icosahedral subdivision level (3 = 642 vertices, ~290 after dorsal filtering)
     inset_factor: 0.85  # Sources at 85% of brain radius (ensures interior placement)
     filter_dorsal: true  # Filter to dorsal hemisphere only (Z > center) for better conditioning
@@ -64,3 +73,10 @@ outputs:
   save_intermediate: true
   figure_format: png
   figure_dpi: 100
+  # Signed only. The magnitude variant duplicates the signed one at roughly
+  # 1 GB per subject on full-length recordings, and every deployed study
+  # already overrides this key to "signed" by hand (FORGE disease, treatment
+  # and the WP-14 arms all do). Making it the default stops that override
+  # being something a study has to remember. Set to "both" if a downstream
+  # analysis genuinely wants rectified amplitudes.
+  output_variants: "signed"

@@ -1,4 +1,12 @@
-"""Volumetric source space implementation."""
+"""Cartesian-based source space implementation.
+
+One of the three volumetric source spaces, alongside `roi_based` and
+`shell_based`. Sources sit on a regular 3D grid constrained by BEM geometry and
+the brain mask.
+
+The config key is still `source_space.volumetric` in the older presets; both
+that and `source_space.cartesian` are accepted below.
+"""
 
 import mne
 import numpy as np
@@ -35,6 +43,14 @@ def create_source_space(config, previous_outputs):
     source_config = config['source_space'].get('volumetric') or config['source_space'].get('cartesian') or {}
 
     spacing_mm = source_config.get('spacing_mm', 1.5)  # Default 1.5mm if not specified
+
+    # Under Monte Carlo sampling this source space is the *pool* that draws are
+    # taken from, not the deployed grid, so it is built dense. The deployed
+    # density is a property of each draw (monte_carlo.n_sources).
+    _mc = config['source_space'].get('monte_carlo') or {}
+    if config['source_space'].get('source_sampling') == 'monte_carlo':
+        spacing_mm = float(_mc.get('pool_spacing_mm', 0.5))
+        print(f'    Monte Carlo pool: grid at {spacing_mm} mm')
     pos_mm = source_config.get('pos_mm', 0.0)
     use_brain_mask = source_config.get('use_brain_mask', True)
     apply_bem_constraint = source_config.get('apply_bem_constraint', True)

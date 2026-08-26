@@ -17,5 +17,5 @@ def __getattr__(name):
         return source_analysis
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__version__ = '0.4.0'
+__version__ = '0.5.0'
 __all__ = ['Pipeline', 'Config', 'study', 'source_analysis']

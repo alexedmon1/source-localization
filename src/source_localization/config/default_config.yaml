@@ -61,6 +61,11 @@ inverse:
   snr: 3.0
   lambda2: null  # If null, computed as 1/(snr^2)
   # Note: depth_weighting removed - custom implementations bypass MNE-Python's human-brain assumptions
+  orientation: free  # free | loose | fixed. free is the historical behaviour and
+                     # is bit-identical to it. loose and fixed require source
+                     # normals, so they need a surface source space; cartesian
+                     # and roi_based write nn = zeros and support only free.
+  loose: 0.2  # tangential penalty when orientation: loose
 
 spectral:
   frequency_bands:
