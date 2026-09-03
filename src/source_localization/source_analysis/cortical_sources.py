@@ -20,11 +20,33 @@ Date: 2026-01-26
 import numpy as np
 from scipy.spatial import cKDTree
 from scipy.ndimage import distance_transform_edt
+import warnings
+
 import nibabel as nib
+from ..utils.atlas import get_true_affine
 from typing import Tuple, Optional, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _true_affine(nii, apply_10x_correction=None):
+    """Voxel-to-mm affine with the file's convention detected, not assumed.
+
+    This module used to scale ``affine[:3, :3]`` by 1/10 unconditionally. That
+    is wrong twice over: it leaves the translation at 10x (so the volume lands
+    nowhere near the sources), and it is applied to files that are already in
+    true units (every current Allen label file and Antwerp's Labels file),
+    shrinking them a further 10x. ``get_true_affine`` inspects the header and
+    corrects only the inflated files, translation included.
+    """
+    if apply_10x_correction is not None:
+        warnings.warn(
+            "apply_10x_correction is deprecated and ignored; the affine "
+            "convention is detected from the file header",
+            DeprecationWarning, stacklevel=3,
+        )
+    return get_true_affine(nii).copy()
 
 
 class CorticalSourceSpace:
@@ -163,7 +185,7 @@ class CorticalSourceSpace:
         max_depth_mm: float = 2.0,
         spacing_mm: float = 0.5,
         cortical_labels: Optional[list] = None,
-        apply_10x_correction: bool = True
+        apply_10x_correction: Optional[bool] = None
     ) -> 'CorticalSourceSpace':
         """
         Create cortical source space from atlas NIfTI file.
@@ -173,7 +195,8 @@ class CorticalSourceSpace:
             max_depth_mm: Maximum depth from surface
             spacing_mm: Source grid spacing
             cortical_labels: Optional list of label IDs to include (cortical ROIs)
-            apply_10x_correction: Apply 10x voxel size correction for mouse atlas
+            apply_10x_correction: Deprecated and ignored. The affine convention is
+            detected per file by utils.atlas.get_true_affine()
 
         Returns:
             CorticalSourceSpace instance
@@ -182,12 +205,7 @@ class CorticalSourceSpace:
 
         nii = nib.load(atlas_path)
         atlas_data = np.asarray(nii.dataobj)
-        affine = nii.affine.copy()
-
-        # Apply 10x correction for mouse atlas (critical!)
-        if apply_10x_correction:
-            logger.info("Applying 10x voxel size correction for mouse atlas")
-            affine[:3, :3] /= 10.0
+        affine = _true_affine(nii, apply_10x_correction)
 
         # Create brain mask
         if cortical_labels is not None:

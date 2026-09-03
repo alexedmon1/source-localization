@@ -4,7 +4,8 @@ Extract source activity for each ROI defined in the atlas.
 
 Produces both magnitude and signed ROI time series:
 - Magnitude: Always positive, for power/spectral analysis
-- Signed: Preserves sign (SVD-based), for connectivity/correlation analysis
+- Signed: Preserves sign (normal component under fixed orientation, max-variance
+  component under free orientation), for connectivity/correlation analysis
 """
 
 import numpy as np
@@ -302,20 +303,35 @@ def run(config, previous_outputs):
         from ..utils.export_set import export_roi_to_set
         sfreq = stc.sfreq if hasattr(stc, 'sfreq') else previous_outputs.get('sfreq', 500.0)
 
-        if 'magnitude' in variants:
-            export_roi_to_set(
-                roi_stcs_magnitude,
-                sfreq=sfreq,
-                output_path=data_dir / 'roi_timeseries_magnitude.set',
-                subject_id='source_localized_magnitude'
-            )
-        if 'signed' in variants:
-            export_roi_to_set(
-                roi_stcs_signed,
-                sfreq=sfreq,
-                output_path=data_dir / 'roi_timeseries_signed.set',
-                subject_id='source_localized_signed'
-            )
+        if stc.data.shape[1] == 1:
+            # A single sample is a power map, not a time series (DICS). MNE
+            # cannot read a one-sample .set as either raw or epochs, so write
+            # a table instead and say so.
+            print(f"    Source estimate has one sample (static power); writing "
+                  f"CSV rather than .set")
+            for variant, rois in (('magnitude', roi_stcs_magnitude), ('signed', roi_stcs_signed)):
+                if variant in variants:
+                    out = data_dir / f'roi_power_{variant}.csv'
+                    with open(out, 'w') as fh:
+                        fh.write('roi,power\n')
+                        for name in roi_labels:
+                            fh.write(f'{name},{float(np.ravel(rois[name])[0]):.10g}\n')
+                    print(f"    Saved: {out}")
+        else:
+            if 'magnitude' in variants:
+                export_roi_to_set(
+                    roi_stcs_magnitude,
+                    sfreq=sfreq,
+                    output_path=data_dir / 'roi_timeseries_magnitude.set',
+                    subject_id='source_localized_magnitude'
+                )
+            if 'signed' in variants:
+                export_roi_to_set(
+                    roi_stcs_signed,
+                    sfreq=sfreq,
+                    output_path=data_dir / 'roi_timeseries_signed.set',
+                    subject_id='source_localized_signed'
+                )
 
         # ROI extraction QC visualizations
         import matplotlib.pyplot as plt

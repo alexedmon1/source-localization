@@ -878,7 +878,7 @@ Sources are mapped to ROIs using KD-tree proximity search within 1.0 mm radius (
 
 ## Related Modules
 
-- `source_localization.inverse.methods` - Inverse solution methods (MNE, dSPM, sLORETA)
+- `source_localization.steps.inverse_solution` - Inverse solution methods (MNE, dSPM, sLORETA, eLORETA, LCMV, DICS)
 - `source_localization.utils.atlas` - Atlas utilities
 - `source_localization.utils.roi` - ROI extraction
 - `adv_test/validation/` - Original reference implementation

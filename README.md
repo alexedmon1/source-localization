@@ -521,7 +521,9 @@ raw = mne.io.read_raw_eeglab('results/data/roi_timeseries_signed.set')
   arbitrary between epochs and sources; use it for within-epoch connectivity,
   not for polarity claims.
 - **DICS** produces a single band-power value per source, not a time series.
-  The pipeline exports it as a one-sample estimate.
+  The pipeline writes it as `roi_power_*.csv` and `source_power_*.csv` rather
+  than `.set` files, which cannot hold one sample. DICS does not run on the
+  surface presets; see the regularization known issue.
 - **ROIs with no assigned source are omitted** from the outputs rather than
   written as zeros. The run log lists them.
 

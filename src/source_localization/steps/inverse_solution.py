@@ -12,7 +12,9 @@ Beamformer methods (LCMV, DICS) offer:
 
 Output Types:
 - Magnitude: Always positive (norm across 3 orientations). Use for power analysis.
-- Signed: Preserves sign via SVD (dominant orientation). Use for connectivity analysis.
+- Signed: Preserves sign. Under fixed orientation this is the component along the
+  cortical normal; under free orientation it is the max-variance component per
+  epoch (not an SVD — see apply_inverse_to_epoch). Use for connectivity analysis.
 
 Memory Optimization:
 - Epoch-wise processing to minimize peak memory usage
@@ -881,21 +883,20 @@ def apply_inverse_DICS(fwd, epochs, info, freq_band=(30, 55), reg=0.05, weight_n
     # Use CSD averaged across frequencies
     stc, freqs_out = apply_dics_csd(csd.mean(), filters)
 
-    # Extract source power
-    # Note: DICS outputs power (real, positive), not amplitude
-    magnitude = np.abs(stc.data)
+    # DICS outputs one band-power value per source (real, positive), not a
+    # time series. It used to be tiled across the epoch's time axis "for
+    # compatibility", which exported a constant as if it were a signal and let
+    # spectral analysis run on it. It is now a single sample; ROI extraction
+    # averages it per parcel like any other estimate, and the .set exports
+    # carry one sample.
+    power = np.abs(np.asarray(stc.data, dtype=float)).reshape(len(stc.data), -1)
+    magnitude = power.mean(axis=1, keepdims=True).astype(np.float32)
 
-    # Replicate across time dimension for compatibility with downstream code
-    # DICS gives a single power estimate per source
-    n_times = len(epochs.times)
-    if magnitude.ndim == 1:
-        magnitude = np.tile(magnitude[:, np.newaxis], (1, n_times))
-
-    # For DICS, signed is same as magnitude (power is inherently positive)
-    # This is expected behavior for frequency-domain beamformers
+    # Power is inherently positive, so the signed variant is the same array.
     signed = magnitude.copy()
 
-    print(f"    ✓ DICS complete: {magnitude.shape}")
+    print(f"    ✓ DICS complete: {magnitude.shape[0]:,} sources x 1 sample "
+          f"(band power {freq_band[0]}-{freq_band[1]} Hz, not a time series)")
     print(f"    Note: DICS outputs power (always positive), signed=magnitude")
 
     return magnitude, signed, stc
@@ -924,7 +925,8 @@ def run(config, previous_outputs):
     Compute inverse solution.
 
     Computes both magnitude (always positive, for power analysis) and signed
-    (SVD-based, for connectivity analysis) source time courses.
+    (normal component under fixed orientation, max-variance component under
+    free orientation; for connectivity analysis) source time courses.
 
     Uses epoch-wise processing for memory efficiency: processes one epoch at a
     time instead of concatenating all epochs, reducing peak memory from ~8GB
@@ -1160,18 +1162,30 @@ def run(config, previous_outputs):
         from ..utils.export_set import export_source_to_set
         sfreq = stc_magnitude.sfreq if hasattr(stc_magnitude, 'sfreq') else previous_outputs.get('sfreq', 500.0)
 
-        if 'magnitude' in variants:
-            export_source_to_set(
-                stc_magnitude.data, source_coords_mm_export, sfreq,
-                data_dir / 'source_timeseries_magnitude.set',
-                subject_id='source_magnitude'
-            )
-        if 'signed' in variants:
-            export_source_to_set(
-                stc_signed.data, source_coords_mm_export, sfreq,
-                data_dir / 'source_timeseries_signed.set',
-                subject_id='source_signed'
-            )
+        if stc_magnitude.data.shape[1] == 1:
+            # Static power (DICS): one value per source. MNE cannot read a
+            # one-sample .set, so write a coordinate-tagged table instead.
+            print(f"    Source estimate has one sample (static power); writing "
+                  f"CSV rather than .set")
+            for variant, data in (('magnitude', stc_magnitude.data), ('signed', stc_signed.data)):
+                if variant in variants:
+                    out = data_dir / f'source_power_{variant}.csv'
+                    np.savetxt(out, np.column_stack([source_coords_mm_export, data[:, 0]]),
+                               delimiter=',', header='x_mm,y_mm,z_mm,power', comments='')
+                    print(f"    Saved: {out}")
+        else:
+            if 'magnitude' in variants:
+                export_source_to_set(
+                    stc_magnitude.data, source_coords_mm_export, sfreq,
+                    data_dir / 'source_timeseries_magnitude.set',
+                    subject_id='source_magnitude'
+                )
+            if 'signed' in variants:
+                export_source_to_set(
+                    stc_signed.data, source_coords_mm_export, sfreq,
+                    data_dir / 'source_timeseries_signed.set',
+                    subject_id='source_signed'
+                )
 
         # Inverse solution QC visualizations
         import matplotlib.pyplot as plt

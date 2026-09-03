@@ -30,7 +30,7 @@ from source_localization.steps import (
     electrode_registration, bem_model, source_space, forward_solution
 )
 from source_localization.validation.simulation import DipoleSimulator
-from source_localization.inverse import methods as inverse_methods
+from source_localization.steps.inverse_solution import apply_inverse_custom_sLORETA
 from source_localization.utils.shell_mapping import assign_sources_to_rois
 import mne
 
@@ -153,16 +153,9 @@ def run_localization_test(
             # Apply inverse using sLORETA for best localization
             evoked = mne.EvokedArray(eeg_data, info, tmin=0, verbose=False)
 
-            source_activity_norm, source_signed, W = inverse_methods.apply_inverse_sLORETA(
-                fwd, info,
-                evoked=evoked,
-                snr=3.0
-            )
+            source_magnitude, _ = apply_inverse_custom_sLORETA(fwd, evoked.data, snr=3.0, verbose=False)
 
-            # Find peak: reshape to (n_sources, 3, n_times), compute norm across orientations
-            n_sources_inv = source_activity_norm.shape[0] // 3
-            source_reshaped = source_activity_norm.reshape(n_sources_inv, 3, -1)
-            source_magnitude = np.linalg.norm(source_reshaped, axis=1)  # (n_sources, n_times)
+            # Find peak (magnitude already combines orientations)
             peak_idx = np.argmax(source_magnitude.mean(axis=1))
 
             # Get peak position from forward solution source positions

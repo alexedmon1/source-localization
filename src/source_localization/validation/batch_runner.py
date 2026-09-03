@@ -386,8 +386,12 @@ class BatchValidationRunner:
                         z_c = np.arange(min_mm[2], max_mm[2] + spacing, spacing)
                         xx, yy, zz = np.meshgrid(x_c, y_c, z_c, indexing='ij')
                         grid_candidates = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
-                        # Filter to points inside brain
-                        affine_inv = np.linalg.inv(atlas_nii.affine)
+                        # Filter to points inside brain. Same corrected affine
+                        # as the bounds above: with the raw one, coarse22's
+                        # 10x header mapped every mm candidate to a voxel ~10x
+                        # too small, so the inside-brain test was evaluated at
+                        # the wrong place for that atlas.
+                        affine_inv = np.linalg.inv(atlas_affine)
                         grid_voxels = np.round(nib.affines.apply_affine(affine_inv, grid_candidates)).astype(int)
                         valid = np.ones(len(grid_candidates), dtype=bool)
                         for dim in range(3):

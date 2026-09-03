@@ -306,7 +306,7 @@ Examples:
     analyze_parser.add_argument('--jobs', '-j', type=int, default=1,
                                 help='Number of parallel jobs (default: 1)')
     analyze_parser.add_argument('--bands', nargs='+', default=['delta', 'theta', 'alpha', 'beta', 'low_gamma', 'high_gamma'],
-                                help='Frequency bands to analyze')
+                                help='Frequency bands to analyze: delta, theta, alpha, beta, low_gamma, high_gamma')
     analyze_parser.add_argument('--connectivity', nargs='+', default=['coherence'],
                                 help='Connectivity methods: coherence, plv, wpli, imcoh')
     analyze_parser.add_argument('--epoch-length', type=float, default=2.0,
@@ -438,7 +438,7 @@ def _run_study_command(args):
         config = StudyConfig.from_yaml(args.config)
         df = collect_group_results(config)
         print(f"Collected {len(df)} rows from {df['subject_id'].nunique()} subjects")
-        print(f"Output saved to: {config.group_dir / 'group_band_power.csv'}")
+        print(f"Output saved to: {config.group_dir / 'subjects.csv'}")
         return 0
 
     elif args.study_command == 'status':
@@ -505,11 +505,15 @@ def _run_study_command(args):
         else:
             logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 
-        # Parse bands
-        bands = {b: DEFAULT_BANDS[b] for b in args.bands if b in DEFAULT_BANDS}
-        if not bands:
-            print(f"No valid bands specified. Available: {list(DEFAULT_BANDS.keys())}")
+        # Parse bands. An unknown name is an error, not a silent omission:
+        # `--bands gamma` used to run happily on the other bands and never
+        # say that gamma had been dropped.
+        unknown = [b for b in args.bands if b not in DEFAULT_BANDS]
+        if unknown:
+            print(f"Unknown band(s): {unknown}. Available: {list(DEFAULT_BANDS.keys())} "
+                  f"(gamma is split into low_gamma and high_gamma)", file=sys.stderr)
             return 1
+        bands = {b: DEFAULT_BANDS[b] for b in args.bands}
 
         print(f"Analyzing {len(config.subjects)} subjects...")
         print(f"Bands: {list(bands.keys())}")
