@@ -4,7 +4,8 @@ Extract source activity for each ROI defined in the atlas.
 
 Produces both magnitude and signed ROI time series:
 - Magnitude: Always positive, for power/spectral analysis
-- Signed: Preserves sign (SVD-based), for connectivity/correlation analysis
+- Signed: Preserves sign (normal component under fixed orientation, max-variance
+  component under free orientation), for connectivity/correlation analysis
 """
 
 import numpy as np
@@ -70,9 +71,17 @@ def run(config, previous_outputs):
     has_roi_assignments = False
     roi_assignments = None
 
-    if src is not None and len(src) > 0 and 'roi_assignments' in src[0]:
-        roi_assignments = src[0]['roi_assignments']
+    # The forward step re-emits `roi_assignments` restricted to the sources
+    # MNE kept, aligned with STC rows. Prefer that; fall back to the source
+    # space's whole-space array when running from pickles that predate it.
+    if previous_outputs.get('roi_assignments') is not None:
+        roi_assignments = np.asarray(previous_outputs['roi_assignments'])
         has_roi_assignments = True
+    elif src is not None and len(src) > 0 and src[0].get('roi_assignments') is not None:
+        roi_assignments = np.asarray(src[0]['roi_assignments'])
+        has_roi_assignments = True
+
+    if has_roi_assignments:
         print(f"    Using direct ROI assignment (sources pre-assigned to ROIs)")
         use_proximity = False  # Override: use direct assignment
     else:
@@ -87,15 +96,23 @@ def run(config, previous_outputs):
     n_sources_coords = len(source_coords_mm)
     print(f"    Source counts: stc.data={n_sources_stc}, coords={n_sources_coords}, n_sources={n_sources}")
 
-    if n_sources_stc != n_sources_coords:
-        print(f"    ⚠️  WARNING: Source count mismatch!")
-        print(f"    Using only the first {n_sources_stc} source coordinates to match stc.data")
-        source_coords_mm = source_coords_mm[:n_sources_stc]
-        n_sources = n_sources_stc
-        # Also truncate roi_assignments if present
-        if roi_assignments is not None and len(roi_assignments) > n_sources_stc:
-            roi_assignments = roi_assignments[:n_sources_stc]
-            print(f"    Truncated ROI assignments from {n_sources_coords} to {n_sources_stc}")
+    # These must agree exactly. They used to be reconciled by front-slicing
+    # the coordinates and assignments to the STC's length, which pairs every
+    # row after the first source MNE dropped with the wrong coordinate and
+    # parcel. The forward step now emits arrays restricted to the kept sources,
+    # so a mismatch here means a stale or hand-built `previous_outputs`.
+    if n_sources_stc != n_sources_coords or (
+        roi_assignments is not None and len(roi_assignments) != n_sources_stc
+    ):
+        raise ValueError(
+            f"Source count mismatch: stc has {n_sources_stc:,} rows, "
+            f"source_coords_mm has {n_sources_coords:,}"
+            + (f", roi_assignments has {len(roi_assignments):,}"
+               if roi_assignments is not None else "")
+            + ". Re-run from the forward step so per-source arrays are "
+              "restricted to the sources the forward kept."
+        )
+    n_sources = n_sources_stc
 
     # Load brain labels and ROI mapping
     package_dir = Path(__file__).parent.parent
@@ -286,20 +303,35 @@ def run(config, previous_outputs):
         from ..utils.export_set import export_roi_to_set
         sfreq = stc.sfreq if hasattr(stc, 'sfreq') else previous_outputs.get('sfreq', 500.0)
 
-        if 'magnitude' in variants:
-            export_roi_to_set(
-                roi_stcs_magnitude,
-                sfreq=sfreq,
-                output_path=data_dir / 'roi_timeseries_magnitude.set',
-                subject_id='source_localized_magnitude'
-            )
-        if 'signed' in variants:
-            export_roi_to_set(
-                roi_stcs_signed,
-                sfreq=sfreq,
-                output_path=data_dir / 'roi_timeseries_signed.set',
-                subject_id='source_localized_signed'
-            )
+        if stc.data.shape[1] == 1:
+            # A single sample is a power map, not a time series (DICS). MNE
+            # cannot read a one-sample .set as either raw or epochs, so write
+            # a table instead and say so.
+            print(f"    Source estimate has one sample (static power); writing "
+                  f"CSV rather than .set")
+            for variant, rois in (('magnitude', roi_stcs_magnitude), ('signed', roi_stcs_signed)):
+                if variant in variants:
+                    out = data_dir / f'roi_power_{variant}.csv'
+                    with open(out, 'w') as fh:
+                        fh.write('roi,power\n')
+                        for name in roi_labels:
+                            fh.write(f'{name},{float(np.ravel(rois[name])[0]):.10g}\n')
+                    print(f"    Saved: {out}")
+        else:
+            if 'magnitude' in variants:
+                export_roi_to_set(
+                    roi_stcs_magnitude,
+                    sfreq=sfreq,
+                    output_path=data_dir / 'roi_timeseries_magnitude.set',
+                    subject_id='source_localized_magnitude'
+                )
+            if 'signed' in variants:
+                export_roi_to_set(
+                    roi_stcs_signed,
+                    sfreq=sfreq,
+                    output_path=data_dir / 'roi_timeseries_signed.set',
+                    subject_id='source_localized_signed'
+                )
 
         # ROI extraction QC visualizations
         import matplotlib.pyplot as plt

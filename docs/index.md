@@ -29,7 +29,7 @@ Read these before interpreting output from the affected pipeline.
 | Page | Affects |
 |---|---|
 | [Shell ROI coverage at 215 vertices](known-issues/SHELL_ROI_COVERAGE.md) | `shell_ellipsoid` — thin lateral ROIs can be dropped by the sampling grid |
-| [Regularization scaling](known-issues/REGULARIZATION_SCALING_ISSUE.md) | Inverse solution scaling for mouse-scale head models |
+| [Regularization scaling](known-issues/REGULARIZATION_SCALING_ISSUE.md) | Inverse solution scaling for mouse-scale head models; LCMV/DICS beamformers are not covered by the fix |
 
 ## Two rules that keep this site useful
 

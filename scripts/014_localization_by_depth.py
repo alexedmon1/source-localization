@@ -23,7 +23,7 @@ import mne
 from source_localization.config import Config
 from source_localization.steps import electrode_registration, bem_model, source_space, forward_solution
 from source_localization.validation.simulation import DipoleSimulator
-from source_localization.inverse import methods as inverse_methods
+from source_localization.steps.inverse_solution import apply_inverse_custom_sLORETA
 from source_localization.utils.shell_mapping import get_shell_metadata
 
 
@@ -127,14 +127,9 @@ def run_depth_analysis(preset_name, n_per_depth=20, snr_db=10.0):
 
             # Apply inverse
             evoked = mne.EvokedArray(eeg_data, info, tmin=0, verbose=False)
-            source_activity_norm, _, _ = inverse_methods.apply_inverse_sLORETA(
-                fwd, info, evoked=evoked, snr=3.0
-            )
+            source_magnitude, _ = apply_inverse_custom_sLORETA(fwd, evoked.data, snr=3.0, verbose=False)
 
-            # Find peak
-            n_sources_inv = source_activity_norm.shape[0] // 3
-            source_reshaped = source_activity_norm.reshape(n_sources_inv, 3, -1)
-            source_magnitude = np.linalg.norm(source_reshaped, axis=1)
+            # Find peak (magnitude already combines orientations)
             peak_idx = np.argmax(source_magnitude.mean(axis=1))
             peak_position_mm = simulator.source_positions[peak_idx]
 

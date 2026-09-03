@@ -2009,7 +2009,8 @@ class ValidationRunner:
         from source_localization.steps.inverse_solution import (
             apply_inverse_custom_dSPM,
             apply_inverse_custom_MNE,
-            apply_inverse_custom_sLORETA
+            apply_inverse_custom_sLORETA,
+            apply_inverse_custom_eLORETA,
         )
 
         method = inverse_config['method'].upper()
@@ -2032,6 +2033,9 @@ class ValidationRunner:
             source_power = magnitude
         elif method == 'SLORETA':
             magnitude, _ = apply_inverse_custom_sLORETA(fwd, eeg_data, snr, lambda2, verbose=False)
+            source_power = magnitude
+        elif method == 'ELORETA':
+            magnitude, _ = apply_inverse_custom_eLORETA(fwd, eeg_data, snr, lambda2, verbose=False)
             source_power = magnitude
         elif method == 'LCMV':
             source_power = _apply_lcmv_beamformer(epochs, fwd, inverse_config)
@@ -2239,14 +2243,11 @@ def _apply_dics_beamformer(epochs, fwd, inverse_config):
 
     stc_power, freqs_out = apply_dics_csd(csd.mean(), filters, verbose=False)
 
-    n_times = epochs.get_data().shape[-1]
-
-    if stc_power.data.ndim == 1:
-        source_power = np.tile(stc_power.data[:, np.newaxis], (1, n_times))
-    else:
-        source_power = np.tile(stc_power.data.mean(axis=1, keepdims=True), (1, n_times))
-
-    return source_power
+    # DICS yields one band-power value per source. Return it as a single
+    # sample rather than tiling it across the epoch's time axis, which made a
+    # static estimate look like a time series to everything downstream.
+    power = np.asarray(stc_power.data, dtype=float).reshape(len(stc_power.data), -1)
+    return power.mean(axis=1, keepdims=True)
 
 
 def run_validation(

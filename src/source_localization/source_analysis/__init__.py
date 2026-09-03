@@ -97,4 +97,6 @@ __all__ = [
     'VIRIDIS_BLACK_CMAP',
 ]
 
-__version__ = '0.3.0'
+# One version for the whole package. This module used to carry its own
+# ('0.3.0'), which drifted from source_localization.__version__.
+from .. import __version__  # noqa: E402

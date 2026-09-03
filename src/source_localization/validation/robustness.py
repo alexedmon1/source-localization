@@ -45,7 +45,9 @@ import mne
 
 from .noise import NOISE_TYPES
 from .simulation import DipoleSimulator
-from ..inverse.methods import apply_inverse_sLORETA, apply_inverse_MNE, apply_inverse_dSPM
+from ..steps.inverse_solution import (
+    apply_inverse_custom_sLORETA, apply_inverse_custom_MNE, apply_inverse_custom_dSPM,
+)
 
 
 __all__ = ['RobustnessTest', 'RobustnessResults']
@@ -309,17 +311,20 @@ class RobustnessTest:
         sys.stdout = io.StringIO()
 
         try:
+            # The pipeline's own implementations. These return one magnitude
+            # row per source (orientations already combined), which
+            # _find_peak_and_error handles as the n_orient == 1 case.
             if self.inverse_method == 'sloreta':
-                source_activity, _, _ = apply_inverse_sLORETA(
-                    self.fwd, self.info, evoked=evoked, snr=self.inverse_snr
+                source_activity, _ = apply_inverse_custom_sLORETA(
+                    self.fwd, evoked.data, snr=self.inverse_snr, verbose=False
                 )
             elif self.inverse_method == 'mne':
-                source_activity, _, _ = apply_inverse_MNE(
-                    self.fwd, self.info, evoked=evoked, snr=self.inverse_snr
+                source_activity, _ = apply_inverse_custom_MNE(
+                    self.fwd, evoked.data, snr=self.inverse_snr, verbose=False
                 )
             elif self.inverse_method == 'dspm':
-                source_activity, _, _ = apply_inverse_dSPM(
-                    self.fwd, self.info, evoked=evoked, snr=self.inverse_snr
+                source_activity, _ = apply_inverse_custom_dSPM(
+                    self.fwd, evoked.data, snr=self.inverse_snr, verbose=False
                 )
             else:
                 raise ValueError(f"Unknown inverse method: {self.inverse_method}")

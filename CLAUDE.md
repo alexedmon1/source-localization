@@ -51,17 +51,17 @@ python -c "import source_localization; print(source_localization.__version__)"
 ```
 Pipeline.run()
     ├── 1. electrode_registration  → MNE Info with channel positions
-    ├── 2. eeg_data               → Load EEGLAB .set, create epochs
+    ├── 2. eeg_data               → Load EEGLAB .set, reorder channels to the registration, create epochs
     ├── 3. bem_model              → Build head model (sphere or ellipsoid)
-    ├── 4. source_space           → Create source grid (volumetric/surface/ROI-based)
-    ├── 5. forward_solution       → Compute leadfield matrix G
-    ├── 6. inverse_solution       → Apply MNE/dSPM/sLORETA
+    ├── 4. source_space           → Create source grid (surface/roi_based/cartesian/shell)
+    ├── 5. forward_solution       → Compute leadfield matrix G; re-emit per-source arrays restricted to kept sources
+    ├── 6. inverse_solution       → Apply MNE/dSPM/sLORETA/eLORETA (custom) or LCMV/DICS (stock MNE)
     └── 7. roi_extraction         → Map sources to ROIs, export .set files
 
 Output: roi_timeseries_magnitude.set, roi_timeseries_signed.set (MNE/EEGLAB compatible)
 
 Optional post-processing (--spectral, --visualize flags):
-    ├── spectral_analysis         → Compute band power (theta/alpha/beta/gamma)
+    ├── spectral_analysis         → Compute band power (delta/theta/alpha/beta/low_gamma/high_gamma)
     └── visualization             → Generate plots and HTML report
 ```
 
@@ -81,15 +81,17 @@ src/source_localization/
 │   ├── sphere.py         # Analytical 3-layer sphere
 │   └── ellipsoid.py      # Numerical ellipsoid BEM
 ├── source_space/         # Source space types
-│   ├── volumetric.py     # 3D grid sources
-│   ├── surface.py        # Cortical surface mesh
-│   └── roi_based.py      # Sources per atlas ROI
-└── config/presets/       # 8 validated YAML configs
+│   ├── surface.py            # dispatch: anatomical mid-ribbon (default) or icosphere
+│   ├── surface_anatomical.py # cortical mid-ribbon cut from Allen32, fixed orientation
+│   ├── roi_based.py          # Sources per atlas ROI
+│   ├── cartesian_based.py    # 3D grid sources
+│   └── shell_based.py        # Concentric shells
+└── config/presets/       # 11 YAML presets (the CLI globs this directory)
 ```
 
 ### Configuration System
 - Presets in `src/source_localization/config/presets/*.yaml`
-- Available presets: `ellipsoid_surface` (best), `sphere_surface`, `roi_based_sphere`, `ellipsoid_volumetric`, `sphere_volumetric`
+- Available presets (11): `ellipsoid_surface` / `ellipsoid_surface_anatomical` (anatomical surface, carry Allen32), `sphere_surface` (icosphere), `roi_based_ellipsoid`, `roi_based_sphere` (sphere drops some ROI sources), `shell_ellipsoid`, `shell_ellipsoid_extended`, `shell_sphere`, `ellipsoid_cartesian`, `ellipsoid_cartesian_extended`, `sphere_cartesian`
 - Override via CLI: `--snr 5.0 --method MNE`
 - Or Python API: `Pipeline.from_preset('ellipsoid_surface', **{'inverse.snr': 5.0})`
 
@@ -97,8 +99,11 @@ src/source_localization/
 
 Atlases are declared in `src/source_localization/data/atlas/registry.yaml`, loaded
 into `config.ATLAS_DEFINITIONS`, and applied by `Config.apply_atlas(name)`, which
-overwrites the `inputs:` paths. **Presets hardcode the Antwerp paths**, so an
-atlas is only used if it is asked for explicitly.
+overwrites the `inputs:` paths. **Most presets hardcode the Antwerp paths**, so an
+atlas is only used if it is asked for explicitly. The two anatomical-surface
+presets (`ellipsoid_surface`, `ellipsoid_surface_anatomical`) carry Allen32
+instead, because the surface is cut from that parcellation; `--atlas antwerp`
+with them raises.
 
 ```bash
 python -m source_localization.cli --preset shell_ellipsoid --atlas allen ...
@@ -228,19 +233,31 @@ Two failure modes, both silent — always go through `utils/atlas.py`:
 - Ellipsoid BEM uses numerical solution (more accurate, 1.5mm localization error)
 
 ### Inverse Methods
-- `dSPM`: Noise-normalized (default, recommended)
+- `sLORETA`: Standardized low resolution (default in every preset; most robust to mouse-scale leadfields)
+- `dSPM`: Noise-normalized
 - `MNE`: Raw minimum norm
-- `sLORETA`: Standardized low resolution
+- `eLORETA`: Exact low resolution (custom, iterative)
+- `LCMV` / `DICS`: stock MNE beamformers, **not covered by the mouse-scale regularization fix**; DICS yields one power value per source and is written as CSV, and fails on the surface presets
 - Default SNR=3.0, λ²=1/9
+
+### Channel order and dropped sources (both used to be silent)
+- `steps/eeg_data.py` reorders the recording's channels to the electrode registration and refuses a file missing a registered electrode. The eeg-preprocess output stores channels as E23, E22, E30, ...; before 0.5.0 that order was multiplied straight into a leadfield ordered E1..E30. `steps/inverse_solution.py` re-checks the names against `fwd['sol']['row_names']`.
+- `mne.make_forward_solution` drops sources outside the inner skull without warning. `steps/forward_solution.py` maps the surviving `vertno` back to source-space rows and re-emits `source_coords_mm`, `n_sources`, `roi_assignments`, `kept_source_indices`; downstream steps raise on a length mismatch instead of front-slicing. `tests/test_preset_containment.py` (slow) asserts zero drops per preset and atlas; `roi_based_sphere` is a recorded expected failure.
 
 ## Validation
 
-The package includes dipole simulation validation:
+The package includes dipole simulation validation. There is no
+`validate_pipeline()`; the entry points are `run_validation` (several configs)
+and `ValidationRunner` (one config, more control):
 ```python
-from source_localization.validation import validate_pipeline
-results = validate_pipeline(pipeline_dir='./results/ellipsoid_surface', n_rois=46)
-# Returns: mean_error_mm (~1.5mm), roi_accuracy (~13%)
+from source_localization.validation import ValidationRunner
+runner = ValidationRunner(config_path='configs/ellipsoid_shell_sLORETA.yaml',
+                          output_dir='results/ellipsoid_shell_sLORETA')
+runner.setup()
+metrics = runner.run(snr_levels=[10], n_trials=25)   # localization error, ROI accuracy, depth strata
 ```
+Default runs use the same forward for simulation and inversion (inverse crime)
+with white noise, so reported numbers are best-case.
 
 ## Python API Usage
 

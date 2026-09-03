@@ -8,6 +8,49 @@ import numpy as np
 from pathlib import Path
 
 
+def align_channels_to_info(inst, info, label="EEG"):
+    """Reorder (and if necessary trim) an Epochs/Raw object to ``info``'s channel order.
+
+    The forward solution is built from the electrode-registration ``info``, so
+    its rows follow that channel order. The inverse step multiplies the
+    operator by ``epochs.get_data()`` directly, which follows the *file's*
+    channel order. Nothing used to reconcile the two, so a ``.set`` whose
+    channels were stored in a different order (the eeg-preprocess output stores
+    them E23, E22, E30, ...) silently paired every leadfield row with the wrong
+    channel's data. Positions were copied by name, so the misalignment left no
+    trace in the info either.
+
+    Raises if any registered electrode is absent from the recording. Channels
+    present in the recording but not registered are dropped, loudly.
+    """
+    wanted = list(info['ch_names'])
+    have = list(inst.ch_names)
+
+    missing = [c for c in wanted if c not in have]
+    if missing:
+        raise ValueError(
+            f"{label} recording lacks {len(missing)} registered electrode(s): "
+            f"{missing}. Recording channels: {have}. The forward solution is "
+            f"built for the registered electrodes, so the data cannot be aligned."
+        )
+
+    extra = [c for c in have if c not in wanted]
+    if extra:
+        print(f"    ⚠️  Dropping {len(extra)} channel(s) not in the electrode "
+              f"registration: {extra}")
+
+    if have != wanted:
+        if not extra:
+            print(f"    Reordering channels to match electrode registration "
+                  f"(file order started {have[:4]}..., registration order "
+                  f"starts {wanted[:4]}...)")
+        inst.reorder_channels(wanted)
+
+    if list(inst.ch_names) != wanted:
+        raise RuntimeError("channel alignment failed")  # pragma: no cover
+    return inst
+
+
 def run(config, previous_outputs):
     """
     Load EEG data and create epochs.
@@ -45,12 +88,14 @@ def run(config, previous_outputs):
         print(f"    Attempting to load as epochs...")
         epochs = mne.io.read_epochs_eeglab(str(eeg_file), verbose=False)
 
+        # Put the channels in the registration's order (the forward's row
+        # order) before anything downstream reads the data array.
+        align_channels_to_info(epochs, info)
+
         # Update channel info from electrode registration (has correct positions)
         for ch_idx, ch_name in enumerate(epochs.ch_names):
-            if ch_name in info['ch_names']:
-                # Copy electrode position from registered info
-                info_idx = info['ch_names'].index(ch_name)
-                epochs.info['chs'][ch_idx]['loc'] = info['chs'][info_idx]['loc']
+            info_idx = info['ch_names'].index(ch_name)
+            epochs.info['chs'][ch_idx]['loc'] = info['chs'][info_idx]['loc']
 
         # Set average EEG reference (required for inverse modeling)
         print(f"    Setting average EEG reference...")
@@ -71,11 +116,12 @@ def run(config, previous_outputs):
         try:
             raw = mne.io.read_raw_eeglab(str(eeg_file), preload=True, verbose=False)
 
+            align_channels_to_info(raw, info)
+
             # Update channel info from electrode registration
             for ch_idx, ch_name in enumerate(raw.ch_names):
-                if ch_name in info['ch_names']:
-                    info_idx = info['ch_names'].index(ch_name)
-                    raw.info['chs'][ch_idx]['loc'] = info['chs'][info_idx]['loc']
+                info_idx = info['ch_names'].index(ch_name)
+                raw.info['chs'][ch_idx]['loc'] = info['chs'][info_idx]['loc']
 
             # Set average EEG reference (required for inverse modeling)
             print(f"    Setting average EEG reference...")

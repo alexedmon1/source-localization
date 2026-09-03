@@ -15,8 +15,14 @@ pipeline:
 
 inputs:
   brain_volume: "data/atlas/Atlas_3DRois.nii"
-  brain_labels: "data/atlas/Atlas_3DRoisLeftRight.Labels.nii"
-  roi_mapping: "data/atlas/roi_mapping.json"
+  # The anatomical mid-ribbon surface is cut from the Allen32 parcellation and
+  # carries Allen32 parcel ids, so this preset's labels are Allen32 rather than
+  # the Antwerp default the other presets declare. With Antwerp labels the
+  # surface builder refused (its `categories` do not exist in that mapping)
+  # and the README Quick Start crashed. `--atlas allen64` also works;
+  # `--atlas antwerp` does not and says so.
+  brain_labels: "data/atlas/allen/allen_labels.nii.gz"
+  roi_mapping: "data/atlas/allen/roi_mapping.json"
   electrodes_csv: "data/electrodes/mouse_array_coords.csv"
   eeg_file: null
 
@@ -107,3 +113,6 @@ outputs:
   # being something a study has to remember. Set to "both" if a downstream
   # analysis genuinely wants rectified amplitudes.
   output_variants: "signed"
+
+provenance:
+  atlas: allen32

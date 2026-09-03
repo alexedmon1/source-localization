@@ -190,10 +190,29 @@ Both `inverse/methods.py` and `steps/inverse_solution.py` now have:
 2. sLORETA remains the best method (48.0% vs 26.8% for dSPM)
 3. The performance gap is due to sLORETA's inherently scale-invariant normalization
 
+## Beamformers are not covered by the fix
+
+The trace-scaled regularization above is applied only by the package's own
+MNE, dSPM, sLORETA and eLORETA implementations in
+`steps/inverse_solution.py`. `LCMV` and `DICS` call `mne.beamformer.make_lcmv`
+and `make_dics` directly with a bare fractional `reg` (default 0.05), which
+MNE interprets relative to a human-scale covariance. Nothing has been measured
+for them at mouse scale, so their output should be treated as unvalidated.
+
+DICS additionally produces one band-power value per source rather than a time
+series. Until 0.5.0 that value was tiled across the epoch's time axis and
+exported as if it were a signal; it is now exported as a single sample.
+DICS also fails outright on the surface presets (`sphere_surface`,
+`ellipsoid_surface`): `mne.beamformer.apply_dics_csd` cannot build a source
+estimate for their source-space layout ("Vertices must be a list of numpy
+arrays with one array per source space"). It runs on the shell, cartesian
+and ROI-based presets.
+
 ## Recommendations
 
 1. **Use sLORETA** for mouse EEG source localization - it is inherently robust to leadfield scaling
 2. **Apply auto-scaling** if using MNE or dSPM methods
+2a. **Do not rely on LCMV or DICS** without validating their regularization at mouse scale
 3. **Verify regularization ratio** when adapting pipelines to new species/geometries
 4. **Check leadfield magnitude** - values ~10^3 V/(A·m) are physically correct for mouse scale
 

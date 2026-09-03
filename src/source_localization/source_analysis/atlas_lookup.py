@@ -16,7 +16,10 @@ Date: 2026-01-26
 """
 
 import numpy as np
+import warnings
+
 import nibabel as nib
+from ..utils.atlas import get_true_affine
 from scipy.spatial import cKDTree
 from scipy.ndimage import distance_transform_edt
 from typing import Tuple, Optional, Dict, List, Any, Union
@@ -26,6 +29,25 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _true_affine(nii, apply_10x_correction=None):
+    """Voxel-to-mm affine with the file's convention detected, not assumed.
+
+    This module used to scale ``affine[:3, :3]`` by 1/10 unconditionally. That
+    is wrong twice over: it leaves the translation at 10x (so the volume lands
+    nowhere near the sources), and it is applied to files that are already in
+    true units (every current Allen label file and Antwerp's Labels file),
+    shrinking them a further 10x. ``get_true_affine`` inspects the header and
+    corrects only the inflated files, translation included.
+    """
+    if apply_10x_correction is not None:
+        warnings.warn(
+            "apply_10x_correction is deprecated and ignored; the affine "
+            "convention is detected from the file header",
+            DeprecationWarning, stacklevel=3,
+        )
+    return get_true_affine(nii).copy()
 
 
 @dataclass
@@ -68,7 +90,7 @@ class AtlasLookup:
         self,
         atlas_path: str,
         roi_mapping_path: Optional[str] = None,
-        apply_10x_correction: bool = True
+        apply_10x_correction: Optional[bool] = None
     ):
         """
         Initialize atlas lookup.
@@ -76,19 +98,15 @@ class AtlasLookup:
         Args:
             atlas_path: Path to atlas NIfTI file
             roi_mapping_path: Optional path to ROI mapping JSON file
-            apply_10x_correction: Apply 10x voxel size correction for mouse atlas
+            apply_10x_correction: Deprecated and ignored. The affine convention is
+            detected per file by utils.atlas.get_true_affine()
         """
         logger.info(f"Loading atlas from {atlas_path}")
 
         # Load atlas
         nii = nib.load(atlas_path)
         self.atlas_data = np.asarray(nii.dataobj)
-        self.affine = nii.affine.copy()
-
-        # Apply 10x correction for mouse atlas
-        if apply_10x_correction:
-            logger.info("Applying 10x voxel size correction")
-            self.affine[:3, :3] /= 10.0
+        self.affine = _true_affine(nii, apply_10x_correction)
 
         # Compute inverse affine for mm-to-voxel
         self.affine_inv = np.linalg.inv(self.affine)

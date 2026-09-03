@@ -62,7 +62,7 @@ def analyze_subject(
 
     Args:
         subject_dir: Path to subject output directory (contains roi_timeseries/)
-        bands: Dict of band_name -> (fmin, fmax). Default: delta, theta, alpha, beta, gamma
+        bands: Dict of band_name -> (fmin, fmax). Default: delta, theta, alpha, beta, low_gamma, high_gamma
         connectivity_methods: List of methods: 'coherence', 'plv', 'wpli', 'imcoh'
         connectivity_bands: Which bands to compute connectivity for (default: all)
         overwrite: Overwrite existing analysis files
@@ -96,6 +96,12 @@ def analyze_subject(
     bands = bands or DEFAULT_BANDS
     connectivity_methods = connectivity_methods or DEFAULT_CONNECTIVITY_METHODS
     connectivity_bands = connectivity_bands or list(bands.keys())
+    unknown = [b for b in connectivity_bands if b not in bands]
+    if unknown:
+        raise ValueError(
+            f"connectivity_bands {unknown} are not in bands {list(bands)}. "
+            f"Note DEFAULT_BANDS splits gamma into low_gamma and high_gamma."
+        )
 
     results = {}
 

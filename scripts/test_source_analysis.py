@@ -106,8 +106,7 @@ def main():
     cortical_src = CorticalSourceSpace.from_atlas(
         str(atlas_path),
         max_depth_mm=args.max_depth,
-        spacing_mm=0.5,
-        apply_10x_correction=True
+        spacing_mm=0.5
     )
 
     print(f"  - Cortical sources: {cortical_src.n_sources}")
@@ -187,8 +186,7 @@ def main():
 
     atlas = AtlasLookup(
         str(atlas_path.parent / 'Atlas_3DRois.nii'),
-        roi_mapping_path=str(roi_mapping_path),
-        apply_10x_correction=True
+        roi_mapping_path=str(roi_mapping_path)
     )
 
     # Label peaks
