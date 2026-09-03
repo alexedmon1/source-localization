@@ -47,8 +47,7 @@ jobs:
           path: ~/.cache/source-localization/surfaces
           key: surfaces-${{ hashFiles('src/source_localization/source_space/surface_anatomical.py', 'src/source_localization/data/atlas/allen/allen_labels.nii.gz') }}
       - name: Install
-        run: |
-          uv venv
-          uv pip install -e ".[dev]"
+        # setup-uv already created and activated .venv for the matrix Python.
+        run: uv pip install -e ".[dev]"
       - name: Test
         run: uv run --no-sync pytest tests -m "not slow" -q --deselect tests/test_psd_sanity.py
