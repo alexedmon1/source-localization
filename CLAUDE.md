@@ -51,10 +51,10 @@ python -c "import source_localization; print(source_localization.__version__)"
 ```
 Pipeline.run()
     ├── 1. electrode_registration  → MNE Info with channel positions
-    ├── 2. eeg_data               → Load EEGLAB .set, create epochs
+    ├── 2. eeg_data               → Load EEGLAB .set, reorder channels to the registration, create epochs
     ├── 3. bem_model              → Build head model (sphere or ellipsoid)
-    ├── 4. source_space           → Create source grid (volumetric/surface/ROI-based)
-    ├── 5. forward_solution       → Compute leadfield matrix G
+    ├── 4. source_space           → Create source grid (surface/roi_based/cartesian/shell)
+    ├── 5. forward_solution       → Compute leadfield matrix G; re-emit per-source arrays restricted to kept sources
     ├── 6. inverse_solution       → Apply MNE/dSPM/sLORETA
     └── 7. roi_extraction         → Map sources to ROIs, export .set files
 
@@ -81,15 +81,17 @@ src/source_localization/
 │   ├── sphere.py         # Analytical 3-layer sphere
 │   └── ellipsoid.py      # Numerical ellipsoid BEM
 ├── source_space/         # Source space types
-│   ├── volumetric.py     # 3D grid sources
-│   ├── surface.py        # Cortical surface mesh
-│   └── roi_based.py      # Sources per atlas ROI
-└── config/presets/       # 8 validated YAML configs
+│   ├── surface.py            # dispatch: anatomical mid-ribbon (default) or icosphere
+│   ├── surface_anatomical.py # cortical mid-ribbon cut from Allen32, fixed orientation
+│   ├── roi_based.py          # Sources per atlas ROI
+│   ├── cartesian_based.py    # 3D grid sources
+│   └── shell_based.py        # Concentric shells
+└── config/presets/       # 11 YAML presets (the CLI globs this directory)
 ```
 
 ### Configuration System
 - Presets in `src/source_localization/config/presets/*.yaml`
-- Available presets: `ellipsoid_surface` (best), `sphere_surface`, `roi_based_sphere`, `ellipsoid_volumetric`, `sphere_volumetric`
+- Available presets (11): `ellipsoid_surface` / `ellipsoid_surface_anatomical` (anatomical surface, carry Allen32), `sphere_surface` (icosphere), `roi_based_ellipsoid`, `roi_based_sphere` (sphere drops some ROI sources), `shell_ellipsoid`, `shell_ellipsoid_extended`, `shell_sphere`, `ellipsoid_cartesian`, `ellipsoid_cartesian_extended`, `sphere_cartesian`
 - Override via CLI: `--snr 5.0 --method MNE`
 - Or Python API: `Pipeline.from_preset('ellipsoid_surface', **{'inverse.snr': 5.0})`
 
@@ -97,8 +99,11 @@ src/source_localization/
 
 Atlases are declared in `src/source_localization/data/atlas/registry.yaml`, loaded
 into `config.ATLAS_DEFINITIONS`, and applied by `Config.apply_atlas(name)`, which
-overwrites the `inputs:` paths. **Presets hardcode the Antwerp paths**, so an
-atlas is only used if it is asked for explicitly.
+overwrites the `inputs:` paths. **Most presets hardcode the Antwerp paths**, so an
+atlas is only used if it is asked for explicitly. The two anatomical-surface
+presets (`ellipsoid_surface`, `ellipsoid_surface_anatomical`) carry Allen32
+instead, because the surface is cut from that parcellation; `--atlas antwerp`
+with them raises.
 
 ```bash
 python -m source_localization.cli --preset shell_ellipsoid --atlas allen ...
