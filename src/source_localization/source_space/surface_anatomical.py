@@ -175,8 +175,12 @@ def build_depth_field(iso_mm=DEFAULT_ISO_MM, close_holes=0,
     unknown = [c for c in categories if c not in mapping["categories"]]
     if unknown:
         raise ValueError(
-            f"unknown categories {unknown} for {mapping_path.name}; available: "
-            f"{sorted(mapping['categories'])}"
+            f"The anatomical surface is built from a parcellation whose "
+            f"roi_mapping.json defines categories {list(categories)}, but "
+            f"{mapping_path.name} (from the selected atlas) defines only "
+            f"{sorted(mapping['categories'])}; unknown: {unknown}. This "
+            f"surface is an Allen32 product: select `--atlas allen32` (or "
+            f"another Allen atlas), or use a non-surface preset with this atlas."
         )
     cortical_ids = [i for c in categories for i in mapping["categories"][c]]
 

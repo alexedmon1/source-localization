@@ -901,6 +901,24 @@ def apply_inverse_DICS(fwd, epochs, info, freq_band=(30, 55), reg=0.05, weight_n
     return magnitude, signed, stc
 
 
+def _check_channel_alignment(fwd, epochs):
+    """Refuse to apply an operator whose channel order differs from the data's."""
+    fwd_names = list(fwd['sol']['row_names'])
+    data_names = list(epochs.ch_names)
+    if fwd_names != data_names:
+        if sorted(fwd_names) == sorted(data_names):
+            hint = "same channels, different order"
+        else:
+            hint = (f"missing from data: {sorted(set(fwd_names) - set(data_names))}; "
+                    f"extra in data: {sorted(set(data_names) - set(fwd_names))}")
+        raise ValueError(
+            f"Forward channel order does not match the EEG data ({hint}). "
+            f"Forward: {fwd_names[:5]}...; data: {data_names[:5]}.... "
+            f"steps/eeg_data.py should have aligned them; applying the "
+            f"operator anyway would pair leadfield rows with the wrong channels."
+        )
+
+
 def run(config, previous_outputs):
     """
     Compute inverse solution.
@@ -1031,6 +1049,12 @@ def run(config, previous_outputs):
         # (10,440 instead of 3,480) and the epoch reshape then fails.
         n_sources = W.shape[0] // n_comp
 
+        # The operator's columns follow the forward's row order; the data array
+        # follows the epochs' channel order. They are reconciled in the EEG
+        # step, but this is where a mismatch would do silent damage, so refuse
+        # here rather than trust that it happened.
+        _check_channel_alignment(fwd, epochs)
+
         # Get epochs data
         epochs_data = epochs.get_data()  # (n_epochs, n_channels, n_times)
         n_epochs, n_channels, n_times_per_epoch = epochs_data.shape
@@ -1119,12 +1143,19 @@ def run(config, previous_outputs):
 
         # Export source-level .set files for parametric mapping
         # Each source becomes a "channel" with its 3D coordinates
+        # The forward step re-emits `source_coords_mm` restricted to the
+        # sources MNE kept, so the two must agree exactly. They used to be
+        # reconciled by front-slicing, which pairs every row after the first
+        # dropped source with the wrong coordinate.
         source_coords_mm = previous_outputs['source_coords_mm']
-        # Handle source count mismatch
         if len(stc_magnitude.data) != len(source_coords_mm):
-            source_coords_mm_export = source_coords_mm[:len(stc_magnitude.data)]
-        else:
-            source_coords_mm_export = source_coords_mm
+            raise ValueError(
+                f"Source count mismatch: the inverse produced "
+                f"{len(stc_magnitude.data):,} sources but source_coords_mm has "
+                f"{len(source_coords_mm):,}. The forward step should have "
+                f"filtered the coordinates to the sources it kept."
+            )
+        source_coords_mm_export = source_coords_mm
 
         from ..utils.export_set import export_source_to_set
         sfreq = stc_magnitude.sfreq if hasattr(stc_magnitude, 'sfreq') else previous_outputs.get('sfreq', 500.0)

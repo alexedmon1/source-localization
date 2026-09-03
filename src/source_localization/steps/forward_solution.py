@@ -118,14 +118,45 @@ def run(config, previous_outputs):
     # (parcel assignments, per-vertex normals) is silently misaligned when this
     # happens, so it is worth saying loudly.
     n_requested = int(sum(s['nuse'] for s in src))
+    kept = kept_source_indices(src, fwd['src'])
+    if len(kept) != n_sources:  # pragma: no cover - MNE invariant
+        raise RuntimeError(
+            f"forward has {n_sources} sources but its source space lists "
+            f"{len(kept)} in-use vertices"
+        )
+
+    # Re-emit every per-source array restricted to the sources MNE kept, in
+    # forward column order. Downstream steps (inverse export, ROI extraction)
+    # index these by STC row, and until this existed they truncated from the
+    # front instead, which assigns every row after the first dropped source to
+    # the wrong coordinate and parcel.
+    source_coords_mm = np.asarray(previous_outputs['source_coords_mm'])
+    if len(source_coords_mm) != n_requested:
+        raise ValueError(
+            f"source_coords_mm has {len(source_coords_mm)} rows but the source "
+            f"space has {n_requested} in-use vertices"
+        )
+    source_coords_kept = source_coords_mm[kept]
+
+    roi_assignments = None
+    if len(src) > 0 and src[0].get('roi_assignments') is not None:
+        roi_assignments = np.asarray(src[0]['roi_assignments'])
+        if len(roi_assignments) != n_requested:
+            raise ValueError(
+                f"roi_assignments has {len(roi_assignments)} entries but the "
+                f"source space has {n_requested} in-use vertices"
+            )
+        roi_assignments = roi_assignments[kept]
+
     if n_sources < n_requested:
         dropped = n_requested - n_sources
         print(f"    ⚠️  BEM CONTAINMENT: {dropped:,} of {n_requested:,} sources "
               f"({dropped / n_requested:.1%}) fall outside the inner skull and "
               f"were dropped from the forward.")
-        print(f"        The source space and the forward now disagree. Either "
-              f"the conductor is too small for this source space, or the source "
-              f"space extends beyond the brain.")
+        print(f"        Either the conductor is too small for this source space, "
+              f"or the source space extends beyond the brain. Source "
+              f"coordinates and parcel assignments have been restricted to the "
+              f"{n_sources:,} sources the forward kept.")
 
     # Save intermediate data and create visualizations
     if config['outputs'].get('save_intermediate', True):
@@ -146,5 +177,43 @@ def run(config, previous_outputs):
         plt.close(fig)
 
     return {
-        'fwd': fwd
+        'fwd': fwd,
+        # Per-source arrays aligned with the forward's columns. These override
+        # the source-space step's versions in `previous_outputs`.
+        'source_coords_mm': source_coords_kept,
+        'n_sources': int(n_sources),
+        'roi_assignments': roi_assignments,
+        'kept_source_indices': kept,
     }
+
+
+def kept_source_indices(src_before, src_after):
+    """Row indices (into the pre-forward source arrays) of the sources a forward kept.
+
+    ``mne.make_forward_solution`` discards sources outside the inner skull and
+    records the survivors only in ``fwd['src'][i]['vertno']``. Per-source
+    arrays built by the source-space step are ordered entry by entry, each in
+    ``vertno`` order, so the position of each surviving vertex in the original
+    entry's ``vertno`` (plus the entry offset) is its row in those arrays.
+    """
+    idx = []
+    offset = 0
+    for before, after in zip(src_before, src_after):
+        before_v = np.asarray(before['vertno'])
+        after_v = np.asarray(after['vertno'])
+        pos = {int(v): i for i, v in enumerate(before_v)}
+        try:
+            rows = np.array([pos[int(v)] for v in after_v], dtype=int)
+        except KeyError as e:
+            raise ValueError(
+                f"forward source space lists vertex {e} that the input source "
+                f"space does not have"
+            ) from None
+        idx.append(offset + rows)
+        offset += len(before_v)
+    if len(src_before) != len(src_after):
+        raise ValueError(
+            f"source space has {len(src_before)} entries, forward's has "
+            f"{len(src_after)}"
+        )
+    return np.concatenate(idx) if idx else np.zeros(0, dtype=int)
