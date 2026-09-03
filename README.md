@@ -2,7 +2,7 @@
 
 **Created:** 2025-11-26
 **Last Updated:** 2026-09-03
-**Version:** 0.5.0
+**Version:** 0.5.1
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -155,7 +155,7 @@ Release tags used by published work:
 | `v0.4.1` | corrected brain mask — sources are placed inside the brain rather than the meningeal rim |
 | `v0.4.2` | v0.4.1 plus the same packaging fix. Install this; cite v0.4.1 |
 
-Note that versions before 0.5.0 did not reorder EEG channels to match the
+Note that versions before 0.5.1 did not reorder EEG channels to match the
 electrode registration. Recordings stored in a channel order other than
 E1..E30 were silently misaligned with the leadfield. Check
 `epochs.ch_names` on your input files before relying on an older tag.
@@ -374,7 +374,7 @@ of truth for every setting; the CLI lists them under `--preset`.
 
 "Extended" ellipsoids shift the centre anteriorly and lengthen the Y semi-axis
 so the olfactory bulbs fall inside the conductor. Without that, MNE drops
-bulb sources from the forward. Since 0.5.0 the forward step reports any dropped
+bulb sources from the forward. Since 0.5.1 the forward step reports any dropped
 sources and restricts every per-source array to the survivors, so a drop can no
 longer misalign downstream indexing, but it still discards anatomy.
 
@@ -862,20 +862,28 @@ source_localization/
 
 ## History
 
-The package version is `0.5.0`. Earlier revisions of this README carried a
+The package version is `0.5.1`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
 
+Notable changes in 0.5.1 (`v0.5.1`):
+
+- EEG channels reordered to the electrode registration; the inverse refuses a
+  mismatched order. Runs on files stored in a non-E1..E30 order before this
+  release were silently misaligned
+- Forward step restricts per-source arrays to the sources MNE kept, instead of
+  downstream steps front-slicing them
+- Anatomical-surface presets carry the Allen32 atlas
+- DICS written as power tables; eLORETA in the validation runner; unknown
+  band names are errors; `source_analysis` reads affines through `utils.atlas`
+- README rebuilt from the code and tested against it
+
 Notable changes in 0.5.0:
 
 - Anatomical cortical mid-ribbon surface source space with fixed orientation
 - Atlas registry (`registry.yaml`) driving both CLIs; `allen26` added
-- EEG channels reordered to the electrode registration; the inverse refuses a
-  mismatched order
-- Forward step restricts per-source arrays to the sources MNE kept
-- Anatomical-surface presets carry the Allen32 atlas
 - Monte Carlo ROI operator
 
 ---
