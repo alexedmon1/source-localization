@@ -200,7 +200,7 @@ MNE interprets relative to a human-scale covariance. Nothing has been measured
 for them at mouse scale, so their output should be treated as unvalidated.
 
 DICS additionally produces one band-power value per source rather than a time
-series. Until 0.5.0 that value was tiled across the epoch's time axis and
+series. Until 0.5.1 that value was tiled across the epoch's time axis and
 exported as if it were a signal; it is now exported as a single sample.
 DICS also fails outright on the surface presets (`sphere_surface`,
 `ellipsoid_surface`): `mne.beamformer.apply_dics_csd` cannot build a source

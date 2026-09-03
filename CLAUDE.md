@@ -241,7 +241,7 @@ Two failure modes, both silent — always go through `utils/atlas.py`:
 - Default SNR=3.0, λ²=1/9
 
 ### Channel order and dropped sources (both used to be silent)
-- `steps/eeg_data.py` reorders the recording's channels to the electrode registration and refuses a file missing a registered electrode. The eeg-preprocess output stores channels as E23, E22, E30, ...; before 0.5.0 that order was multiplied straight into a leadfield ordered E1..E30. `steps/inverse_solution.py` re-checks the names against `fwd['sol']['row_names']`.
+- `steps/eeg_data.py` reorders the recording's channels to the electrode registration and refuses a file missing a registered electrode. The eeg-preprocess output stores channels as E23, E22, E30, ...; before 0.5.1 that order was multiplied straight into a leadfield ordered E1..E30. `steps/inverse_solution.py` re-checks the names against `fwd['sol']['row_names']`.
 - `mne.make_forward_solution` drops sources outside the inner skull without warning. `steps/forward_solution.py` maps the surviving `vertno` back to source-space rows and re-emits `source_coords_mm`, `n_sources`, `roi_assignments`, `kept_source_indices`; downstream steps raise on a length mismatch instead of front-slicing. `tests/test_preset_containment.py` (slow) asserts zero drops per preset and atlas; `roi_based_sphere` is a recorded expected failure.
 
 ## Validation
