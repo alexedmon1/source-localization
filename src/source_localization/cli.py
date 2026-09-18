@@ -7,6 +7,14 @@ from pathlib import Path
 
 from .pipeline import Pipeline
 from .config import Config, ATLAS_DEFINITIONS
+from .methods import (
+    BEM_TYPES,
+    INVERSE_METHODS,
+    SAMPLING_MODES,
+    SOURCE_SPACES,
+    choices,
+    default_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +105,18 @@ Examples:
     # Optional overrides
     parser.add_argument('--output', '-o', help='Output directory')
     parser.add_argument('--snr', type=float, help='SNR for inverse solution')
-    parser.add_argument('--method', choices=['MNE', 'dSPM', 'sLORETA'], help='Inverse method')
+    # Choices come from methods.py, which tests check against the dispatcher in
+    # steps/inverse_solution.py. The hand-written list here offered three of the
+    # six the pipeline accepts, so eLORETA, LCMV and DICS were unreachable.
+    parser.add_argument('--method', choices=choices(INVERSE_METHODS),
+                        help='Inverse method (default: %s). See `source-localization list`'
+                             % default_of(INVERSE_METHODS))
     parser.add_argument('--spacing', type=float, help='Source spacing in mm')
+    parser.add_argument('--source-sampling', choices=choices(SAMPLING_MODES),
+                        help="How sources are placed (default: %s). 'monte_carlo' "
+                             "averages the ROI operator over many sparse draws and "
+                             "produces ROI output only"
+                             % default_of(SAMPLING_MODES))
 
     # Optional post-processing flags
     parser.add_argument('--spectral', action='store_true',
@@ -146,6 +164,8 @@ def _run_pipeline(args):
         overrides['inverse.method'] = args.method
     if args.spacing:
         overrides['source_space.spacing_mm'] = args.spacing
+    if getattr(args, 'source_sampling', None):
+        overrides['source_space.source_sampling'] = args.source_sampling
 
     # BEM caching overrides
     if args.recreate_bem:
@@ -543,6 +563,124 @@ def _run_study_command(args):
         return 1
 
 
+
+def _create_list_parser(subparsers):
+    """Create parser for the 'list' command."""
+    parser = subparsers.add_parser(
+        'list',
+        help='List what this install can run: presets, methods, atlases',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+A pipeline is four independent choices plus an atlas:
+
+  BEM  x  source space  x  sampling  x  inverse method     (+ --atlas)
+
+A preset is one named bundle of them. Everything below is read from the package
+itself -- presets from config/presets/, methods from methods.py, atlases from
+data/atlas/registry.yaml -- so this listing cannot drift from what is selectable.
+
+Examples:
+  source-localization list
+  source-localization list --presets
+  source-localization list --atlases
+"""
+    )
+    parser.add_argument('--presets', action='store_true',
+                        help='Only the presets')
+    parser.add_argument('--methods', action='store_true',
+                        help='Only the BEM / source space / sampling / inverse choices')
+    parser.add_argument('--atlases', action='store_true',
+                        help='Only the atlas parcellations')
+    return parser
+
+
+def _print_method_group(title, options, key_width=14, width=78):
+    """One block of the methods listing, wrapped to a terminal."""
+    import textwrap
+
+    indent = ' ' * (key_width + 5)
+    print(f"{title}:")
+    for m in options.values():
+        tag = '  [default]' if m.default else ''
+        print(f"  {m.name:<{key_width}s} {m.summary}{tag}")
+        for prefix, text in (('  ', m.detail), ('! ', m.caveat)):
+            if not text:
+                continue
+            print(textwrap.fill(text, width=width, initial_indent=indent + prefix,
+                                subsequent_indent=indent + '  '))
+    print()
+
+
+def _print_presets():
+    """Presets, with the choices each one resolves to."""
+    import yaml
+
+    presets_dir = Path(__file__).parent / 'config' / 'presets'
+    print("Presets (--preset):\n")
+    print(f"  {'name':<32s} {'BEM':<10s} {'source space':<19s} {'inverse':<9s} atlas")
+    for path in sorted(presets_dir.glob('*.yaml')):
+        try:
+            cfg = yaml.safe_load(path.read_text()) or {}
+        except Exception:
+            continue
+        pipe = cfg.get('pipeline') or {}
+        inv = cfg.get('inverse') or {}
+        src = cfg.get('source_space') or {}
+        labels = ((cfg.get('inputs') or {}).get('brain_labels') or '')
+        atlas = 'allen32' if 'allen_labels.nii' in labels else (
+            'allen64' if 'allen64' in labels else
+            'allen26' if 'allen26' in labels else
+            'antwerp' if 'Atlas_3DRois' in labels else '-')
+        method = (src.get('surface') or {}).get('method')
+        space = pipe.get('source_type', '?') + (f"/{method}" if method else '')
+        print(f"  {path.stem:<32s} {pipe.get('bem_type', '?'):<10s} "
+              f"{space:<19s} {inv.get('method', '?'):<9s} {atlas}")
+    print("\n  Override any of them: --snr, --method, --spacing, --source-sampling,")
+    print("  --atlas. The two anatomical-surface presets carry Allen32 and reject")
+    print("  --atlas antwerp, because the surface is cut from that parcellation.\n")
+
+
+def _print_atlases():
+    """Atlases, from the registry that also decides what --atlas accepts."""
+    print("Atlas parcellations (--atlas):\n")
+    print(f"  {'name':<10s} {'parcels':>7s} {'coverage':>9s}  notes")
+    for name in sorted(ATLAS_DEFINITIONS):
+        meta = ATLAS_DEFINITIONS[name].get('meta', {}) or {}
+        parcels = meta.get('parcels')
+        coverage = meta.get('brain_mask_coverage_pct')
+        notes = []
+        if meta.get('alias_of'):
+            notes.append(f"same files as {meta['alias_of']}")
+        if meta.get('derived_from'):
+            notes.append(f"derived from {meta['derived_from']}")
+        if meta.get('bilateral_parcels'):
+            notes.append(f"{meta['bilateral_parcels']} bilateral pairs merged")
+        print(f"  {name:<10s} {parcels if parcels is not None else '?':>7} "
+              f"{(f'{coverage}%' if coverage is not None else '?'):>9s}  "
+              f"{', '.join(notes)}")
+    print("\n  Prefer allen32 for any per-ROI claim: it tiles grey matter, so")
+    print("  nearest-label assignment is a sub-voxel nudge. Antwerp labels ~31% of")
+    print("  the brain, and can move a source up to 2.6 mm to reach a label.\n")
+
+
+def _run_list_command(args):
+    """Print the method vocabulary."""
+    want = {k for k in ('presets', 'methods', 'atlases') if getattr(args, k, False)}
+    if not want:
+        want = {'presets', 'methods', 'atlases'}
+
+    if 'presets' in want:
+        _print_presets()
+    if 'methods' in want:
+        _print_method_group('Head models (pipeline.bem_type)', BEM_TYPES)
+        _print_method_group('Source spaces (pipeline.source_type)', SOURCE_SPACES)
+        _print_method_group('Source sampling (--source-sampling)', SAMPLING_MODES)
+        _print_method_group('Inverse methods (--method)', INVERSE_METHODS)
+    if 'atlases' in want:
+        _print_atlases()
+    return 0
+
+
 def main():
     """Main CLI entry point."""
     # Check if called with old-style arguments (no subcommand)
@@ -565,6 +703,7 @@ def main():
         epilog='''
 Commands:
   run         Run the source localization pipeline on EEG data
+  list        List the presets, methods and atlases this install offers
   validate    Run validation tests (dipole simulation)
   study       Process multi-subject studies
 
@@ -583,6 +722,7 @@ For backwards compatibility, you can also run:
 
     # Add subcommands
     _create_run_parser(subparsers)
+    _create_list_parser(subparsers)
     _create_validate_parser(subparsers)
     _create_study_parser(subparsers)
 
@@ -595,6 +735,9 @@ For backwards compatibility, you can also run:
 
     if args.command == 'run':
         return _run_pipeline(args)
+
+    elif args.command == 'list':
+        return _run_list_command(args)
 
     elif args.command == 'validate':
         from .validation.cli import run_validation_cli

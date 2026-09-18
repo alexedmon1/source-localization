@@ -60,6 +60,10 @@ Pipeline.run()
 
 Output: roi_timeseries_magnitude.set, roi_timeseries_signed.set (MNE/EEGLAB compatible)
 
+Under `source_space.source_sampling: monte_carlo`, steps 6 and 7 are replaced by
+one `monte_carlo_roi` step, which writes signed ROI output only. See "Source
+sampling" below.
+
 Optional post-processing (--spectral, --visualize flags):
     ├── spectral_analysis         → Compute band power (delta/theta/alpha/beta/low_gamma/high_gamma)
     └── visualization             → Generate plots and HTML report
@@ -92,7 +96,12 @@ src/source_localization/
 ### Configuration System
 - Presets in `src/source_localization/config/presets/*.yaml`
 - Available presets (11): `ellipsoid_surface` / `ellipsoid_surface_anatomical` (anatomical surface, carry Allen32), `sphere_surface` (icosphere), `roi_based_ellipsoid`, `roi_based_sphere` (sphere drops some ROI sources), `shell_ellipsoid`, `shell_ellipsoid_extended`, `shell_sphere`, `ellipsoid_cartesian`, `ellipsoid_cartesian_extended`, `sphere_cartesian`
-- Override via CLI: `--snr 5.0 --method MNE`
+- Override via CLI: `--snr 5.0 --method MNE --source-sampling monte_carlo`
+- **`source-localization list` prints all of it** — every preset and what it
+  resolves to, the four method choices, and the atlases. Built from
+  `config/presets/`, `methods.py` and `registry.yaml`; `tests/test_methods.py`
+  asserts it against the dispatchers, so it cannot drift. `--presets`,
+  `--methods`, `--atlases` narrow it.
 - Or Python API: `Pipeline.from_preset('ellipsoid_surface', **{'inverse.snr': 5.0})`
 
 ### Atlas Selection
@@ -117,7 +126,9 @@ Pipeline.from_preset('shell_ellipsoid', atlas='allen32')   # API reaches all key
 | `antwerp` | `Atlas_3DRoisLeftRight.Labels.nii` | 46 + background | Default. Named structures only |
 | `allen` | `allen/allen_labels.nii.gz` | 32 + background | **Identical to `allen32`** — same files |
 | `allen32` | `allen/allen_labels.nii.gz` | 32 + background | 16 per hemisphere, `1-16 = L`, `17-32 = R` |
+| `allen26` | `allen/allen26_labels.nii.gz` | 26 + background | Allen32 with the 6 bilateral pairs the MEA30 montage cannot separate merged (\|cos\| ≥ 0.99); 10 separable pairs stay lateralized |
 | `allen64` | `allen/allen_labels_allen64.nii.gz` | 64 + background | 32 per hemisphere |
+| `coarse22` | `coarse_parcellation/coarse_22roi_atlas.nii` | 22 + background | Antwerp regrouping. **10×-inflated header** |
 
 Each registry entry is `inputs:` (the file paths, copied into the pipeline
 config) plus `meta:` (parcel count, coverage, tier scheme — descriptive only,
@@ -239,6 +250,62 @@ Two failure modes, both silent — always go through `utils/atlas.py`:
 - `eLORETA`: Exact low resolution (custom, iterative)
 - `LCMV` / `DICS`: stock MNE beamformers, **not covered by the mouse-scale regularization fix**; DICS yields one power value per source and is written as CSV, and fails on the surface presets
 - Default SNR=3.0, λ²=1/9
+
+**`methods.py` is the single source of truth** for the inverse methods, BEM
+types, source spaces and sampling modes. `--method` offered three of the six the
+pipeline accepts for several releases because the choices were written out by
+hand; they now come from there, and `tests/test_methods.py` checks each name
+against the dispatcher that has to accept it.
+
+### Source sampling: one grid, or an average over many
+
+`source_space.source_sampling` is `fixed` (default) or `monte_carlo`. Full
+treatment in `docs/guides/monte_carlo_sampling.md`.
+
+A deployed source grid is **one arbitrary placement** of a continuous current
+distribution, and its phase is not anatomical — the Cartesian grid is anchored to
+voxel 0 of the volume array, a bounding-box corner. Sweeping that offset across
+one cell moves coverage between 29 and 32 parcels. `monte_carlo` integrates over
+placement instead: draw K sparse configurations from a dense pool and average the
+ROI operators they induce.
+
+```yaml
+source_space:
+  source_sampling: monte_carlo
+  monte_carlo:
+    n_sources: 160        # per draw
+    n_draws: 100          # K; converged by 100
+    seed: 20260821
+    pool_spacing_mm: 0.20 # surface/cartesian pool density
+    pool_n_shells: 24     # shell pool density
+    pool_points_per_shell: 1200
+```
+
+It is nearly free: the parcel series is linear in the sensor data, so averaging K
+time series equals averaging K operators and applying once. Nothing per-draw is
+materialised, and the operator depends only on (montage, BEM, source pool) — not
+the recording — so it is computed once and reused.
+
+Consequences that matter downstream:
+
+- **ROI-only by construction.** `monte_carlo_roi` replaces both
+  `inverse_solution` and `roi_extraction`. No single grid is solved, so there is
+  no `step5_stc_*.pkl` and no vertex set; combining it with
+  `skip_roi_extraction` raises. Each source-space module builds itself *dense*
+  under this flag — the source space is the pool, and deployed density is a
+  property of the draw.
+- **`roi_based` is excluded.** Its sources sit at ROI centroids by PCA
+  placement, which is the method; there is no dense pool to draw from. It stays
+  the conventional comparator.
+- **Outputs:** `roi_timeseries_signed.set`, `step6_roi_timeseries_signed.pkl`,
+  and `data/monte_carlo_report.json` — per parcel, the SNR `gain` over a single
+  draw, `coverage` (fraction of draws that sampled it), and `collinear_with`.
+- **Two flags must reach whoever reads the numbers.** A parcel near-collinear
+  with another has no meaningful *individual* value: the inverse splits their
+  shared signal arbitrarily and the split moves with the draw. A parcel with
+  `coverage < 0.5` has its amplitude scaled down, so a low value there means
+  "rarely sampled", not "quiet source". source-analytics reads both out of the
+  report and logs them before producing tables.
 
 ### Channel order and dropped sources (both used to be silent)
 - `steps/eeg_data.py` reorders the recording's channels to the electrode registration and refuses a file missing a registered electrode. The eeg-preprocess output stores channels as E23, E22, E30, ...; before 0.5.1 that order was multiplied straight into a leadfield ordered E1..E30. `steps/inverse_solution.py` re-checks the names against `fwd['sol']['row_names']`.
