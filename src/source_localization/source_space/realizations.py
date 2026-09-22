@@ -52,6 +52,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .roi_combine import DEFAULT_COMBINE_MODE, combine_sources
+
 __all__ = ["farthest_point_sample", "build_roi_operator"]
 
 DEFAULT_N_SOURCES = 160
@@ -81,8 +83,12 @@ def farthest_point_sample(positions_mm, n_take, seed):
     return np.sort(np.asarray(chosen))
 
 
-def _parcel_rows(G_pool, idx, labels, lambda2):
-    """One realization's ROI operator: {parcel -> row of length n_channels}."""
+def _parcel_rows(G_pool, idx, labels, lambda2, combine=DEFAULT_COMBINE_MODE):
+    """One realization's ROI operator: {parcel -> row of length n_channels}.
+
+    ``combine`` selects how a parcel's member rows are merged; see
+    :mod:`source_localization.source_space.roi_combine`.
+    """
     Gs = G_pool[:, idx]
     GGT = Gs @ Gs.T
     reg = lambda2 * np.trace(GGT) / Gs.shape[0]
@@ -94,12 +100,13 @@ def _parcel_rows(G_pool, idx, labels, lambda2):
         name = labels[pool_idx]
         if name:
             members.setdefault(name, []).append(local)
-    return {p: W[m, :].mean(axis=0) for p, m in members.items()}
+    return {p: combine_sources(W[m, :], combine) for p, m in members.items()}
 
 
 def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOURCES,
                        k=DEFAULT_K, seed=DEFAULT_SEED, lambda2=1.0 / 9.0,
-                       collinear_threshold=0.99):
+                       collinear_threshold=0.99,
+                       combine=DEFAULT_COMBINE_MODE):
     """Average the ROI operators of ``k`` sparse realizations.
 
     Parameters
@@ -113,6 +120,9 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
     lambda2 : regularisation, matching the deployed inverse.
     collinear_threshold : |r| above which two parcel topographies are called
         degenerate, and their individual gains flagged as unreliable.
+    combine : how each realization's member rows are merged into a parcel row
+        ('mean', 'mean_flip', 'pca_flip'); see
+        :mod:`source_localization.source_space.roi_combine`.
 
     Returns
     -------
@@ -135,7 +145,7 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
     single_snr: dict[str, list[float]] = {}
     for j in range(k):
         idx = farthest_point_sample(positions_mm, n_sources, seed + j)
-        for p, row in _parcel_rows(G_pool, idx, labels, lambda2).items():
+        for p, row in _parcel_rows(G_pool, idx, labels, lambda2, combine).items():
             total[p] = total.get(p, 0.0) + row
             counts[p] = counts.get(p, 0) + 1
             c = row @ G_pool

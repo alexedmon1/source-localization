@@ -42,6 +42,7 @@ from pathlib import Path
 import numpy as np
 
 from ..source_space.realizations import build_roi_operator
+from ..source_space.roi_combine import resolve_combine_mode
 
 
 def _labels_for_pool(config, previous_outputs, n_pool):
@@ -129,9 +130,12 @@ def run(config, previous_outputs):
     print(f"    Pool: {n_pool:,} sources, {n_labelled:,} labelled")
     print(f"    Drawing {n_draws} configurations of {n_sources} sources")
 
+    combine = resolve_combine_mode(config)
+    if combine != 'mean':
+        print(f"    Within-ROI combination: {combine}")
     operator, parcels, report = build_roi_operator(
         G, coords, labels, n_sources=n_sources, k=n_draws, seed=seed,
-        lambda2=lambda2)
+        lambda2=lambda2, combine=combine)
     print(f"    Operator: {operator.shape[0]} parcels x {operator.shape[1]} channels")
 
     # Per-parcel gain, and the collinearity that makes some of it unreliable.
@@ -162,6 +166,7 @@ def run(config, previous_outputs):
         save_pickle(roi_stcs_signed, data_dir / 'step6_roi_timeseries_signed.pkl')
         (data_dir / 'monte_carlo_report.json').write_text(json.dumps(
             {'n_sources': n_sources, 'n_draws': n_draws, 'seed': seed,
+             'combine': combine,
              'pool_sources': int(n_pool), 'orientation': orientation,
              'parcels': parcels, 'per_parcel': report}, indent=2, default=float))
         if 'signed' in variants:
