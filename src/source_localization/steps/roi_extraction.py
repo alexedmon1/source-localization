@@ -9,6 +9,8 @@ Produces both magnitude and signed ROI time series:
 """
 
 import numpy as np
+
+from ..source_space.roi_combine import combine_sources, resolve_combine_mode
 import nibabel as nib
 import json
 from pathlib import Path
@@ -245,12 +247,18 @@ def run(config, previous_outputs):
     rois_with_sources = []
     rois_without_sources = []
 
+    combine = resolve_combine_mode(config)
+    if combine != 'mean':
+        print(f"    Within-ROI combination: {combine}")
+
     for roi_name in roi_labels:
         source_indices = roi_source_mapping.get(roi_name, [])
         if len(source_indices) > 0:
-            # Average source activity within ROI
+            # Combine source activity within ROI. The magnitude variant is non-negative by
+            # construction, so a sign flip is meaningless there and it always takes the mean.
             roi_stcs_magnitude[roi_name] = stc_magnitude.data[source_indices, :].mean(axis=0)
-            roi_stcs_signed[roi_name] = stc_signed.data[source_indices, :].mean(axis=0)
+            roi_stcs_signed[roi_name] = combine_sources(
+                stc_signed.data[source_indices, :], combine)
             rois_with_sources.append(roi_name)
         else:
             # Skip ROIs with no sources - don't include zeros for untested regions
