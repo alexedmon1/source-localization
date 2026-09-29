@@ -231,3 +231,77 @@ def test_pool_n_shells_is_honoured_when_scales_are_given():
     assert resolve(deployed, 24, is_mc=False) == deployed
     # And an MC pool that asks for the deployed count is left alone.
     assert resolve(deployed, 4, is_mc=True) == deployed
+
+
+def _toy_same_rng():
+    """_toy() from a fixed generator state, so the flipped and unflipped pools match."""
+    global RNG
+    saved, RNG = RNG, np.random.default_rng(11)
+    try:
+        return _toy()
+    finally:
+        RNG = saved
+
+
+def _flipped_parcel_toy():
+    """P0's sources alternate orientation, as fixed normals on a folded mesh do.
+
+    With few sources per draw, a draw samples one or two P0 members and inherits
+    their sign, so P0's per-draw rows point both ways.
+    """
+    G, pos, labels = _toy_same_rng()
+    p0 = [i for i, l in enumerate(labels) if l == "P0"]
+    for n, i in enumerate(p0):
+        if n % 2:
+            G[:, i] *= -1
+    return G, pos, labels
+
+
+def test_draws_with_opposite_signs_cancel_unless_aligned():
+    """surface-evoked X54: unaligned draws cancel; aligned draws do not."""
+    G, pos, labels = _flipped_parcel_toy()
+    plain, parcels, rep_plain = build_roi_operator(G, pos, labels, n_sources=6, k=60, seed=5)
+    aligned, parcels_a, rep_al = build_roi_operator(G, pos, labels, n_sources=6, k=60, seed=5,
+                                                    align_draws=True)
+    _, _, rep_same = build_roi_operator(*_toy_same_rng(), n_sources=6, k=60, seed=5)
+    assert parcels == parcels_a
+    i = parcels.index("P0")
+    # the flipped parcel's draws cancel; the same parcel unflipped does not
+    assert rep_plain["P0"]["draw_coherence"] < 0.5 * rep_same["P0"]["draw_coherence"], (
+        rep_plain["P0"]["draw_coherence"], rep_same["P0"]["draw_coherence"])
+    assert np.linalg.norm(aligned[i]) > 2 * np.linalg.norm(plain[i])
+    assert aligned[i] @ plain[i] > 0, "aligned row must not come out globally negated"
+    assert rep_al["P0"]["draws_aligned"] and not rep_plain["P0"]["draws_aligned"]
+    # draw_coherence describes the draws themselves, so it is the same either way
+    assert rep_al["P0"]["draw_coherence"] == pytest.approx(rep_plain["P0"]["draw_coherence"])
+
+
+def test_draw_alignment_is_off_by_default():
+    G, pos, labels = _flipped_parcel_toy()
+    default, _, rep = build_roi_operator(G, pos, labels, n_sources=12, k=20, seed=5)
+    explicit, _, _ = build_roi_operator(G, pos, labels, n_sources=12, k=20, seed=5, align_draws=False)
+    np.testing.assert_array_equal(default, explicit)
+    assert not any(v["draws_aligned"] for v in rep.values())
+
+
+def test_aligned_operator_is_still_one_linear_map():
+    """Signs come from the operator's geometry, never the data, so averaging
+    aligned per-draw series still equals applying the aligned operator once."""
+    from source_localization.source_space.realizations import _parcel_rows, align_draw_signs
+    G, pos, labels = _flipped_parcel_toy()
+    B = RNG.normal(size=(G.shape[0], 50))
+    k, n = 15, 12
+    op, parcels, _ = build_roi_operator(G, pos, labels, n_sources=n, k=k, seed=9, align_draws=True)
+    rows = {p: [] for p in parcels}
+    for j in range(k):
+        for p, row in _parcel_rows(G, farthest_point_sample(pos, n, 9 + j), labels, 1.0 / 9.0).items():
+            rows[p].append(row)
+    series = np.vstack([(align_draw_signs(rows[p]) @ B).sum(axis=0) / k for p in parcels])
+    np.testing.assert_allclose(op @ B, series, rtol=1e-10, atol=1e-12)
+
+
+def test_every_parcel_reports_draw_coherence():
+    G, pos, labels = _toy()
+    _, parcels, rep = build_roi_operator(G, pos, labels, n_sources=60, k=10, seed=1)
+    for p in parcels:
+        assert 0.0 < rep[p]["draw_coherence"] <= 1.0 + 1e-12

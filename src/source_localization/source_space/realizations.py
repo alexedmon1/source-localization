@@ -45,6 +45,24 @@ taken together is stable at 1.03-1.28x. That is a property of the degenerate
 *pair*, not of either parcel, so :func:`build_roi_operator` reports per-parcel
 gain alongside a collinearity flag rather than implying a uniform benefit.
 
+Draws can cancel each other, and alignment is opt-in
+---------------------------------------------------
+Each draw's parcel row carries an arbitrary sign: a fixed-orientation source's
+row points along its normal, and a draw that happens to sample a parcel with one
+or two sources inherits their sign. Summing the draws with no alignment then
+cancels. Measured on the deployed allen26 surface at 48 sources per draw (surface-
+evoked X54): Auditory_L/R get about one source per draw, 37% / 34% of their draws
+point opposite to the final row, and the summed row keeps only 0.28 / 0.30 of the
+mean single-draw norm (Cerebellum 0.68). Aligning each parcel's draws to their
+first principal direction before summing raised how often a simulated auditory
+source wins its own parcel from 0.19 to 0.44 (L) and 0.27 to 0.57 (R), at a cost
+to Retrosplenial (0.72 to 0.59-0.63) and Motor.
+
+``align_draws=True`` does that alignment; it is off by default so every existing
+result reproduces. ``draw_coherence`` in the report -- the norm of the averaged
+row over the mean single-draw norm, 1.0 when every draw agrees -- is written
+either way, so the cancellation is visible whether or not it is corrected.
+
 This path is ROI-only by construction. There is no vertex-level output to give,
 because no single grid is ever solved.
 """
@@ -54,7 +72,7 @@ import numpy as np
 
 from .roi_combine import DEFAULT_COMBINE_MODE, combine_sources
 
-__all__ = ["farthest_point_sample", "build_roi_operator"]
+__all__ = ["farthest_point_sample", "build_roi_operator", "align_draw_signs"]
 
 DEFAULT_N_SOURCES = 160
 DEFAULT_K = 100
@@ -103,10 +121,32 @@ def _parcel_rows(G_pool, idx, labels, lambda2, combine=DEFAULT_COMBINE_MODE):
     return {p: combine_sources(W[m, :], combine) for p, m in members.items()}
 
 
+def align_draw_signs(rows):
+    """Flip each draw's row to agree with the draws' first principal direction.
+
+    ``rows`` is ``(n_draws, n_channels)``, one parcel's row from each draw that
+    sampled it. Returns the rows with signs flipped so they no longer cancel when
+    summed. The result is anchored to the plain sum, so the aligned row never
+    comes out globally negated relative to the unaligned one -- the same
+    convention :mod:`source_localization.source_space.roi_combine` uses.
+    """
+    rows = np.asarray(rows, dtype=float)
+    if len(rows) < 2:
+        return rows
+    u = np.linalg.svd(rows, full_matrices=False)[2][0]
+    s = np.sign(rows @ u)
+    s[s == 0] = 1.0
+    aligned = rows * s[:, None]
+    if aligned.sum(axis=0) @ rows.sum(axis=0) < 0:
+        aligned = -aligned
+    return aligned
+
+
 def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOURCES,
                        k=DEFAULT_K, seed=DEFAULT_SEED, lambda2=1.0 / 9.0,
                        collinear_threshold=0.99,
-                       combine=DEFAULT_COMBINE_MODE):
+                       combine=DEFAULT_COMBINE_MODE,
+                       align_draws=False):
     """Average the ROI operators of ``k`` sparse realizations.
 
     Parameters
@@ -123,12 +163,16 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
     combine : how each realization's member rows are merged into a parcel row
         ('mean', 'mean_flip', 'pca_flip'); see
         :mod:`source_localization.source_space.roi_combine`.
+    align_draws : flip each parcel's per-draw rows to a common sign before
+        summing (:func:`align_draw_signs`). Off by default; see the module
+        docstring for why draws cancel without it.
 
     Returns
     -------
     operator : ndarray, (n_parcels, n_channels)   -- apply to sensor data
     parcels : list of str                          -- row order of `operator`
-    report : dict with per-parcel `gain`, `n_realizations`, `collinear_with`
+    report : dict with per-parcel `gain`, `n_realizations`, `coverage`,
+        `collinear_with`, `draw_coherence` and `draws_aligned`
     """
     G_pool = np.asarray(G_pool, dtype=float)
     labels = list(labels)
@@ -140,17 +184,24 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
         if name:
             own.setdefault(name, []).append(i)
 
-    total: dict[str, np.ndarray] = {}
-    counts: dict[str, int] = {}
+    draws: dict[str, list[np.ndarray]] = {}
     single_snr: dict[str, list[float]] = {}
     for j in range(k):
         idx = farthest_point_sample(positions_mm, n_sources, seed + j)
         for p, row in _parcel_rows(G_pool, idx, labels, lambda2, combine).items():
-            total[p] = total.get(p, 0.0) + row
-            counts[p] = counts.get(p, 0) + 1
+            draws.setdefault(p, []).append(row)
             c = row @ G_pool
             single_snr.setdefault(p, []).append(
                 float(np.linalg.norm(c[own[p]]) / np.linalg.norm(row)))
+
+    counts = {p: len(r) for p, r in draws.items()}
+    # How much the draws cancel: norm of the averaged row over the mean single-draw
+    # norm, before any alignment. 1.0 when every draw agrees.
+    coherence = {p: float(np.linalg.norm(np.sum(r, axis=0) / len(r))
+                          / np.mean(np.linalg.norm(r, axis=1)))
+                 for p, r in draws.items()}
+    total = {p: (align_draw_signs(r) if align_draws else np.asarray(r)).sum(axis=0)
+             for p, r in draws.items()}
 
     parcels = sorted(total)
     # Divide by k, not by counts[p].
@@ -200,6 +251,10 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
             "coverage": counts[p] / k,
             "max_collinearity": best,
             "collinear_with": partner if best >= collinear_threshold else None,
+            # Below ~0.5 the draws largely cancel (surface-evoked X54); the
+            # operator row is then much weaker than any one draw's.
+            "draw_coherence": coherence[p],
+            "draws_aligned": bool(align_draws),
         }
 
     sparse = [(p, report[p]["coverage"]) for p in parcels
