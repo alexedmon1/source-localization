@@ -40,7 +40,32 @@ source_space:
     pool_spacing_mm: 0.20          # surface and cartesian pool density
     pool_n_shells: 24              # shell pool density
     pool_points_per_shell: 1200
+    align_draws: false             # sign-align each parcel's draws before averaging
 ```
+
+### Draws can cancel: `align_draws`
+
+A fixed-orientation source's operator row points along its normal, so each draw's
+parcel row inherits the sign of the sources it happened to sample. A small parcel
+gets one or two sources per draw, neighbouring normals on the anatomical mesh differ
+by tens of degrees, and summed draws cancel. Measured on the allen26 surface at 48
+sources per draw:
+
+| parcel | draws sampling it | `draw_coherence` | own-parcel win rate, unaligned -> aligned |
+|---|---|---|---|
+| Auditory_L | 73 | 0.28 | 0.19 -> 0.44 |
+| Auditory_R | 74 | 0.30 | 0.27 -> 0.57 |
+| Cerebellum | 100 | 0.68 | 0.91 -> 0.92 |
+| Retrosplenial_L | 79 | 0.46 | 0.72 -> 0.59 |
+
+`draw_coherence` is the norm of the averaged row over the mean single-draw norm (1.0 =
+every draw agrees), written to `monte_carlo_report.json` whether or not alignment is
+on. `align_draws: true` flips each parcel's draws to their first principal direction,
+anchored to the plain sum's sign, before averaging. It is a trade, not a free gain:
+parcels whose cancellation had been absorbing activity (Retrosplenial, Motor) lose
+accuracy, and the mean over parcels moves only 0.39 -> 0.43. Off by default so
+existing runs reproduce exactly. The `roi_extraction.combine` flip modes do not
+address this -- they align sources within one draw, not draws with each other.
 
 When enabled, `monte_carlo_roi` replaces `inverse_solution` and `roi_extraction`.
 The source space becomes the **pool** draws are taken from rather than the

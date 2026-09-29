@@ -89,6 +89,7 @@ def run(config, previous_outputs):
     n_sources = int(mc.get('n_sources', 160))
     n_draws = int(mc.get('n_draws', 100))
     seed = int(mc.get('seed', 20260821))
+    align_draws = bool(mc.get('align_draws', False))
 
     inv_cfg = config.get('inverse', {})
     lambda2 = inv_cfg.get('lambda2') or 1.0 / float(inv_cfg.get('snr', 3.0)) ** 2
@@ -133,9 +134,18 @@ def run(config, previous_outputs):
     combine = resolve_combine_mode(config)
     if combine != 'mean':
         print(f"    Within-ROI combination: {combine}")
+    if align_draws:
+        print("    Draw signs aligned per parcel before averaging")
     operator, parcels, report = build_roi_operator(
         G, coords, labels, n_sources=n_sources, k=n_draws, seed=seed,
-        lambda2=lambda2, combine=combine)
+        lambda2=lambda2, combine=combine, align_draws=align_draws)
+    weak = sorted((report[p]['draw_coherence'], p) for p in parcels
+                  if report[p]['draw_coherence'] < 0.5)
+    if weak:
+        print(f"    {'Aligned' if align_draws else '⚠️  Unaligned'}: {len(weak)} parcel(s) whose draws "
+              f"cancel below half strength (draw_coherence):")
+        for coh, p in weak:
+            print(f"          {p} ({coh:.2f})")
     print(f"    Operator: {operator.shape[0]} parcels x {operator.shape[1]} channels")
 
     # Per-parcel gain, and the collinearity that makes some of it unreliable.
@@ -166,7 +176,7 @@ def run(config, previous_outputs):
         save_pickle(roi_stcs_signed, data_dir / 'step6_roi_timeseries_signed.pkl')
         (data_dir / 'monte_carlo_report.json').write_text(json.dumps(
             {'n_sources': n_sources, 'n_draws': n_draws, 'seed': seed,
-             'combine': combine,
+             'combine': combine, 'align_draws': align_draws,
              'pool_sources': int(n_pool), 'orientation': orientation,
              'parcels': parcels, 'per_parcel': report}, indent=2, default=float))
         if 'signed' in variants:

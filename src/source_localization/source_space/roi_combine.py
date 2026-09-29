@@ -20,9 +20,13 @@ Three modes, selected by ``roi_extraction.combine`` in the study config:
     average of the members.
 
 Both flip modes are *sign-anchored to the plain average*, so the result never comes out
-globally negated relative to ``mean``. Without that anchor the sign is arbitrary per call,
-which matters when results are summed across Monte Carlo draws — the anchor is what keeps
-those draws from cancelling each other.
+globally negated relative to ``mean``. Without that anchor the sign is arbitrary per call.
+
+The anchor does **not** stop Monte Carlo draws cancelling each other. It fixes a merged
+row's sign relative to that same draw's plain average, and a draw that samples a parcel
+with one or two sources has nothing to merge -- the row keeps its source's sign, and
+different draws disagree. That cancellation is corrected across draws, by
+``monte_carlo.align_draws`` (:func:`source_localization.source_space.realizations.align_draw_signs`).
 
 The same three modes apply whether the members are time courses (fixed sampling, where
 ROI extraction runs on the source estimate) or operator rows (Monte Carlo sampling, where

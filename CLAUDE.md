@@ -279,6 +279,7 @@ source_space:
     pool_spacing_mm: 0.20 # surface/cartesian pool density
     pool_n_shells: 24     # shell pool density
     pool_points_per_shell: 1200
+    align_draws: false    # sign-align each parcel's draws before averaging
 ```
 
 It is nearly free: the parcel series is linear in the sensor data, so averaging K
@@ -300,6 +301,15 @@ Consequences that matter downstream:
 - **Outputs:** `roi_timeseries_signed.set`, `step6_roi_timeseries_signed.pkl`,
   and `data/monte_carlo_report.json` — per parcel, the SNR `gain` over a single
   draw, `coverage` (fraction of draws that sampled it), and `collinear_with`.
+- **Draws can cancel, and alignment is opt-in.** Each draw's parcel row carries
+  its sources' normal sign, and a small parcel gets one or two sources per draw, so
+  summed draws cancel. On the allen26 surface at 48 per draw, Auditory_L/R rows kept
+  0.28 / 0.30 of a single draw's norm and simulated auditory sources won their own
+  parcel 0.19 / 0.27 of the time; `align_draws: true` raised that to 0.44 / 0.57,
+  at a cost to Retrosplenial and Motor. Off by default, so existing runs reproduce
+  byte for byte. `draw_coherence` in the report measures the cancellation either
+  way (1.0 = every draw agrees). The `combine` flip modes do not fix this: they
+  align sources within one draw, not draws with each other.
 - **Two flags must reach whoever reads the numbers.** A parcel near-collinear
   with another has no meaningful *individual* value: the inverse splits their
   shared signal arbitrarily and the split moves with the draw. A parcel with
