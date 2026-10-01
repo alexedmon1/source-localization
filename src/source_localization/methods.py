@@ -65,6 +65,15 @@ SOURCE_SPACES: Dict[str, Method] = {
     'shell': Method(
         'shell', 'concentric geometry-matched shells',
         'Depth-stratified sampling that follows the head shape.'),
+    'hybrid': Method(
+        'hybrid', 'anatomical surface plus a volume grid for deep structures',
+        'Cortex, cerebellum and olfactory bulb on the mid-ribbon at their '
+        'normals; thalamus, tectum, hippocampus, basal ganglia, hypothalamus '
+        'and amygdala on a Cartesian grid with free orientation. Gives a deep '
+        'generator somewhere to go other than the nearest cortex.',
+        caveat='Monte Carlo sampling only. On a dorsal array deep and cortical '
+               'electrode patterns are near-collinear, so how a response is '
+               'split between the two parts is set largely by the inverse.'),
 }
 
 
@@ -81,7 +90,7 @@ SAMPLING_MODES: Dict[str, Method] = {
         'Integrates over source placement instead of committing to one grid. '
         'Nearly free: the parcel series is linear in the sensor data, so K '
         'operators are averaged and applied once. Works with surface, '
-        'cartesian and shell.',
+        'cartesian, shell and hybrid.',
         caveat='ROI-only by construction — no single grid is solved, so the run '
                'has no vertex output and skip_roi_extraction raises.'),
 }

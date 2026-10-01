@@ -8,6 +8,8 @@ a sheet:
 - roi_based: Sources at ROI centroids (`roi_based.py`)
 - shell: Concentric geometry-matched shells (`shell_based.py`)
 - surface: Icosphere or anatomical mid-ribbon mesh (`surface.py`)
+- hybrid: the anatomical surface plus a volume grid for the deep structures no
+  surface reaches (`hybrid.py`); Monte Carlo sampling only
 
 All source types support a universal electrode proximity filter via:
   source_space.max_electrode_distance_mm: <float>
@@ -57,9 +59,12 @@ def run(config, previous_outputs):
     elif source_type in ('shell', 'shell_based'):
         from ..source_space import shell_based
         src, source_coords_mm, n_sources = shell_based.create_source_space(config, previous_outputs)
+    elif source_type == 'hybrid':
+        from ..source_space import hybrid
+        src, source_coords_mm, n_sources = hybrid.create_source_space(config, previous_outputs)
     else:
         raise ValueError(f"Unknown source type: {source_type}. "
-                        f"Valid types: cartesian, surface, roi_based, shell")
+                        f"Valid types: cartesian, surface, roi_based, shell, hybrid")
 
     print(f"✓ Created {source_type} source space with {n_sources:,} sources")
 

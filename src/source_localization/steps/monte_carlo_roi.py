@@ -102,28 +102,60 @@ def run(config, previous_outputs):
     # collapsed to its dominant orientation, because the operator average is
     # defined over one column per source.
     from .inverse_solution import apply_orientation_constraint
+    source_type = config.get('pipeline', {}).get('source_type')
     orientation = inv_cfg.get('orientation')
     if orientation is None:
         surf = (config.get('source_space') or {}).get('surface') or {}
-        anatomical = (config.get('pipeline', {}).get('source_type') == 'surface'
+        anatomical = (source_type in ('surface', 'hybrid')
                       and surf.get('method', 'anatomical') == 'anatomical')
         orientation = 'fixed' if anatomical else 'free'
 
-    fwd_c, n_comp, _ = apply_orientation_constraint(
-        fwd, orientation=orientation, loose=float(inv_cfg.get('loose', 0.2)),
-        verbose=True)
-    G = fwd_c['sol']['data']
-    if n_comp == 3:
-        n_pool = G.shape[1] // 3
-        cols = []
-        for i in range(n_pool):
-            blk = G[:, 3 * i:3 * i + 3]
-            u, s, _ = np.linalg.svd(blk, full_matrices=False)
-            cols.append(u[:, 0] * s[0])
-        G = np.column_stack(cols)
-        print(f"    Free orientation collapsed to dominant direction "
-              f"({n_pool} sources)")
+    if source_type == 'hybrid':
+        # Surface sources along their normal, volume sources along their
+        # dominant direction; MNE's fixed conversion refuses a volume entry.
+        from ..source_space.hybrid import pool_columns
+        G, is_surf = pool_columns(fwd, orientation)
+        print(f"    Hybrid pool: {int(is_surf.sum()):,} surface sources "
+              f"({'normal' if orientation == 'fixed' else 'dominant direction'}), "
+              f"{int((~is_surf).sum()):,} volume sources (dominant direction)")
+    else:
+        fwd_c, n_comp, _ = apply_orientation_constraint(
+            fwd, orientation=orientation, loose=float(inv_cfg.get('loose', 0.2)),
+            verbose=True)
+        G = fwd_c['sol']['data']
+        if n_comp == 3:
+            n_pool = G.shape[1] // 3
+            cols = []
+            for i in range(n_pool):
+                blk = G[:, 3 * i:3 * i + 3]
+                u, s, _ = np.linalg.svd(blk, full_matrices=False)
+                cols.append(u[:, 0] * s[0])
+            G = np.column_stack(cols)
+            print(f"    Free orientation collapsed to dominant direction "
+                  f"({n_pool} sources)")
     n_pool = G.shape[1]
+
+    # A hybrid draws its two parts separately by default: the surface part takes
+    # n_sources exactly as a surface-only run would (same pool, same seeds, so the
+    # same draws), and n_sources_volume deep sources are added on top. 'union'
+    # instead draws n_sources from the combined pool, the parts competing for it.
+    strata = None
+    hybrid_draw = None
+    if source_type == 'hybrid':
+        hybrid_draw = mc.get('hybrid_draw', 'stratified')
+        if hybrid_draw == 'stratified':
+            if mc.get('n_sources_volume') is None:
+                raise ValueError(
+                    "hybrid_draw 'stratified' needs monte_carlo.n_sources_volume, the "
+                    "deep sources added to each draw's n_sources surface sources")
+            n_vol = int(mc['n_sources_volume'])
+            strata = [(np.flatnonzero(is_surf), n_sources), (np.flatnonzero(~is_surf), n_vol)]
+            print(f"    Hybrid draws stratified: {n_sources} surface + {n_vol} volume "
+                  f"= {n_sources + n_vol} sources per draw")
+        elif hybrid_draw == 'union':
+            print(f"    Hybrid draws from the union: {n_sources} sources per draw in total")
+        else:
+            raise ValueError(f"monte_carlo.hybrid_draw must be stratified or union, got {hybrid_draw}")
 
     coords = previous_outputs['source_coords_mm'][:n_pool]
     labels = _labels_for_pool(config, previous_outputs, n_pool)
@@ -138,7 +170,7 @@ def run(config, previous_outputs):
         print("    Draw signs aligned per parcel before averaging")
     operator, parcels, report = build_roi_operator(
         G, coords, labels, n_sources=n_sources, k=n_draws, seed=seed,
-        lambda2=lambda2, combine=combine, align_draws=align_draws)
+        lambda2=lambda2, combine=combine, align_draws=align_draws, strata=strata)
     weak = sorted((report[p]['draw_coherence'], p) for p in parcels
                   if report[p]['draw_coherence'] < 0.5)
     if weak:
@@ -174,11 +206,18 @@ def run(config, previous_outputs):
         data_dir = get_data_dir(config)
         variants = get_output_variants(config)
         save_pickle(roi_stcs_signed, data_dir / 'step6_roi_timeseries_signed.pkl')
+        mc_report = {'n_sources': n_sources, 'n_draws': n_draws, 'seed': seed,
+                     'combine': combine, 'align_draws': align_draws,
+                     'pool_sources': int(n_pool), 'orientation': orientation,
+                     'parcels': parcels, 'per_parcel': report}
+        if source_type == 'hybrid':
+            # Only for hybrid, so every other run's report stays byte-identical.
+            mc_report.update({'hybrid_draw': hybrid_draw,
+                              'n_sources_volume': strata[1][1] if strata else None,
+                              'pool_surface': int(is_surf.sum()),
+                              'pool_volume': int((~is_surf).sum())})
         (data_dir / 'monte_carlo_report.json').write_text(json.dumps(
-            {'n_sources': n_sources, 'n_draws': n_draws, 'seed': seed,
-             'combine': combine, 'align_draws': align_draws,
-             'pool_sources': int(n_pool), 'orientation': orientation,
-             'parcels': parcels, 'per_parcel': report}, indent=2, default=float))
+            mc_report, indent=2, default=float))
         if 'signed' in variants:
             export_roi_to_set(roi_stcs_signed, sfreq=epochs.info['sfreq'],
                               output_path=data_dir / 'roi_timeseries_signed.set',

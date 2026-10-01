@@ -146,7 +146,7 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
                        k=DEFAULT_K, seed=DEFAULT_SEED, lambda2=1.0 / 9.0,
                        collinear_threshold=0.99,
                        combine=DEFAULT_COMBINE_MODE,
-                       align_draws=False):
+                       align_draws=False, strata=None):
     """Average the ROI operators of ``k`` sparse realizations.
 
     Parameters
@@ -166,6 +166,14 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
     align_draws : flip each parcel's per-draw rows to a common sign before
         summing (:func:`align_draw_signs`). Off by default; see the module
         docstring for why draws cancel without it.
+    strata : sequence of (pool_indices, n_take), optional
+        Draw each stratum separately -- ``n_take`` farthest-point sources from
+        ``pool_indices``, with the same seed per draw -- and solve them together.
+        ``n_sources`` is then ignored. A hybrid source space uses this so its
+        surface part draws exactly what a surface-only pool of the same
+        positions would draw, and its volume part is added on top, rather than
+        the two competing for one budget. None (default) draws from the whole
+        pool at once, as before.
 
     Returns
     -------
@@ -186,8 +194,18 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
 
     draws: dict[str, list[np.ndarray]] = {}
     single_snr: dict[str, list[float]] = {}
+    positions_mm = np.asarray(positions_mm, dtype=float)
+    if strata is not None:
+        strata = [(np.asarray(ix, dtype=int), int(n)) for ix, n in strata]
+        flat = np.concatenate([ix for ix, _ in strata])
+        if len(np.unique(flat)) != len(flat):
+            raise ValueError("strata overlap: a pool source is in more than one")
     for j in range(k):
-        idx = farthest_point_sample(positions_mm, n_sources, seed + j)
+        if strata is None:
+            idx = farthest_point_sample(positions_mm, n_sources, seed + j)
+        else:
+            idx = np.sort(np.concatenate([
+                ix[farthest_point_sample(positions_mm[ix], n, seed + j)] for ix, n in strata]))
         for p, row in _parcel_rows(G_pool, idx, labels, lambda2, combine).items():
             draws.setdefault(p, []).append(row)
             c = row @ G_pool
