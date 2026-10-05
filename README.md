@@ -387,6 +387,82 @@ longer misalign downstream indexing, but it still discards anatomy.
 | **ROI-based** | Sources placed inside each atlas parcel | Free | ROI-level statistics, mixed models |
 | Cartesian | 3D volumetric grid | Free | Whole-brain coverage |
 | Shell | Concentric geometry-matched shells | Free | Depth-stratified parametric mapping |
+| **Hybrid** | Anatomical surface for cortex, cerebellum and olfactory bulb, plus a volume grid for the deep structures no surface reaches. Monte Carlo sampling only | Surface: fixed to cortical normal; volume: dominant direction | Data with deep generators that a cortex-only space would push onto cortex |
+
+### Hybrid source space
+
+`source_type: hybrid` combines two parts in one source space. Cortex is represented
+once, by the surface.
+
+- **Surface:** the anatomical cortical mid-ribbon (as in `ellipsoid_surface`), sources
+  fixed along the cortical normal.
+- **Volume:** a Cartesian grid restricted to the atlas categories the surface leaves out
+  (for allen26: brainstem, thalamic, hypothalamic, hippocampal and subcortical), each
+  source collapsed to its dominant orientation.
+
+It exists because a cortex-only space has nowhere to put a deep response, so the inverse
+spreads it over the nearest cortex. On the MEA30 dorsal array the auditory responses are
+dominated by a posterior-midline (deep) generator, and a surface space assigned them to
+cerebellum, retrosplenial and lateral cortex.
+
+**Monte Carlo only.** A fixed-grid inverse applies one orientation rule to every source,
+so `source_sampling: fixed` raises for a hybrid space. There is no preset yet; use a config
+like this one (allen26, ellipsoid BEM):
+
+```yaml
+pipeline:
+  source_type: hybrid
+  bem_type: ellipsoid
+source_space:
+  surface:
+    method: anatomical
+    spacing_mm: 0.5
+    categories: [cortical, cerebellum, olfactory]
+  hybrid:
+    volume_categories: [brainstem, thalamic, hypothalamic, hippocampal, subcortical]
+    volume_spacing_mm: 0.4
+  source_sampling: monte_carlo
+  monte_carlo:
+    n_sources: 48            # surface sources per draw
+    n_sources_volume: 36     # deep sources added to each draw (stratified)
+    hybrid_draw: stratified  # or "union": n_sources drawn from the combined pool
+    n_draws: 100
+    seed: 20260821
+    pool_spacing_mm: 0.2
+    align_draws: true        # recommended for new analyses
+inverse:
+  method: sLORETA
+  orientation: fixed
+```
+
+Run it with `--atlas allen26`. `volume_categories` defaults to every category not in
+`surface.categories`.
+
+| Option | Meaning |
+|---|---|
+| `hybrid.volume_categories` | Atlas categories filled by the volume grid |
+| `hybrid.volume_spacing_mm` | Volume grid spacing (0.4 mm matches the Cartesian Monte Carlo pool) |
+| `monte_carlo.hybrid_draw` | `stratified` (default): each draw takes `n_sources` surface sources exactly as a surface-only run would, plus `n_sources_volume` deep ones. `union`: `n_sources` from the combined pool, the two parts competing |
+| `monte_carlo.n_sources_volume` | Deep sources per draw; required for `stratified`. 36 matches the surface draw's spacing (median nearest-neighbour 2.04 mm vs 2.03 mm) |
+
+Read the deep parcels as a **"not cortex" bin**. On the dorsal array, deep and cortical
+electrode patterns are near-collinear (Brainstem_Tectum vs Cerebellum |cos| 0.997), and
+the best-fitting deep structure changes with a 1 mm registration shift. The deep parcels
+take deep signal off cortex, but their individual labels cannot be read. The split
+between the parts is largely the inverse's, not the data's.
+
+Measured so far, on MEA30 data:
+
+- In simulation it separates two planted between-animal effects slightly better than the
+  electrodes (+0.02 to +0.03 on the unmixing index); the surface-only space is slightly
+  worse (about -0.02).
+- In the SL statistical-learning cohort it beat both the surface-only and the ROI-based
+  spaces on every comparison: phase locking, effect detection and genotype separation.
+- It did not beat the electrodes themselves.
+
+Treat it as an anatomical view of the electrode information, not as added resolution.
+Implementation: `source_space/hybrid.py`, `steps/monte_carlo_roi.py`; tests in
+`tests/test_hybrid.py`.
 
 ### Which Preset Should I Use?
 
@@ -394,6 +470,9 @@ longer misalign downstream indexing, but it still discards anatomy.
 - **Cortical, signed, orientation-aware analysis:** `ellipsoid_surface`.
 - **Whole-brain parametric mapping:** `shell_ellipsoid`, with the coverage caveat linked above.
 - **Fast iteration:** `sphere_surface`.
+- **Responses that may have deep generators (e.g. auditory responses on a dorsal array):**
+  the hybrid source space (Monte Carlo; no preset yet, see above), reading deep parcels as
+  one "not cortex" bin.
 
 All inverse methods can be set per preset or with `--method`. sLORETA is the
 default in every preset and the most robust to mouse-scale leadfields (see the
