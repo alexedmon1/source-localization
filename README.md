@@ -351,7 +351,7 @@ source-localization study analyze study_config.yaml \
 
 ## Configuration Presets
 
-### Available Presets (11 total)
+### Available Presets (12 total)
 
 Source counts were measured on 2026-09-03 with the Allen32 atlas. ROI-based
 counts depend on the atlas (e.g. `roi_based_sphere` places 184 sources on
@@ -371,6 +371,7 @@ of truth for every setting; the CLI lists them under `--preset`.
 | `ellipsoid_cartesian` | Ellipsoid | Cartesian grid | 141 | Volumetric grid, auto spacing |
 | `ellipsoid_cartesian_extended` | Ellipsoid (extended) | Cartesian grid | 150 | Conductor extended over the olfactory bulbs |
 | `sphere_cartesian` | Sphere | Cartesian grid | 80 | Volumetric grid, auto spacing |
+| `ellipsoid_hybrid` | Ellipsoid (extended) | Hybrid: anatomical surface + deep volume | 84 per draw (pool 10,267 on allen26) | Monte Carlo only, 48 surface + 36 deep sources per draw, 100 draws. See [Hybrid source space](#hybrid-source-space) |
 
 "Extended" ellipsoids shift the centre anteriorly and lengthen the Y semi-axis
 so the olfactory bulbs fall inside the conductor. Without that, MNE drops
@@ -406,8 +407,17 @@ dominated by a posterior-midline (deep) generator, and a surface space assigned 
 cerebellum, retrosplenial and lateral cortex.
 
 **Monte Carlo only.** A fixed-grid inverse applies one orientation rule to every source,
-so `source_sampling: fixed` raises for a hybrid space. There is no preset yet; use a config
-like this one (allen26, ellipsoid BEM):
+so `source_sampling: fixed` raises for a hybrid space.
+
+The `ellipsoid_hybrid` preset is the configuration below. It is `ellipsoid_surface`'s BEM
+and surface plus the deep volume, with Monte Carlo sampling:
+
+```bash
+source-localization run --preset ellipsoid_hybrid --atlas allen26 --eeg /path/to/data.set --output ./results
+```
+
+It reproduces the SL statistical-learning analysis's hybrid runs exactly (parcel series
+equal to 1.7e-14). The keys, for a config of your own:
 
 ```yaml
 pipeline:
@@ -435,8 +445,9 @@ inverse:
   orientation: fixed
 ```
 
-Run it with `--atlas allen26`. `volume_categories` defaults to every category not in
-`surface.categories`.
+It runs on the Allen atlases (allen26, allen32, allen64); Antwerp and coarse22 cannot carry
+the anatomical surface. `volume_categories` defaults to every category not in
+`surface.categories`, which is what the preset uses.
 
 | Option | Meaning |
 |---|---|
@@ -471,8 +482,8 @@ Implementation: `source_space/hybrid.py`, `steps/monte_carlo_roi.py`; tests in
 - **Whole-brain parametric mapping:** `shell_ellipsoid`, with the coverage caveat linked above.
 - **Fast iteration:** `sphere_surface`.
 - **Responses that may have deep generators (e.g. auditory responses on a dorsal array):**
-  the hybrid source space (Monte Carlo; no preset yet, see above), reading deep parcels as
-  one "not cortex" bin.
+  `ellipsoid_hybrid --atlas allen26` (Monte Carlo), reading the deep parcels as one
+  "not cortex" bin.
 
 All inverse methods can be set per preset or with `--method`. sLORETA is the
 default in every preset and the most robust to mouse-scale leadfields (see the

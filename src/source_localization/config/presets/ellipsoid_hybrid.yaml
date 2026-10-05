@@ -1,0 +1,114 @@
+# Hybrid source space: the anatomical cortical surface plus a volume grid for the deep
+# structures no surface reaches. Monte Carlo sampling only (a fixed-grid inverse applies
+# one orientation rule to every source, so `source_sampling: fixed` raises for hybrid).
+#
+# Why: a cortex-only source space has nowhere to put a deep response, so the inverse
+# spreads it over the nearest cortex. On the MEA30 dorsal array the auditory responses
+# are dominated by a posterior-midline (deep) generator; the surface space assigned them
+# to cerebellum, retrosplenial and lateral cortex. The volume part gives that signal
+# somewhere to go. Read the deep parcels as one "not cortex" bin: deep and cortical
+# electrode patterns are near-collinear on the dorsal array (Brainstem_Tectum vs
+# Cerebellum |cos| 0.997), so their individual labels cannot be read. See the README,
+# "Hybrid source space".
+#
+# Everything but the source space and sampling is `ellipsoid_surface`: the extended
+# ellipsoid BEM, the 0.5 mm anatomical mid-ribbon fixed along the cortical normal, and
+# sLORETA. The sampling is the configuration the SL statistical-learning analysis ran
+# (48 surface + 36 volume sources per draw, 100 draws), with draw-sign alignment on.
+pipeline:
+  name: "Ellipsoidal BEM + Hybrid Sources (surface + deep volume, Monte Carlo)"
+  bem_type: ellipsoid
+  source_type: hybrid
+
+inputs:
+  brain_volume: "data/atlas/Atlas_3DRois.nii"
+  # Allen labels, as `ellipsoid_surface`: the anatomical surface is cut from the Allen
+  # parcellation. `--atlas allen26` (used by the SL analysis) and `--atlas allen64`
+  # also work; `--atlas antwerp` does not.
+  brain_labels: "data/atlas/allen/allen_labels.nii.gz"
+  roi_mapping: "data/atlas/allen/roi_mapping.json"
+  electrodes_csv: "data/electrodes/mouse_array_coords.csv"
+  eeg_file: null
+
+electrode:
+  projection_method: "intensity"
+  skull_offset_mm: 0.0
+  bregma_vox: [30, 149, 41]
+  lambda_vox: [30, 97, 41]
+  create_visualization: true
+
+bem:
+  ellipsoid:
+    n_layers: 3
+    conductivities: [0.33, 0.0042, 0.33]
+    radii_ratios: [0.87, 0.92, 1.0]
+    # EXTENDED, as `ellipsoid_surface`: keeps the olfactory bulbs inside the conductor.
+    center_offset_mm: [0.0, 0.8, 0.0]
+    axis_extensions_mm: [0.0, 1.5, 0.0]
+    use_cache: true
+    force_recreate: true
+
+source_space:
+  surface:
+    method: anatomical
+    spacing_mm: 0.50
+    iso_mm: 0.08
+    # Cortex, cerebellum and olfactory bulb: laminar dipole geometry, so a normal
+    # constraint means what it means in neocortex.
+    categories: [cortical, cerebellum, olfactory]
+    close_holes: 0
+  hybrid:
+    # Atlas categories filled by the volume grid. Unset = every category not in
+    # `surface.categories` (allen26/allen32: brainstem, thalamic, hypothalamic,
+    # hippocampal, subcortical). Cortex is represented once, by the surface.
+    volume_spacing_mm: 0.4      # the Cartesian Monte Carlo pool's spacing
+  source_sampling: monte_carlo
+  monte_carlo:
+    n_sources: 48               # surface sources per draw, as a surface-only run draws them
+    n_sources_volume: 36        # deep sources added to each draw; matches the surface
+                                # draw's spacing (median nearest neighbour 2.04 vs 2.03 mm)
+    hybrid_draw: stratified     # or "union": n_sources from the combined pool
+    n_draws: 100
+    seed: 20260821
+    pool_spacing_mm: 0.2
+    # Align each parcel's draws before averaging, so small parcels sampled by one or two
+    # sources per draw do not cancel (Monte Carlo guide; off by default elsewhere only so
+    # older deployed runs reproduce).
+    align_draws: true
+
+forward:
+  meg: false
+  eeg: true
+  mindist: 0.0
+
+inverse:
+  method: sLORETA
+  snr: 3.0
+  lambda2: null
+  depth_weighting: 0.8          # not used by the Monte Carlo operator; kept for parity
+  orientation: fixed            # surface along the normal; volume along its dominant direction
+  loose: 0.2
+
+spectral:
+  frequency_bands:
+    delta: [1, 4]
+    theta: [4, 10]
+    alpha: [10, 13]
+    beta: [13, 30]
+    low_gamma: [30, 55]
+    high_gamma: [65, 100]
+  primary_band: low_gamma
+
+roi:
+  use_proximity: false
+  proximity_radius_mm: 2.0
+
+outputs:
+  dir: "outputs/ellipsoid_hybrid"
+  save_intermediate: true
+  figure_format: png
+  figure_dpi: 100
+  output_variants: "signed"
+
+provenance:
+  atlas: allen32
