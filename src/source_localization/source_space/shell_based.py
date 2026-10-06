@@ -52,8 +52,9 @@ def create_source_space(config, previous_outputs):
     # taken from, not the deployed grid, so it is built dense: more shells, more
     # points per shell. The deployed density is a property of each draw
     # (monte_carlo.n_sources).
-    _mc = config['source_space'].get('monte_carlo') or {}
-    _is_mc = config['source_space'].get('source_sampling') == 'monte_carlo'
+    from .pool import is_pool_sampling, pool_config
+    _mc = pool_config(config)
+    _is_mc = is_pool_sampling(config)
     if _is_mc:
         n_shells = int(_mc.get('pool_n_shells', 12))
     shell_scales = shell_config.get('shell_scales', None)

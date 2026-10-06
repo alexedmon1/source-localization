@@ -93,6 +93,16 @@ SAMPLING_MODES: Dict[str, Method] = {
         'cartesian, shell and hybrid.',
         caveat='ROI-only by construction — no single grid is solved, so the run '
                'has no vertex output and skip_roi_extraction raises.'),
+    'parcel_subspace': Method(
+        'parcel_subspace', "one inverse over each parcel's leadfield patterns",
+        'Builds the same dense pool as monte_carlo, represents each parcel by the '
+        'top n_patterns patterns of its pool leadfield, and solves one MNE (or '
+        'sLORETA) inverse over all of them. Deterministic: no draws, seed or sign '
+        'alignment. In simulation it localized about 1 mm closer than the deployed '
+        'monte_carlo operator (surface-evoked troubleshooting log, section 24).',
+        caveat='ROI-only, like monte_carlo. Which per-parcel component series to '
+               'use for evoked measures is provisional (dominant pattern as signed, '
+               'root-sum-square as magnitude); all components are saved.'),
 }
 
 

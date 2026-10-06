@@ -56,7 +56,7 @@ class TestVolumeCategories:
 def test_fixed_sampling_is_refused():
     cfg = _cfg()
     cfg["source_space"]["source_sampling"] = "fixed"
-    with pytest.raises(ValueError, match="monte_carlo only"):
+    with pytest.raises(ValueError, match="monte_carlo or parcel_subspace only"):
         hybrid.create_source_space(cfg, {})
 
 

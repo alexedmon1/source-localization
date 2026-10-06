@@ -81,21 +81,15 @@ def _labels_for_pool(config, previous_outputs, n_pool):
     return labels
 
 
-def run(config, previous_outputs):
-    """Build the Monte Carlo ROI operator and apply it to the recording."""
-    print("Monte Carlo ROI Extraction")
+def pool_leadfield(config, previous_outputs):
+    """One leadfield column per pool source, with each source's parcel.
 
-    mc = (config['source_space'].get('monte_carlo') or {})
-    n_sources = int(mc.get('n_sources', 160))
-    n_draws = int(mc.get('n_draws', 100))
-    seed = int(mc.get('seed', 20260821))
-    align_draws = bool(mc.get('align_draws', False))
-
-    inv_cfg = config.get('inverse', {})
-    lambda2 = inv_cfg.get('lambda2') or 1.0 / float(inv_cfg.get('snr', 3.0)) ** 2
-
+    Shared by the Monte Carlo and parcel-subspace steps, which build different ROI operators
+    from the same pool. Returns a dict with ``G`` (n_channels, n_pool), ``is_surf`` (hybrid
+    only, else None), ``orientation``, ``source_type``, ``coords`` and ``labels``.
+    """
     fwd = previous_outputs['fwd']
-    epochs = previous_outputs['epochs']
+    inv_cfg = config.get('inverse', {})
 
     # Fixed orientation where the source space carries meaningful normals, so a
     # pool source is one leadfield column. Anything else stays free and is
@@ -110,6 +104,7 @@ def run(config, previous_outputs):
                       and surf.get('method', 'anatomical') == 'anatomical')
         orientation = 'fixed' if anatomical else 'free'
 
+    is_surf = None
     if source_type == 'hybrid':
         # Surface sources along their normal, volume sources along their
         # dominant direction; MNE's fixed conversion refuses a volume entry.
@@ -134,6 +129,29 @@ def run(config, previous_outputs):
             print(f"    Free orientation collapsed to dominant direction "
                   f"({n_pool} sources)")
     n_pool = G.shape[1]
+    return {'G': G, 'is_surf': is_surf, 'orientation': orientation, 'source_type': source_type,
+            'coords': previous_outputs['source_coords_mm'][:n_pool],
+            'labels': _labels_for_pool(config, previous_outputs, n_pool)}
+
+
+def run(config, previous_outputs):
+    """Build the Monte Carlo ROI operator and apply it to the recording."""
+    print("Monte Carlo ROI Extraction")
+
+    mc = (config['source_space'].get('monte_carlo') or {})
+    n_sources = int(mc.get('n_sources', 160))
+    n_draws = int(mc.get('n_draws', 100))
+    seed = int(mc.get('seed', 20260821))
+    align_draws = bool(mc.get('align_draws', False))
+
+    inv_cfg = config.get('inverse', {})
+    lambda2 = inv_cfg.get('lambda2') or 1.0 / float(inv_cfg.get('snr', 3.0)) ** 2
+
+    epochs = previous_outputs['epochs']
+    pool = pool_leadfield(config, previous_outputs)
+    G, is_surf, orientation = pool['G'], pool['is_surf'], pool['orientation']
+    source_type = pool['source_type']
+    n_pool = G.shape[1]
 
     # A hybrid draws its two parts separately by default: the surface part takes
     # n_sources exactly as a surface-only run would (same pool, same seeds, so the
@@ -157,8 +175,7 @@ def run(config, previous_outputs):
         else:
             raise ValueError(f"monte_carlo.hybrid_draw must be stratified or union, got {hybrid_draw}")
 
-    coords = previous_outputs['source_coords_mm'][:n_pool]
-    labels = _labels_for_pool(config, previous_outputs, n_pool)
+    coords, labels = pool['coords'], pool['labels']
     n_labelled = sum(1 for x in labels if x)
     print(f"    Pool: {n_pool:,} sources, {n_labelled:,} labelled")
     print(f"    Drawing {n_draws} configurations of {n_sources} sources")

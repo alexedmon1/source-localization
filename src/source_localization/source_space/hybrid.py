@@ -108,9 +108,11 @@ def create_source_space(config, previous_outputs):
     """Surface entries (101, 102) followed by one volume entry for deep structures."""
     from . import cartesian_based, surface_anatomical
 
-    if config["source_space"].get("source_sampling") != "monte_carlo":
+    from .pool import is_pool_sampling
+    if not is_pool_sampling(config):
         raise ValueError(
-            "source_type 'hybrid' supports source_sampling: monte_carlo only. The "
+            "source_type 'hybrid' supports source_sampling: monte_carlo or parcel_subspace "
+            "only. The "
             "fixed-grid inverse applies one orientation rule to every source, and a "
             "hybrid needs fixed orientation on the surface and free in the volume.")
 
@@ -129,8 +131,10 @@ def create_source_space(config, previous_outputs):
         (config["source_space"].get("cartesian") or config["source_space"].get("volumetric") or {}),
         spacing_mm=spacing)
     vcfg["source_space"].pop("volumetric", None)
-    vcfg["source_space"]["monte_carlo"] = dict(
-        config["source_space"].get("monte_carlo") or {}, pool_spacing_mm=spacing)
+    for key in ("monte_carlo", "parcel_subspace"):
+        if key == "monte_carlo" or config["source_space"].get(key) is not None:
+            vcfg["source_space"][key] = dict(
+                config["source_space"].get(key) or {}, pool_spacing_mm=spacing)
     src_v, coords_v, _ = cartesian_based.create_source_space(vcfg, previous_outputs)
     vlab = _volume_labels(config, coords_v)
     keep = np.isin(vlab, deep_ids)
