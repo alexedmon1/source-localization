@@ -16,6 +16,7 @@ from .steps import (
     inverse_solution,
     roi_extraction,
     monte_carlo_roi,
+    parcel_subspace_roi,
     spectral_analysis,
     visualization
 )
@@ -239,19 +240,23 @@ class Pipeline:
         # analysis to refer to.
         sampling = (self.config['source_space'].get('source_sampling', 'fixed')
                     or 'fixed')
-        if sampling not in ('fixed', 'monte_carlo'):
+        if sampling not in ('fixed', 'monte_carlo', 'parcel_subspace'):
             raise ValueError(
-                f"Unknown source_sampling: {sampling}. Valid: fixed, monte_carlo")
-        if sampling == 'monte_carlo':
+                f"Unknown source_sampling: {sampling}. Valid: fixed, monte_carlo, parcel_subspace")
+        if sampling in ('monte_carlo', 'parcel_subspace'):
             if skip_roi_extraction:
                 raise ValueError(
-                    "source_sampling='monte_carlo' produces ROI output only, so "
+                    f"source_sampling='{sampling}' produces ROI output only, so "
                     "skip_roi_extraction leaves it with nothing to produce. Use "
                     "source_sampling='fixed' for vertex-level work.")
+            # The parcel-subspace operator is built from the same dense pool, but
+            # represents each parcel by its leadfield patterns and solves once.
+            step = (('monte_carlo_roi', monte_carlo_roi) if sampling == 'monte_carlo'
+                    else ('parcel_subspace_roi', parcel_subspace_roi))
             steps_to_run = [
                 (name, mod) for name, mod in self.STEPS
                 if name not in ('inverse_solution', 'roi_extraction')
-            ] + [('monte_carlo_roi', monte_carlo_roi)]
+            ] + [step]
 
         if skip_roi_extraction:
             steps_to_run = [

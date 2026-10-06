@@ -47,10 +47,10 @@ def create_source_space(config, previous_outputs):
     # Under Monte Carlo sampling this source space is the *pool* that draws are
     # taken from, not the deployed grid, so it is built dense. The deployed
     # density is a property of each draw (monte_carlo.n_sources).
-    _mc = config['source_space'].get('monte_carlo') or {}
-    if config['source_space'].get('source_sampling') == 'monte_carlo':
-        spacing_mm = float(_mc.get('pool_spacing_mm', 0.5))
-        print(f'    Monte Carlo pool: grid at {spacing_mm} mm')
+    from .pool import is_pool_sampling, pool_config
+    if is_pool_sampling(config):
+        spacing_mm = float(pool_config(config).get('pool_spacing_mm', 0.5))
+        print(f"    Pool ({config['source_space']['source_sampling']}): grid at {spacing_mm} mm")
     pos_mm = source_config.get('pos_mm', 0.0)
     use_brain_mask = source_config.get('use_brain_mask', True)
     apply_bem_constraint = source_config.get('apply_bem_constraint', True)

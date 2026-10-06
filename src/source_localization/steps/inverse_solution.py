@@ -13,8 +13,11 @@ Beamformer methods (LCMV, DICS) offer:
 Output Types:
 - Magnitude: Always positive (norm across 3 orientations). Use for power analysis.
 - Signed: Preserves sign. Under fixed orientation this is the component along the
-  cortical normal; under free orientation it is the max-variance component per
+  cortical normal; under free orientation it is, by default, the max-variance component per
   epoch (not an SVD — see apply_inverse_to_epoch). Use for connectivity analysis.
+  ``inverse.signed_orientation: leadfield`` instead projects every epoch onto each source's
+  fixed leadfield direction (:func:`leadfield_directions`); the per-epoch choice switches a
+  source's axis between epochs and costs phase locking (surface-evoked X56).
 
 Memory Optimization:
 - Epoch-wise processing to minimize peak memory usage
@@ -355,7 +358,48 @@ def compute_inverse_operator(fwd, method='sLORETA', snr=3.0, lambda2=None, depth
     return W, normalizer, n_comp
 
 
-def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources, n_comp=3):
+def leadfield_directions(fwd, labels=None):
+    """Each free-orientation source's dominant leadfield direction, one fixed unit vector per source.
+
+    The first right singular vector of the source's three leadfield columns: the orientation
+    along which a dipole there is most visible to the array. It depends on the head model and
+    montage only, so it is the same for every recording.
+
+    Sign. With ``labels`` (one parcel name per source, None or '' for none), each source's sign is
+    set so that its electrode pattern agrees with its parcel's dominant pattern, so a parcel mean
+    of the signed series does not cancel. A source without a parcel, or every source when
+    ``labels`` is None, points dorsally (positive z), falling back to a positive component sum
+    when it has no z component. Measured on real 40 Hz ITC (surface-evoked troubleshooting log,
+    section 28), parcel alignment kept the most phase locking of the rules tried.
+
+    Returns ndarray (n_sources, 3).
+    """
+    G = np.asarray(fwd['sol']['data'], float)
+    n = G.shape[1] // 3
+    blocks = G.reshape(G.shape[0], n, 3)
+    dirs = np.stack([np.linalg.svd(blocks[:, s, :], full_matrices=False)[2][0] for s in range(n)])
+    anchor = np.where(np.abs(dirs[:, 2]) > 1e-6, dirs[:, 2], dirs.sum(axis=1))
+    dirs = dirs * np.where(anchor < 0, -1.0, 1.0)[:, None]
+    if labels is not None:
+        labels = list(labels)
+        if len(labels) != n:
+            raise ValueError(f"{len(labels)} labels for {n} sources")
+        topo = np.einsum('csk,sk->cs', blocks, dirs)
+        groups = {}
+        for i, name in enumerate(labels):
+            if name:
+                groups.setdefault(name, []).append(i)
+        for idx in groups.values():
+            u = np.linalg.svd(topo[:, idx], full_matrices=False)[0][:, 0]
+            if u @ topo[:, idx].sum(axis=1) < 0:
+                u = -u
+            flip = np.sign(u @ topo[:, idx])
+            flip[flip == 0] = 1.0
+            dirs[idx] *= flip[:, None]
+    return dirs
+
+
+def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources, n_comp=3, fixed_dirs=None):
     """
     Apply precomputed inverse operator to a single epoch.
 
@@ -373,6 +417,10 @@ def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources, n_comp=3):
         Number of sources (n_dipoles / n_comp)
     n_comp : int
         Components per source: 1 under fixed orientation, else 3.
+    fixed_dirs : ndarray (n_sources, 3), optional
+        With three components, project every epoch onto these fixed directions for the
+        signed series (:func:`leadfield_directions`) instead of choosing the largest-variance
+        component per epoch. Ignored under fixed orientation.
 
     Returns
     -------
@@ -402,8 +450,18 @@ def apply_inverse_to_epoch(W, normalizer, epoch_data, n_sources, n_comp=3):
         signed = source_activity_nc[:, 0, :].astype(np.float32)
         return magnitude, signed
 
+    if fixed_dirs is not None:
+        # One orientation per source for every epoch, so the phase relation between epochs
+        # is preserved (X56).
+        signed = np.einsum('sct,sc->st', source_activity_nc,
+                           np.asarray(fixed_dirs, float)).astype(np.float32)
+        return magnitude, signed
+
     # Signed: use first component weighted by sign of max variance direction
-    # This is faster than full SVD and gives similar results for single epochs
+    # This is faster than full SVD and gives similar results for single epochs.
+    # The choice is made per epoch, so a source can switch axis between epochs; that
+    # costs phase locking (surface-evoked X56). inverse.signed_orientation: leadfield
+    # avoids it.
     signed = np.zeros((n_sources, epoch_data.shape[1]), dtype=np.float32)
     for i in range(n_sources):
         # Find dominant orientation from variance
@@ -1038,6 +1096,11 @@ def run(config, previous_outputs):
         # Use memory-efficient epoch-wise processing for MNE/dSPM/sLORETA
         print(f"    Using memory-efficient epoch-wise processing")
 
+        signed_rule = config['inverse'].get('signed_orientation', 'per_epoch_variance')
+        if signed_rule not in ('per_epoch_variance', 'leadfield'):
+            raise ValueError(
+                f"inverse.signed_orientation must be per_epoch_variance or leadfield, got {signed_rule!r}")
+
         # Compute inverse operator once (this is small and reusable)
         W, normalizer, n_comp = compute_inverse_operator(
             fwd, method=method, snr=snr, lambda2=lambda2,
@@ -1056,6 +1119,16 @@ def run(config, previous_outputs):
         # step, but this is where a mismatch would do silent damage, so refuse
         # here rather than trust that it happened.
         _check_channel_alignment(fwd, epochs)
+
+        fixed_dirs = None
+        if signed_rule == 'leadfield' and n_comp == 3:
+            labels = None
+            if previous_outputs.get('source_coords_mm') is not None:
+                from .monte_carlo_roi import _labels_for_pool
+                labels = _labels_for_pool(config, previous_outputs, n_sources)
+            fixed_dirs = leadfield_directions(fwd, labels)
+            print("    Signed series: projected onto each source's fixed leadfield direction"
+                  + (", signs aligned within each parcel" if labels is not None else ""))
 
         # Get epochs data
         epochs_data = epochs.get_data()  # (n_epochs, n_channels, n_times)
@@ -1078,7 +1151,7 @@ def run(config, previous_outputs):
 
             # Apply inverse to this epoch
             mag_epoch, signed_epoch = apply_inverse_to_epoch(
-                W, normalizer, epoch_data, n_sources, n_comp=n_comp
+                W, normalizer, epoch_data, n_sources, n_comp=n_comp, fixed_dirs=fixed_dirs
             )
 
             # Store in output arrays
