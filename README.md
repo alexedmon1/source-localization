@@ -96,8 +96,11 @@ claim about anatomy.
   and takes the **unweighted mean** of the sources in each parcel.
 - Two variants are written: **magnitude** (always positive) and **signed**. Under
   the fixed-orientation anatomical surface the signed value is the component
-  along the cortical normal. Under free orientation it is the component with the
-  largest variance within each epoch. Neither is an SVD.
+  along the cortical normal. Under free orientation it is, by default, the component
+  with the largest variance within each epoch. Neither is an SVD. With
+  `inverse.signed_orientation: leadfield` it is instead the projection onto each
+  source's fixed leadfield direction, signs aligned within each parcel; see
+  "What the outputs are".
 - Depth-weighted extraction exists in `source_analysis.roi_analysis` but is
   **not** part of the pipeline; the earlier claim that it was has been removed.
 
@@ -475,6 +478,36 @@ Treat it as an anatomical view of the electrode information, not as added resolu
 Implementation: `source_space/hybrid.py`, `steps/monte_carlo_roi.py`; tests in
 `tests/test_hybrid.py`.
 
+### Parcel-Subspace Sampling
+
+`source_sampling: parcel_subspace` builds the same dense pool as Monte Carlo, but instead
+of averaging many sparse draws it represents each parcel by the top `n_patterns` patterns
+of its pool leadfield and solves one inverse over all of them. Deterministic: no draws,
+seed or sign alignment. Works with surface, Cartesian, shell and hybrid source spaces.
+
+```yaml
+source_space:
+  source_sampling: parcel_subspace
+  parcel_subspace:
+    n_patterns: 3        # patterns per parcel
+    method: MNE          # MNE | sLORETA
+    pool_spacing_mm: 0.2
+```
+
+Measured in simulation on the 30-electrode mouse array (one head model, 10 dB), as MS1's
+peak displacement over 15 cortical parcels: the deployed Monte Carlo operator (48 x 100,
+sLORETA) 3.05 mm, ROI-based 1.85, this operator (r = 3, MNE) 1.95; the floor set by the
+exact Bayesian posterior was 0.98. MNE localizes better than sLORETA here; per component the
+two have the same filter and differ only in scale, so ITC, phase and within-parcel effect
+sizes are identical under either. More than 3 patterns helped the large dorsal parcels and
+cost the rest.
+
+Output per parcel: the dominant pattern's series as signed, the root-sum-square over
+components as magnitude (provisional), and every component (`step6_roi_components.pkl`)
+and the operator (`parcel_subspace_operator.npz`). Implementation:
+`source_space/parcel_subspace.py`, `steps/parcel_subspace_roi.py`; tests in
+`tests/test_parcel_subspace.py`.
+
 ### Which Preset Should I Use?
 
 - **ROI statistics on an existing design:** `roi_based_ellipsoid --atlas allen32`.
@@ -607,9 +640,19 @@ raw = mne.io.read_raw_eeglab('results/data/roi_timeseries_signed.set')
   parcel. Use it for power.
 - **Signed** keeps polarity. Under the anatomical surface it is the projection
   onto the cortical normal, so sign is anatomically meaningful. Under free
-  orientation it is the max-variance component per epoch, whose sign is
+  orientation it is, by default, the max-variance component per epoch, whose sign is
   arbitrary between epochs and sources; use it for within-epoch connectivity,
   not for polarity claims.
+- **The default free-orientation signed series costs phase locking.** A source can
+  switch axis between epochs, and where its components have opposite signs each switch
+  flips its series by 180 degrees. On real mouse 40 Hz ASSR recordings this happened in
+  15% of epochs and lowered ROI-based inter-trial coherence (wild-type mean 0.563
+  against 0.671). For phase-based measures (ITC, phase, phase connectivity) set
+  `inverse.signed_orientation: leadfield`: every epoch is projected onto each source's
+  fixed leadfield direction (`steps.inverse_solution.leadfield_directions`), with signs
+  aligned within each parcel. It depends on the head model only, so it is the same for
+  every recording. The default is unchanged so existing results reproduce. Monte Carlo,
+  parcel-subspace and fixed-orientation outputs are not affected.
 - **DICS** produces a single band-power value per source, not a time series.
   The pipeline writes it as `roi_power_*.csv` and `source_power_*.csv` rather
   than `.set` files, which cannot hold one sample. DICS does not run on the
@@ -833,6 +876,9 @@ atlas, and source space, so run the validation for the configuration you
 intend to use and report the depth-stratified result. The
 [Monte Carlo sampling guide](docs/guides/monte_carlo_sampling.md) describes
 how to integrate over source-grid placement.
+`validation.displacement` scores any parcel operator by peak displacement, the expected
+distance in mm between the parcel a source is in and the parcel it is credited to (the
+statistic of the published resting-state paper, reproduced exactly against its table).
 
 ### Python API for Validation
 
