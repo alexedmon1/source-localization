@@ -179,7 +179,9 @@ class DipoleSimulator:
         noise_type: str = "white",
         noise_spatial_scale_mm: float = 3.0,
         noise_temporal_exponent: float = 1.0,
-        time_course: Optional[np.ndarray] = None
+        time_course: Optional[np.ndarray] = None,
+        truth_gain: Optional[np.ndarray] = None,
+        background: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, Dict]:
         """
         Simulate EEG from a single dipole source.
@@ -222,6 +224,17 @@ class DipoleSimulator:
             Correlation length in mm for spatially-correlated noise types.
         noise_temporal_exponent : float, default=1.0
             Spectral exponent for 1/f-shaped noise types (1.0 = pink).
+        truth_gain : ndarray, shape (n_channels, 3), optional
+            The source's free-orientation leadfield **at the requested position** under the truth's own head model
+            (the ``realistic`` regime; see :mod:`.regime` and :class:`.head_models.TruthForward`). When given, the
+            clean EEG is ``truth_gain @ moment`` and the simulation forward model is not used for the signal; the
+            snapped-position metadata is still reported, as a diagnostic. When None (the default, and the
+            ``legacy`` regime), the dipole sits at the nearest source of the simulation forward model, exactly as
+            before v0.6.0.
+        background : ndarray, shape (n_channels, n_times), optional
+            Noise to use instead of generating it: a recorded background window
+            (:class:`.noise.RecordedBackground`), at any scale. It is rescaled to the target SNR (or variance)
+            like generated noise. ``noise_type`` is then ignored.
 
         Returns
         -------
@@ -278,7 +291,22 @@ class DipoleSimulator:
         # Convert nAm to Am (MNE uses SI units)
         amplitude_Am = amplitude_nAm * 1e-9
 
-        if time_course is None:
+        if truth_gain is not None:
+            # Realistic regime: the signal comes from the truth's own leadfield at the requested position.
+            g = np.asarray(truth_gain, dtype=float)
+            if g.shape != (self.n_channels, 3):
+                raise ValueError(f"truth_gain must be ({self.n_channels}, 3); got {g.shape}")
+            if time_course is None:
+                waveform = np.full(n_times, amplitude_Am)
+            else:
+                waveform = np.asarray(time_course, dtype=float).ravel() * amplitude_Am
+                if waveform.shape[0] != n_times:
+                    raise ValueError(
+                        f"time_course has {waveform.shape[0]} samples but duration_s x sfreq "
+                        f"implies {n_times}"
+                    )
+            eeg_clean = (g @ orientation)[:, None] * waveform[None, :]
+        elif time_course is None:
             # Unchanged constant-moment path. Deliberately a separate branch
             # rather than multiplying by np.ones(n_times), so that every
             # existing call reproduces its previous output bit-for-bit.
@@ -294,18 +322,24 @@ class DipoleSimulator:
             for i in range(3):
                 dipole_moment[source_idx * 3 + i, :] = orientation[i] * amplitude_Am * tc
 
-        # Generate clean EEG using forward model
-        eeg_clean = self.leadfield @ dipole_moment
+        # Generate clean EEG using forward model (unless the truth's own gain was given)
+        if truth_gain is None:
+            eeg_clean = self.leadfield @ dipole_moment
 
         # Add realistic noise (unit variance; scaled to target SNR below)
         rng = np.random.RandomState(noise_seed)
-        noise = generate_noise(
-            self.n_channels, n_times, rng,
-            noise_type=noise_type,
-            electrode_positions_mm=self.electrode_positions_mm,
-            spatial_scale_mm=noise_spatial_scale_mm,
-            temporal_exponent=noise_temporal_exponent
-        )
+        if background is not None:
+            noise = np.asarray(background, dtype=float)
+            if noise.shape != (self.n_channels, n_times):
+                raise ValueError(f"background must be ({self.n_channels}, {n_times}); got {noise.shape}")
+        else:
+            noise = generate_noise(
+                self.n_channels, n_times, rng,
+                noise_type=noise_type,
+                electrode_positions_mm=self.electrode_positions_mm,
+                spatial_scale_mm=noise_spatial_scale_mm,
+                temporal_exponent=noise_temporal_exponent
+            )
 
         # Calculate signal power
         signal_power = np.mean(eeg_clean ** 2)
@@ -357,7 +391,11 @@ class DipoleSimulator:
             'actual_snr_db': actual_snr_db,
             'noise_mode': noise_mode,
             'noise_variance_uV2': noise_variance_uV2 if noise_mode == "fixed_variance" else None,
-            'noise_type': noise_type,
+            'noise_type': 'recorded' if background is not None else noise_type,
+            # Where the signal and noise came from (see validation.regime):
+            'signal_source': ('truth_gain at requested position' if truth_gain is not None
+                              else 'simulation forward at snapped source'),
+            'noise_source': 'recorded background' if background is not None else 'generated',
             'noise_spatial_scale_mm': (
                 noise_spatial_scale_mm if noise_type in ('spatial', 'colored') else None
             ),
@@ -452,10 +490,16 @@ class DipoleSimulator:
         orientation2: Optional[np.ndarray] = None,
         amplitude1_nAm: float = 50.0,
         amplitude2_nAm: float = 50.0,
+        truth_gain1: Optional[np.ndarray] = None,
+        truth_gain2: Optional[np.ndarray] = None,
+        background: Optional[np.ndarray] = None,
         **kwargs
     ) -> Tuple[np.ndarray, Dict]:
         """
         Simulate EEG from two simultaneous dipoles.
+
+        ``truth_gain1``/``truth_gain2`` and ``background`` are as in :meth:`simulate_dipole` (the ``realistic``
+        validation regime; see :mod:`.regime`). Omitted, the behaviour is the pre-0.6.0 one (``legacy``).
 
         Useful for testing spatial resolution limits and ability to resolve
         multiple concurrent sources.
@@ -502,6 +546,7 @@ class DipoleSimulator:
             position_mm=position1_mm,
             orientation=orientation1,
             amplitude_nAm=amplitude1_nAm,
+            truth_gain=truth_gain1,
             **kwargs_copy
         )
 
@@ -510,6 +555,7 @@ class DipoleSimulator:
             position_mm=position2_mm,
             orientation=orientation2,
             amplitude_nAm=amplitude2_nAm,
+            truth_gain=truth_gain2,
             **kwargs_copy
         )
 
@@ -528,13 +574,18 @@ class DipoleSimulator:
 
         n_times = int(duration_s * sfreq)
         rng = np.random.RandomState(noise_seed)
-        noise = generate_noise(
-            self.n_channels, n_times, rng,
-            noise_type=noise_type,
-            electrode_positions_mm=self.electrode_positions_mm,
-            spatial_scale_mm=noise_spatial_scale_mm,
-            temporal_exponent=noise_temporal_exponent
-        )
+        if background is not None:
+            noise = np.asarray(background, dtype=float)
+            if noise.shape != (self.n_channels, n_times):
+                raise ValueError(f"background must be ({self.n_channels}, {n_times}); got {noise.shape}")
+        else:
+            noise = generate_noise(
+                self.n_channels, n_times, rng,
+                noise_type=noise_type,
+                electrode_positions_mm=self.electrode_positions_mm,
+                spatial_scale_mm=noise_spatial_scale_mm,
+                temporal_exponent=noise_temporal_exponent
+            )
 
         signal_power = np.mean(eeg_clean ** 2)
         noise_power = np.mean(noise ** 2)
@@ -579,7 +630,11 @@ class DipoleSimulator:
             'snr_db': snr_db,
             'signal_power': float(signal_power),
             'noise_power_added': float(noise_scale ** 2 * noise_power),
-            'noise_type': noise_type
+            'noise_type': 'recorded' if background is not None else noise_type,
+            'signal_source': ('truth_gain at requested position'
+                              if (truth_gain1 is not None or truth_gain2 is not None)
+                              else 'simulation forward at snapped source'),
+            'noise_source': 'recorded background' if background is not None else 'generated'
         }
 
         if self.verbose:

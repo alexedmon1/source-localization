@@ -152,6 +152,10 @@ def main():
     p.add_argument('--noise-types', nargs='+', default=['white', 'colored'],
                    choices=list(NOISE_TYPES))
     p.add_argument('--figure-noise', default='colored', choices=list(NOISE_TYPES))
+    p.add_argument('--regime', choices=['realistic', 'legacy'], default=None,
+        help="'realistic' (default): truths through head models drawn from a prior; 'legacy': the "
+             "v0.5.x assumptions, for reproducing pre-0.6.0 numbers only. See "
+             "source_localization.validation.regime.")
     args = p.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -160,7 +164,8 @@ def main():
     print(f"Loading pipeline from {args.pipeline_dir}")
     test = RobustnessTest.from_pipeline_dir(
         args.pipeline_dir, inverse_method=args.inverse_method,
-        inverse_snr=args.inverse_snr, verbose=True)
+        inverse_snr=args.inverse_snr, verbose=True,
+        regime=args.regime)
 
     started = datetime.now()
     result = test.run_orientation_resolvability_test(

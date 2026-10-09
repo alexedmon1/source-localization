@@ -156,6 +156,19 @@ Directory Structure:
              'combined (recommended: runs both, reports ROI acc from centroids + loc error from grid)'
     )
 
+    parser.add_argument(
+        '--regime',
+        choices=['realistic', 'legacy'],
+        default=None,
+        help="Simulation regime (overrides validation.regime in the config; default 'realistic'). "
+             "'realistic': truths at the requested positions through head models drawn from a prior "
+             "(registration shift + skull conductivity), recorded background noise if configured, and a "
+             "noise-only control. 'legacy': the v0.5.x assumptions (the inversion's own forward model at "
+             "grid-snapped positions, generated noise, no noise-only control), kept only to reproduce numbers "
+             "produced before v0.6.0; best-case and not comparable with 'realistic'. "
+             "Defined in source_localization.validation.regime."
+    )
+
     # Modes
     parser.add_argument(
         '--quick', '-q',
@@ -266,6 +279,32 @@ Directory Structure:
         help='Summarize validation results from existing results directory (includes depth analysis)'
     )
 
+    # Planted-network validation
+    net_group = parser.add_argument_group(
+        'Network validation',
+        'Which networks can this montage, source model and atlas resolve? Coupled sources are planted under '
+        'perturbed head models into real recorded backgrounds and scored against the same backgrounds unplanted. '
+        'See docs/validation/README.md, section 7.')
+    net_group.add_argument(
+        '--networks',
+        type=str,
+        metavar='SPEC_YAML',
+        help='Run planted-network validation from a spec (see validation.networks.load_spec)'
+    )
+    net_group.add_argument(
+        '--networks-output',
+        type=str,
+        default=None,
+        metavar='DIR',
+        help='Output directory for --networks (default: <spec dir>/network_validation)'
+    )
+    net_group.add_argument(
+        '--workers',
+        type=int,
+        default=None,
+        help='Worker processes for --networks (default: the spec\'s workers)'
+    )
+
     return parser
 
 
@@ -299,6 +338,17 @@ def run_validation_cli(args: argparse.Namespace) -> int:
     # Handle --batch (batch validation mode)
     if args.batch:
         return run_batch_mode(args, verbose)
+
+    # Handle --networks (planted-network validation)
+    if getattr(args, 'networks', None):
+        from pathlib import Path as _Path
+        from .networks import NetworkValidation, load_spec
+        spec = load_spec(args.networks)
+        if args.workers:
+            spec.workers = args.workers
+        out = args.networks_output or str(_Path(args.networks).parent / 'network_validation')
+        NetworkValidation(spec, verbose=verbose).run(out)
+        return 0
 
     # Require --test-dir for non-batch, non-compare modes
     if not args.test_dir:
@@ -365,7 +415,8 @@ def run_validation_cli(args: argparse.Namespace) -> int:
             quick=args.quick,
             verbose=verbose,
             atlas=args.atlas,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            regime=args.regime
         )
 
         if not results:
@@ -453,7 +504,8 @@ def run_batch_mode(args: argparse.Namespace, verbose: bool) -> int:
             test_all_sources=test_all_sources,
             n_test_sources=n_test_sources,
             atlas=args.atlas,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            regime=args.regime
         )
 
         results = runner.run_all(verbose=verbose)
