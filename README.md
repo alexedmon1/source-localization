@@ -1022,10 +1022,14 @@ Notable changes in 0.6.0:
 - **Validation regime.** The validation runner defaults to the `realistic` regime: truths at the requested
   positions through head models drawn from a prior (registration shift, skull conductivity), recorded background
   noise when configured, and a noise-only control. `legacy` (`--regime legacy`) reproduces the v0.5.x assumptions
-  for old numbers only; its results go to `<config>_legacy/`. `BatchValidationRunner` and `RobustnessTest` run
-  under the legacy regime only, and say so. See [docs/validation/README.md](docs/validation/README.md) and
-  `source_localization.validation.regime`
+  for old numbers only; its results go to `<config>_legacy/`. See
+  [docs/validation/README.md](docs/validation/README.md) and `source_localization.validation.regime`
 - **Validation numbers change:** realistic-regime results are not comparable with earlier ones
+- `validate --batch` and `RobustnessTest` follow the regime too (the sweep scripts take `--regime`); the
+  posterior and ROI-certainty scripts write a noise-only control
+- **Planted-network validation** (`validation.networks`, `validate --networks spec.yaml`): which networks a
+  montage, source model and atlas can resolve, with your own connectivity metrics injected; optional directed
+  stage. `validation.connectivity` (no ground truth) is deprecated
 
 Notable changes in 0.5.1 (`v0.5.1`):
 

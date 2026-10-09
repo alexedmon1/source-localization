@@ -37,6 +37,10 @@ nav:
   - Validation:
       - Validation guide: validation/README.md
       - "Design: honest-by-default validation": validation/DESIGN_validation_upgrade.md
+      - "Methods: single source": validation/methods/SINGLE_SOURCE_VALIDATION.md
+      - "Methods: two sources": validation/methods/TWO_SOURCE_VALIDATION.md
+      - "Methods: ROI certainty": validation/methods/ROI_CERTAINTY_VALIDATION.md
+      - "Methods: reasoning record": validation/methods/SOURCE_CERTAINTY.md
   - Guides:
       - Adding an atlas: guides/adding_an_atlas.md
       - Electrode coordinate setup: guides/ELECTRODE_COORDINATE_SETUP.md

@@ -2,8 +2,9 @@
 
 This is the user guide to `source_localization.validation`: what each tool answers, how to run it, how to
 validate a **new atlas** end to end, and what to report. It describes the code as it is in v0.6.0. Changes not
-yet made are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The older
-module reference (v0.4.0, API-level detail) is
+yet made are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The methods
+supplements behind sections 5-6 (single source, two sources, ROI certainty, and their reasoning record) are in
+[`methods/`](methods/). The older module reference (v0.4.0, API-level detail) is
 [`src/source_localization/validation/README.md`](../../src/source_localization/validation/README.md).
 
 ## Contents
@@ -14,7 +15,7 @@ module reference (v0.4.0, API-level detail) is
 4. [Forward-inverse accuracy: the `validate` CLI](#4-forward-inverse-accuracy-the-validate-cli)
 5. [Parcel certainty and displacement](#5-parcel-certainty-and-displacement)
 6. [Calibrated location and two sources](#6-calibrated-location-and-two-sources)
-7. [Connectivity](#7-connectivity)
+7. [Connectivity: planted-network validation](#7-connectivity-planted-network-validation)
 8. [What to report](#8-what-to-report)
 9. [Results you should not quote](#9-results-you-should-not-quote)
 10. [Troubleshooting](#10-troubleshooting)
@@ -39,9 +40,12 @@ it is unrelated to the legacy *atlas names* (`full`, `coarse_22roi`) the validat
 best-case and **not comparable** with realistic numbers. A legacy run logs a warning, and every output records
 which regime produced it (`validation_regime` in `metrics.json`).
 
-**Not yet ported (legacy only in v0.6.0):** `BatchValidationRunner` (`validate --batch`) and `RobustnessTest`
-simulate on their own path. They log that they run under the legacy regime, and record it in their outputs.
-Porting them is planned (design, section 4).
+**Every simulating component follows the regime:**
+- the `validate` runner;
+- `validate --batch` (`BatchValidationRunner`, option `regime=`);
+- `RobustnessTest` (`regime=`, and `--regime` on the sweep scripts). `RobustnessTest`'s realistic regime needs the
+  BEM: `from_pipeline_dir` loads it. A recorded background replaces **white** noise only; tests that sweep
+  coloured noise types keep them, since varying them is the point.
 
 Select the regime with `validation.regime` in the config, or `--regime realistic|legacy` on the CLI (section 4).
 In the realistic regime, other model errors still exist: head size, array rotation, per-electrode misplacement, BEM
@@ -64,7 +68,7 @@ and SNR), not of the package. Re-run it for the configuration you use, and repor
 | Are there two sources, and how far apart? | `two_source` | `scripts/run_two_source_posterior.py` | current |
 | How blurred is the operator (noise-free)? | `resolution` | `scripts/run_resolution_map.py` | partly superseded (section 9) |
 | Can two blobs be seen at a threshold? | `separability` | `scripts/run_separability.py` | superseded framing (section 9) |
-| Is a connectivity network resolvable? | `connectivity` | — | **no ground truth; not a validation** (section 7). Planned replacement: planted-network validation |
+| Is a connectivity network resolvable? Is its direction readable? | `networks` | `source-localization validate --networks spec.yaml` | current (section 7). The old `connectivity` module has no ground truth and is not a validation |
 
 ## 3. Validating a new atlas, step by step
 
@@ -195,7 +199,7 @@ source-localization validate --compare ./my_validation/results/a/ ./my_validatio
 | `--test-mode` | `roi_centroids` (ROI accuracy at parcel centroids), `uniform_grid` (localization error and depth), `combined` |
 | `--regime` | `realistic` (default) or `legacy`; overrides `validation.regime` (section 1) |
 | `--snr`, `--trials`, `--rois` | Override the config |
-| `--batch --presets ... --methods ...` | Sweep presets × inverse methods (`batch_runner`). **Legacy regime only** in v0.6.0 |
+| `--batch --presets ... --methods ...` | Sweep presets × inverse methods (`batch_runner`); follows `--regime` |
 
 **Outputs:** `results/<config>/metrics.json`, `validation_report.html` and `figures/`. `metrics.json` holds:
 - per SNR: localization error, ROI accuracy, depth-stratified error;
@@ -212,7 +216,7 @@ source-localization validate --compare ./my_validation/results/a/ ./my_validatio
 in the `validation:` block. The data are then simulated with those conductivities and inverted with the config's
 own. In the realistic regime the head-model prior perturbs around them.
 
-**Robustness sweeps** (**legacy regime only** in v0.6.0) (`robustness.RobustnessTest.from_pipeline_dir(...)`) cover SNR (`run_snr_test`), noise level
+**Robustness sweeps** (follow the regime; `RobustnessTest.from_pipeline_dir(..., regime=...)`) (`robustness.RobustnessTest.from_pipeline_dir(...)`) cover SNR (`run_snr_test`), noise level
 (`run_noise_test`), noise type (`run_noise_type_test`), amplitude (`run_amplitude_test`), two dipoles
 (`run_two_dipole_test`) and resolvability (`run_resolvability_test`). Section 9 lists which of their
 conclusions are superseded.
@@ -277,6 +281,11 @@ print(displacement_table(confusion, geometry))           # per true parcel, sort
 
 These do not depend on the atlas (they work on positions), but they answer the question an atlas claim rests on.
 
+> **Naming:** `DipolePosterior` is a Bayesian posterior over **source location** ("where is this source?"). It is
+> unrelated to Bayesian **group statistics** (effect sizes across animals, ROPE decisions), which live in the
+> analysis packages, not here. The validation regime (section 1) is likewise about the simulation, not about any
+> statistical prior.
+
 ```bash
 # single source: does a p% credible region contain the truth p% of the time? Plus "orbital" figures
 python scripts/run_posterior_orbital.py --pipeline-dir DIR --output-dir OUT [--spacing-mm 0.5] [--n-trials N]
@@ -287,28 +296,124 @@ python scripts/run_two_source_posterior.py --pipeline-dir DIR --output-dir OUT [
 
 - `DipolePosterior` assumes the forward model is exact and the noise white with known size. Its coverage is
   verified under those assumptions, not under model error (design, A4).
-- **Noise-only check (built into the `validate` runner; do it yourself here until these scripts have it,
-  planned):** run the readout on noise alone, i.e. simulated data with zero source amplitude. Report how often the
-  largest posterior probability, or the two-source Bayes factor, exceeds the level you would call confident. A
-  method that is confident on noise is not interpretable.
+- **Noise-only control:**
+  - `run_posterior_orbital.py` writes `posterior_noise_only_control.json`: credible radii on noise alone at each
+    SNR's noise level. They should approach the whole-grid radius; small radii mean the posterior reports a
+    location where there is none.
+  - `run_roi_certainty.py` writes `roi_noise_only_control.json`: how often a parcel reaches p >= 0.5 or 0.9 on
+    noise, and which parcel the noise-only argmax favours. For the MEA30 shell run at 10 dB: never confident
+    (0%), but the argmax drifts to Cerebellum at 9x uniform, so treat low-probability Cerebellum attributions with
+    suspicion.
+  - `--noise-only-trials 0` skips either.
+- **Two sources:** `run_two_source_posterior.py` already scores every Bayes factor against a **matched one-source
+  null** (a 10% false-alarm threshold), a stricter control than noise alone.
 
-## 7. Connectivity
+## 7. Connectivity: planted-network validation
 
 **`validation.connectivity` is not a validation.** It compares electrode and ROI connectivity on real data with
-no ground truth (means, SDs and density above 0.5), using mne-connectivity rather than your analysis's metrics.
-It cannot tell you whether a network is resolvable.
+no ground truth, so it cannot tell you whether a network is resolvable. Use **planted-network validation**
+(`validation.networks`) instead.
 
-What is known for the MEA30 30-electrode array, from a planted-network simulation (coupled sources planted under
-fresh head models into real resting EEG):
-- Coupling is **detected** (AUC 0.92-0.99 at +5 dB), but **no node pair is resolvable** in electrodes, parcels or
-  merged regions. The strongest edge is usually a neighbour of the true pair.
-- **Direction** is not readable on the cortical axes. dPLI's sign follows the sources' polarity, and DTF is
+### What it does
+
+For declared node pairs it plants coupled sources at known positions. Each truth is simulated through its own
+head model drawn from the prior (section 1), into **real resting EEG of your montage**. The connectivity is then
+read out at the electrodes and at source nodes, with **your own metric code**. Every edge is z-scored against the
+**same background with nothing planted**, which removes the real coupling the backgrounds contain.
+
+- **Undirected (default).** The resolvable-network table: for every pair, readout, metric, band and coupling kind
+  (lagged, envelope, zero-lag), the lowest SNR at which:
+  - the pair is the strongest edge (top-1) in >= 70% of truths;
+  - a single uncoupled source creates <= 10% false edges;
+  - both hold at that SNR and every higher one.
+
+  Also reported: detection AUC (does the planted edge rise at all?) and false-edge rates under the controls.
+- **Directed (optional).** Whether the readout tells which side leads, both at the exact pair and along coarse
+  axes you define (e.g. anterior-posterior), with controls that have no direction (zero-lag coupling of equal and
+  unequal strength, single sources, uncoupled sources).
+  - Built-in reference measures: PSI, Granger and time-reversed Granger.
+  - Your own directed measures (dPLI, DTF, TE...) are injected like the undirected ones.
+
+### Running it
+
+```bash
+source-localization validate --networks network_spec.yaml [--networks-output DIR] [--workers 9]
+```
+
+`network_spec.yaml` (all keys: `validation.networks.load_spec`):
+
+```yaml
+pipeline_dir: /path/to/run              # one completed pipeline run of your montage (hybrid recommended)
+backgrounds:                            # real resting EEG, same montage; draws alternate across groups
+  - {group: KO, files: "/data/rest/ko/*.set"}
+  - {group: WT, files: "/data/rest/wt/*.set"}
+n_epochs: 30                            # 2 s epochs per simulated recording (60 s)
+n_truths: 50
+bands: {theta: [6, 8], beta: [15, 25], low_gamma: [35, 45]}
+snrs_db: [-10, -5, 0, 5]
+truth_labels: {collapse_volume: true}   # pair node names: parcels, volume parcels as one "Deep"
+readouts:
+  - {name: R-el, type: electrodes}
+  - {name: R-parcel, type: nodes, collapse_volume: true}
+  - {name: R-region, type: nodes, collapse_volume: true, merge_map: regions.json}    # {parcel: region}
+pairs:
+  - {class: dorsal_far, a: Frontal_Anterior, b: Retrosplenial_L, axis: AP}   # axis only for the directed stage
+  - {class: homologous, a: Motor_L, b: Motor_R, axis: LR}
+metrics:                                # your analysis's own code: 'module:function' or '/path/file.py:function'
+  callable: /path/to/source-analytics/src/source_analytics/spectral/connectivity.py:compute_connectivity_matrix
+  names: [imag_coherence, wpli, aec, coherence]
+  abs: []
+workers: 9
+directed:                               # optional
+  axes:
+    AP: {anterior: [Frontal_Anterior, Motor_L, Motor_R, Olfactory_Bulb], posterior: [Retrosplenial_L, ...]}
+    LR: {left: [Motor_L, Somatosensory_L, ...], right: [Motor_R, Somatosensory_R, ...]}
+  measures:
+    dpli: {callable: ".../connectivity.py:compute_connectivity_matrix", key: dpli, net: antisym,
+           kwargs: {metrics: [dpli]}}
+```
+
+The metric callable must follow source-analytics' `compute_connectivity_matrix` contract:
+`f(node_ts: dict[name, 1-D array], sfreq, {band: (lo, hi)})` returning `(results[band][metric] -> (n, n) array,
+names)`.
+
+**Runtime:** about 1-2 h for 12 pairs x 3 bands x 4 SNRs x 5 kinds x 50 truths on 9 workers. Workers are pinned to
+one BLAS thread each.
+
+### Outputs
+
+| File | What it holds |
+|---|---|
+| `resolvable_networks.csv` | The deliverable: `resolvable_from_db` (lowest SNR, or `never`) and per-SNR top-1 and false-edge rates |
+| `detection.csv` | AUC of the planted edge vs a single source and vs two uncoupled sources |
+| `sims.csv.gz` | One row per simulation, readout and metric |
+| `electrode_assignment_<readout>.csv` | Which node each electrode was scored as |
+| `directed_readability.csv`, `directed_outcomes.csv.gz` | Directed stage, if run |
+| `summary.json` | Counts and the spec |
+
+### Reading it
+
+- **Detected but not resolvable** (high AUC, top-1 well under 0.70) means:
+  - the readout sees that coupling changed, but names a neighbouring pair ("ghost interactions");
+  - report edge-level results as "coupling changed near these nodes", not "between them";
+  - or merge the nodes it confuses and re-run.
+- **A merged node hides the coupling inside it** by construction. Choosing regions over parcels trades away every
+  network within a region.
+- **Direction:**
+  - a measure whose direction flips with the planted orientation, and stays quiet on the controls, reads
+    direction;
+  - anything else does not.
+  - dPLI's sign also depends on the relative polarity of the two sources, which is unknown in real data.
+
+### Known results for MEA30
+
+These are from the probability-atlas runs this harness reproduces; the acceptance tests are in
+`tests/test_network_validation.py`.
+- Coupling is detected (AUC 0.92-0.99 at +5 dB), but **no node pair is resolvable** in electrodes, parcels or
+  merged regions.
+- **Direction is not readable** on the cortical axes. dPLI's sign followed the sources' polarity, and DTF was
   biased toward the stronger source.
 - Details: source-analytics `docs/methods/CONNECTIVITY_METHODS.md`, "Validation on MEA30".
-
-**Planned:** `source-localization validate networks` produces, for any montage and atlas, the table of which
-networks are resolvable at which SNR, with your own connectivity metrics injected (design, component B). Until
-then, report edge-level connectivity results as "coupling changed near these nodes", not "between them".
 
 ## 8. What to report
 

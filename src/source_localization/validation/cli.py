@@ -279,6 +279,32 @@ Directory Structure:
         help='Summarize validation results from existing results directory (includes depth analysis)'
     )
 
+    # Planted-network validation
+    net_group = parser.add_argument_group(
+        'Network validation',
+        'Which networks can this montage, source model and atlas resolve? Coupled sources are planted under '
+        'perturbed head models into real recorded backgrounds and scored against the same backgrounds unplanted. '
+        'See docs/validation/README.md, section 7.')
+    net_group.add_argument(
+        '--networks',
+        type=str,
+        metavar='SPEC_YAML',
+        help='Run planted-network validation from a spec (see validation.networks.load_spec)'
+    )
+    net_group.add_argument(
+        '--networks-output',
+        type=str,
+        default=None,
+        metavar='DIR',
+        help='Output directory for --networks (default: <spec dir>/network_validation)'
+    )
+    net_group.add_argument(
+        '--workers',
+        type=int,
+        default=None,
+        help='Worker processes for --networks (default: the spec\'s workers)'
+    )
+
     return parser
 
 
@@ -312,6 +338,17 @@ def run_validation_cli(args: argparse.Namespace) -> int:
     # Handle --batch (batch validation mode)
     if args.batch:
         return run_batch_mode(args, verbose)
+
+    # Handle --networks (planted-network validation)
+    if getattr(args, 'networks', None):
+        from pathlib import Path as _Path
+        from .networks import NetworkValidation, load_spec
+        spec = load_spec(args.networks)
+        if args.workers:
+            spec.workers = args.workers
+        out = args.networks_output or str(_Path(args.networks).parent / 'network_validation')
+        NetworkValidation(spec, verbose=verbose).run(out)
+        return 0
 
     # Require --test-dir for non-batch, non-compare modes
     if not args.test_dir:
@@ -467,7 +504,8 @@ def run_batch_mode(args: argparse.Namespace, verbose: bool) -> int:
             test_all_sources=test_all_sources,
             n_test_sources=n_test_sources,
             atlas=args.atlas,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            regime=args.regime
         )
 
         results = runner.run_all(verbose=verbose)

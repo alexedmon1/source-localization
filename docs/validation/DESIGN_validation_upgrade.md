@@ -1,11 +1,17 @@
 # Design: honest-by-default validation, and planted-network validation
 
-**Status:** approved 2026-10-09. **PR 1 implemented (v0.6.0)** for the CLI validation runner: A1, A2, A3 and the
-regime switch, defined in `validation/regime.py`. Not yet done:
-- the realistic regime in `BatchValidationRunner` and `RobustnessTest` (both annotated as legacy-only);
-- the noise-only control in the posterior, two-source and ROI-certainty scripts;
-- B (planted networks);
-- A4 (deferred).
+**Status:** approved 2026-10-09. **Implemented in v0.6.0:**
+- **PR 1:** A1, A2, A3 and the regime switch (`validation/regime.py`) in the CLI runner.
+- **PR 1b:** the regime in `BatchValidationRunner` and `RobustnessTest`, through the shared
+  `validation/realistic.py`; noise-only controls in the posterior and ROI-certainty scripts. The two-source script
+  keeps its matched one-source null.
+- **PR 2:** B, planted-network validation (`validation/networks/`, `validate --networks`), with acceptance tests
+  against probability-atlas Phases 9 and 10. `connectivity.py` is deprecated.
+
+- **PR 3:** the methods supplements and their figures copied in from the external staging area into
+  `docs/validation/methods/`, with provenance headers (they assume an exact model and white noise).
+
+Not done: A4 (deferred), and simulated cohorts with known truth for the analysis packages (section 6).
 
 The user guide is [the validation README](README.md).
 
@@ -149,7 +155,25 @@ likelihood. It is not scheduled: revisit if a study needs calibrated location un
 - Every validation output records the truth head-model prior, the background source (recorded or synthetic) and
   the noise-only results. A result without them is a 0.5.x result.
 
-## 6. Open questions
+## 6. Package boundary: no group statistics here
+
+This package validates the **measurement**: locations, parcels, networks, and the regime they are simulated under.
+It contains **no group statistics**. In particular, the Bayesian group models (the bayes-sl workspace, moving to
+source-analytics) are not part of it, and nothing here imports them.
+
+To check whether group-level results can be trusted end to end (a known group effect planted at the sources,
+pushed through the realistic forward/inverse path into the measure, then analysed), the division is the one the
+network validation already uses:
+
+- **source-localization** (planned) produces **simulated cohorts with known truth**: planted group effects through
+  perturbed head models into recorded backgrounds, written in the same format as real pipeline output.
+- **source-analytics** analyses a simulated cohort exactly like real data and scores the result against the truth.
+  The Bayesian model's own calibration (prior predictive, parameter recovery, SBC, decision error rates at the
+  study design) also lives there, with the model.
+
+The interface is the output files; neither package depends on the other.
+
+## 7. Open questions
 
 1. **Where the default backgrounds come from.** No recordings ship with the package, so a user must point at their
    own. A small anonymised background set could be bundled for the tests.
