@@ -182,17 +182,43 @@ class RobustnessTest:
         info: mne.Info,
         inverse_method: str = 'sLORETA',
         inverse_snr: float = 3.0,
-        verbose: bool = True
+        verbose: bool = True,
+        regime: Optional[str] = None,
+        bem=None,
+        regime_options: Optional[dict] = None
     ):
+        """
+        ``regime`` is ``'realistic'`` (default) or ``'legacy'`` (v0.5.x assumptions; reproducing old numbers only),
+        as defined in :mod:`source_localization.validation.regime`. The realistic regime needs the simulation's
+        ``bem`` (:meth:`from_pipeline_dir` loads it). ``regime_options`` takes the same keys as a validation
+        config's ``validation:`` block (``truth_head_model``, ``background``, ``noise_only_control``,
+        ``regime_seed``).
+        """
         self.fwd = fwd
         self.src = src
         self.info = info
         self.inverse_method = inverse_method.lower()
         self.inverse_snr = inverse_snr
         self.verbose = verbose
-        # Robustness sweeps simulate on their own path, under the legacy regime only (see .regime).
-        from .regime import legacy_only
-        self.validation_regime = legacy_only('RobustnessTest')
+        from .regime import describe, resolve_regime
+        self.regime = resolve_regime(regime_options or {}, override=regime)
+        self.validation_regime = describe(self.regime)
+        self.validation_regime['component'] = 'RobustnessTest'
+        self._realistic = None
+        self.noise_only_control = None
+        if not self.regime.is_legacy:
+            if bem is None:
+                raise ValueError(
+                    "RobustnessTest in the realistic regime needs the simulation BEM: use "
+                    "RobustnessTest.from_pipeline_dir(...), pass bem=..., or regime='legacy' (v0.5.x assumptions, "
+                    "for reproducing old numbers only)")
+            from .realistic import RealisticTruths
+            background = None
+            bg = (regime_options or {}).get('background')
+            if bg:
+                from .noise import RecordedBackground
+                background = RecordedBackground(bg.get('files') if isinstance(bg, dict) else bg, info['ch_names'])
+            self._realistic = RealisticTruths(self.regime, info, bem, background=background)
 
         # Create simulator
         self.simulator = DipoleSimulator(fwd, info, src, verbose=False)
@@ -237,7 +263,9 @@ class RobustnessTest:
         pipeline_dir: Union[str, Path],
         inverse_method: str = 'sLORETA',
         inverse_snr: float = 3.0,
-        verbose: bool = True
+        verbose: bool = True,
+        regime: Optional[str] = None,
+        regime_options: Optional[dict] = None
     ) -> 'RobustnessTest':
         """
         Create RobustnessTest from a pipeline output directory.
@@ -278,7 +306,15 @@ class RobustnessTest:
         # Get info from forward model
         info = fwd['info']
 
-        return cls(fwd, src, info, inverse_method, inverse_snr, verbose)
+        # The BEM the realistic regime simulates truths with (bem_cache/*.pkl of the same run)
+        bem = None
+        bem_files = sorted((pipeline_dir / 'bem_cache').glob('*.pkl'))
+        if bem_files:
+            with open(bem_files[0], 'rb') as f:
+                bem = pickle.load(f)
+
+        return cls(fwd, src, info, inverse_method, inverse_snr, verbose, regime=regime, bem=bem,
+                   regime_options=regime_options)
 
     def _select_test_positions(
         self,
@@ -295,6 +331,77 @@ class RobustnessTest:
             for p in depth_percentiles
         ]
         return np.array(test_indices)
+
+    # ------------------------------------------------------------ validation regime
+    def _prepare_realistic(self):
+        if self._realistic is not None and not getattr(self, '_realistic_ready', False):
+            if self.verbose:
+                print(f"  Realistic regime: truth leadfields for {len(self._realistic.models)} head models x "
+                      f"{len(self.source_pos_mm)} sources...")
+            self._realistic.precompute(self.source_pos_mm)
+            self._realistic_ready = True
+
+    def _sim1(self, key, **kw):
+        """``simulator.simulate_dipole`` under the regime: legacy is the unchanged call; realistic adds the truth's
+        own leadfield (a head model chosen reproducibly from ``key``) and a recorded background if configured."""
+        if self._realistic is None:
+            return self.simulator.simulate_dipole(**kw)
+        self._prepare_realistic()
+        k, rng = self._realistic.choose(*key)
+        n_t = int(kw.get('duration_s', 1.0) * kw.get('sfreq', 500.0))
+        bg = self._realistic.background_for(n_t, kw.get('sfreq', 500.0), rng, kw.get('noise_type'))
+        return self.simulator.simulate_dipole(truth_gain=self._realistic.gain(kw['position_mm'], k),
+                                              background=bg, **kw)
+
+    def _sim2(self, key, **kw):
+        """``simulator.simulate_two_dipoles`` under the regime (see :meth:`_sim1`); both sources share one head
+        model, as two sources in one animal do."""
+        if self._realistic is None:
+            return self.simulator.simulate_two_dipoles(**kw)
+        self._prepare_realistic()
+        k, rng = self._realistic.choose(*key)
+        n_t = int(kw.get('duration_s', 1.0) * kw.get('sfreq', 500.0))
+        bg = self._realistic.background_for(n_t, kw.get('sfreq', 500.0), rng, kw.get('noise_type'))
+        return self.simulator.simulate_two_dipoles(
+            truth_gain1=self._realistic.gain(kw['position1_mm'], k),
+            truth_gain2=self._realistic.gain(kw['position2_mm'], k), background=bg, **kw)
+
+    def run_noise_only_control(self, n_trials: Optional[int] = None, duration_s: float = 0.5,
+                               sfreq: float = 256.0) -> dict:
+        """Realistic regime: localize noise alone and report how concentrated the peaks are.
+
+        Statistics over sources (:func:`.regime.noise_only_summary`), plus the mean depth of the noise peaks
+        against the mean source depth. A readout that keeps peaking at the same sources, or at one depth, on noise
+        would make those sources look "found" in real data.
+        """
+        from .regime import noise_only_summary
+        from .noise import generate_noise
+        n_trials = int(n_trials or self.regime.noise_only_trials or 200)
+        n_t = int(duration_s * sfreq)
+        rng = np.random.default_rng([self.regime.seed, 999])
+        peaks = []
+        for t in range(n_trials):
+            noise = None
+            if self._realistic is not None:
+                noise = self._realistic.background_for(n_t, sfreq, rng)
+            if noise is None:
+                noise = generate_noise(self.simulator.n_channels, n_t, np.random.RandomState(10_000 + t),
+                                       noise_type='white', electrode_positions_mm=self.simulator.electrode_positions_mm)
+            act = np.atleast_2d(self._apply_inverse(noise * 1e-6))
+            if act.shape[0] == 3 * self.n_sources:              # free orientation: norm over orientations
+                power = np.linalg.norm(act.reshape(self.n_sources, 3, -1), axis=1).mean(axis=1)
+            else:
+                power = np.abs(act).mean(axis=1)
+            peaks.append(int(np.argmax(power)))
+        out = noise_only_summary(np.asarray(peaks) + 1, np.arange(1, len(self.source_pos_mm) + 1))
+        out['unit'] = 'source (index + 1)'
+        out['mean_peak_depth_mm'] = float(np.mean(self.source_depths[peaks]))
+        out['mean_source_depth_mm'] = float(np.mean(self.source_depths))
+        out['noise_source'] = ('recorded background' if (self._realistic is not None and
+                                                         self._realistic.background is not None)
+                               else 'generated (white)')
+        self.noise_only_control = out
+        return out
 
     def _apply_inverse(self, eeg_data: np.ndarray) -> np.ndarray:
         """Apply inverse solution and return source activity."""
@@ -985,7 +1092,7 @@ class RobustnessTest:
 
                         for trial in range(n_trials):
                             try:
-                                eeg_data, meta = self.simulator.simulate_two_dipoles(
+                                eeg_data, meta = self._sim2((1, idx1, idx2, trial), 
                                     position1_mm=pos1,
                                     position2_mm=pos2,
                                     amplitude1_nAm=amplitude_nAm,
@@ -1146,7 +1253,7 @@ class RobustnessTest:
 
                         for trial in range(n_trials):
                             try:
-                                eeg_data, meta = self.simulator.simulate_two_dipoles(
+                                eeg_data, meta = self._sim2((2, idx1, idx2, trial), 
                                     position1_mm=pos1,
                                     position2_mm=pos2,
                                     amplitude1_nAm=amplitude_nAm,
@@ -1360,7 +1467,7 @@ class RobustnessTest:
                 fires = 0
                 for trial in range(n_null_trials):
                     try:
-                        eeg, _ = self.simulator.simulate_dipole(
+                        eeg, _ = self._sim1((3, idx, trial), 
                             position_mm=self.source_pos_mm[idx],
                             amplitude_nAm=amplitude_nAm,
                             snr_db=snr_db,
@@ -1401,7 +1508,7 @@ class RobustnessTest:
                         pair_null = 0.5 * (null_rate[nt][idx1] + null_rate[nt][idx2])
                         for trial in range(n_trials):
                             try:
-                                eeg, meta = self.simulator.simulate_two_dipoles(
+                                eeg, meta = self._sim2((4, idx1, idx2, trial), 
                                     position1_mm=pos1, position2_mm=pos2,
                                     amplitude1_nAm=amplitude_nAm,
                                     amplitude2_nAm=amplitude_nAm,
@@ -1556,7 +1663,7 @@ class RobustnessTest:
                 for trial in range(n_trials):
                     try:
                         # Simulate dipole
-                        eeg_data, metadata = self.simulator.simulate_dipole(
+                        eeg_data, metadata = self._sim1((5, test_idx, trial), 
                             position_mm=test_pos,
                             amplitude_nAm=amplitude_nAm,
                             snr_db=snr_db,
@@ -1653,7 +1760,7 @@ class RobustnessTest:
                 for trial in range(n_trials):
                     try:
                         # Simulate dipole with fixed noise variance
-                        eeg_data, metadata = self.simulator.simulate_dipole(
+                        eeg_data, metadata = self._sim1((6, test_idx, trial), 
                             position_mm=test_pos,
                             amplitude_nAm=amplitude_nAm,
                             noise_mode="fixed_variance",
@@ -1780,7 +1887,7 @@ class RobustnessTest:
                     try:
                         # Seed depends on position/trial but NOT on noise_type,
                         # so every type sees the same underlying draw.
-                        eeg_data, metadata = self.simulator.simulate_dipole(
+                        eeg_data, metadata = self._sim1((7, test_idx, trial), 
                             position_mm=test_pos,
                             amplitude_nAm=amplitude_nAm,
                             snr_db=snr_db,
@@ -1882,7 +1989,7 @@ class RobustnessTest:
                 for trial in range(n_trials):
                     try:
                         # Simulate dipole with fixed noise
-                        eeg_data, metadata = self.simulator.simulate_dipole(
+                        eeg_data, metadata = self._sim1((8, test_idx, trial), 
                             position_mm=test_pos,
                             amplitude_nAm=amplitude,
                             noise_mode="fixed_variance",
@@ -1961,6 +2068,8 @@ class RobustnessTest:
         self.run_noise_test(noise_range=noise_range, n_positions=n_positions, n_trials=n_trials)
         self.run_amplitude_test(amplitude_range=amplitude_range, n_positions=n_positions, n_trials=n_trials)
 
+        if not self.regime.is_legacy:
+            self.run_noise_only_control()
         return self.results
 
     def get_summary(self) -> dict:
@@ -2320,6 +2429,8 @@ class RobustnessTest:
                 'inverse_snr': float(self.inverse_snr),
                 'timestamp': datetime.now().isoformat(),
                 'validation_regime': self.validation_regime,
+                'truth_head_models': self._realistic.meta() if self._realistic is not None else None,
+                'noise_only_control': self.noise_only_control,
             },
             'results': {name: result.to_dict() for name, result in self.results.items()},
             'summary': convert_numpy(self.get_summary())

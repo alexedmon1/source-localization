@@ -13,7 +13,7 @@ mne = pytest.importorskip("mne")
 
 from source_localization.validation.head_models import HeadModel, HeadModelPrior, TruthForward
 from source_localization.validation.noise import RecordedBackground, generate_noise
-from source_localization.validation.regime import (LEGACY, LEGACY_WARNING, REALISTIC, describe, legacy_only,
+from source_localization.validation.regime import (LEGACY, LEGACY_WARNING, REALISTIC, describe,
                                                    noise_only_summary, resolve_regime)
 from source_localization.validation.simulation import DipoleSimulator
 
@@ -103,13 +103,6 @@ def test_override_beats_config_and_unknown_raises():
         resolve_regime({"regime": "old"})
 
 
-def test_legacy_only_components_are_annotated(caplog):
-    with caplog.at_level(logging.WARNING):
-        d = legacy_only("RobustnessTest")
-    assert d["name"] == LEGACY and d["component"] == "RobustnessTest"
-    assert "not yet ported" in caplog.text
-
-
 # ------------------------------------------------------------------ noise-only summary
 def test_noise_only_summary_flags_concentration():
     reach = list(range(1, 11))
@@ -196,3 +189,68 @@ def test_legacy_runs_get_their_own_output_directory(tmp_path):
     assert regime_name({}) == "realistic" and regime_name({"regime": "LEGACY"}) == "legacy"
     with pytest.raises(ValueError):
         regime_name({}, override="old")
+
+
+# ------------------------------------------------------------------ RobustnessTest under the regime
+def _sphere_forward():
+    info, bem, _ = _sphere_setup()
+    rr = np.array([[x, y, z] for x in (-1.5, 0.0, 1.5) for y in (-1.5, 0.0, 1.5) for z in (1.0, 2.5)]) / 1000.0
+    src = mne.setup_volume_source_space(pos={"rr": rr, "nn": np.tile([0, 0, 1.0], (len(rr), 1))}, verbose=False)
+    fwd = mne.make_forward_solution(info, trans=None, src=src, bem=bem, eeg=True, meg=False, mindist=0.0,
+                                    verbose=False)
+    return fwd, fwd['src'], info, bem
+
+
+def test_robustness_realistic_needs_the_bem_and_legacy_is_explicit():
+    from source_localization.validation.robustness import RobustnessTest
+    fwd, src, info, bem = _sphere_forward()
+    with pytest.raises(ValueError, match="needs the simulation BEM"):
+        RobustnessTest(fwd, src, info, verbose=False)
+    legacy = RobustnessTest(fwd, src, info, verbose=False, regime="legacy")
+    assert legacy.validation_regime["name"] == LEGACY and legacy._realistic is None
+    eeg, meta = legacy._sim1((5, 0, 0), position_mm=legacy.source_pos_mm[0], amplitude_nAm=50.0, snr_db=10.0,
+                             duration_s=0.5, sfreq=256.0, noise_seed=1)
+    assert meta['signal_source'] == 'simulation forward at snapped source'
+
+
+def test_robustness_realistic_uses_truth_head_models_and_runs_the_noise_only_control():
+    from source_localization.validation.robustness import RobustnessTest
+    fwd, src, info, bem = _sphere_forward()
+    t = RobustnessTest(fwd, src, info, verbose=False, bem=bem,
+                       regime_options={"truth_head_model": {"n_models": 3}, "noise_only_control": {"n_trials": 20}})
+    assert t.validation_regime["name"] == REALISTIC
+    eeg, meta = t._sim1((5, 0, 0), position_mm=t.source_pos_mm[0], amplitude_nAm=50.0, snr_db=10.0,
+                        duration_s=0.5, sfreq=256.0, noise_seed=1)
+    assert meta['signal_source'] == 'truth_gain at requested position' and eeg.shape == (16, 128)
+    a, _ = t._sim1((5, 0, 0), position_mm=t.source_pos_mm[0], amplitude_nAm=50.0, snr_db=10.0, duration_s=0.5,
+                   sfreq=256.0, noise_seed=1)
+    assert np.array_equal(eeg, a)                                        # reproducible from the key
+    eeg2, meta2 = t._sim2((1, 0, 1, 0), position1_mm=t.source_pos_mm[0], position2_mm=t.source_pos_mm[5],
+                          snr_db=10.0, duration_s=0.5, sfreq=256.0, noise_seed=2)
+    assert meta2['signal_source'] == 'truth_gain at requested position'
+    noc = t.run_noise_only_control()
+    assert noc['n_trials'] == 20 and 'ratio_to_uniform' in noc and noc['noise_source'] == 'generated (white)'
+    assert len(t._realistic.meta()['models']) == 3
+
+
+def test_background_resamples_to_the_callers_rate():
+    bg = RecordedBackground.__new__(RecordedBackground)
+    bg._data = [np.random.default_rng(0).normal(size=(3, 4, 1000))]
+    bg.files, bg.ch_names, bg.sfreq = ["a"], ["E1", "E2", "E3", "E4"], 500.0
+    x = bg.draw(128, np.random.default_rng(1), sfreq=256.0)             # 0.5 s at 256 Hz from 500 Hz data
+    assert x.shape == (4, 128) and np.isclose(np.mean(x ** 2), 1.0)
+
+
+def test_posterior_noise_only_control_stays_diffuse():
+    from source_localization.validation.posterior import DipolePosterior
+    fwd, src, info, _ = _sphere_forward()
+    used = fwd['src'][0]['rr'][fwd['src'][0]['inuse'].astype(bool)] * 1000.0
+    dp = DipolePosterior(fwd['sol']['data'], used, 1.5)
+    rng = np.random.default_rng(0)
+    noc = dp.noise_only_control(snr_db=10.0, n_trials=30, rng=rng)
+    assert noc['n_trials'] == 30 and noc['noise_std'] > 0
+    planted = []
+    for _ in range(30):
+        data, sig = dp.simulate(used[4], np.array([0, 0, 1.0]), 30.0, rng)
+        planted.append(dp.credible_radius_mm(dp.posterior(data, sig, moment_std=1.0), 0.9))
+    assert noc['credible_radius_mm']['0.9']['median'] > np.median(planted)

@@ -376,6 +376,9 @@ def main():
     ap.add_argument('--spacing-mm', type=float, default=0.5)
     ap.add_argument('--n-per-parcel', type=int, default=30)
     ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--noise-only-trials', type=int, default=200,
+                    help='noise-only control trials at the headline SNR (0 to skip); written to '
+                         'roi_noise_only_control.json. See source_localization.validation.regime')
     ap.add_argument('--headline-snr', type=float, default=10.0,
                     help='SNR for the single-condition figures (confusion, '
                          'tolerance, per-parcel belief)')
@@ -398,6 +401,17 @@ def main():
               f"atlas={args.atlas}  n/parcel={args.n_per_parcel}")
         compute_data(dp, pmap, args.pipeline_dir, args.atlas, npz_path,
                      args.n_per_parcel, args.seed)
+        if args.noise_only_trials > 0:
+            # Noise-only control: how often a parcel is named with confidence when there is no source.
+            noc = rc.noise_only_parcel_control(dp, pmap, args.headline_snr, args.noise_only_trials,
+                                               np.random.default_rng([args.seed, 999]))
+            with open(out / 'roi_noise_only_control.json', 'w') as f:
+                json.dump(noc, f, indent=2)
+            print(f"Noise-only control at {args.headline_snr:g} dB: top parcel p >= 0.9 in "
+                  f"{100 * noc['frac_top_parcel_ge_0_9']:.1f}% of trials, p >= 0.5 in "
+                  f"{100 * noc['frac_top_parcel_ge_0_5']:.1f}%; most-named parcel "
+                  f"{noc['parcel_names'][noc['top_roi'] - 1]} ({noc['ratio_to_uniform']:.1f}x uniform)"
+                  f"{'  FLAGGED' if noc['flagged'] else ''}")
 
     z = dict(np.load(npz_path, allow_pickle=False))
     hs = args.headline_snr

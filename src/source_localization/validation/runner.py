@@ -2035,11 +2035,11 @@ class ValidationRunner:
 
     # ------------------------------------------------------------ validation regime
     def _setup_regime(self) -> None:
-        """Resolve the regime (:mod:`.regime`) and build what the realistic regime needs."""
+        """Resolve the regime (:mod:`.regime`) and build what the realistic regime needs (:mod:`.realistic`)."""
         from .regime import resolve_regime, LEGACY_WARNING
         val_config = self.config.get('validation', {})
         self.regime = resolve_regime(val_config, override=self._regime_override)
-        self._truth_forward = None
+        self._realistic = None
         self._background = None
         self._truth_meta = None
         if self.regime.is_legacy:
@@ -2047,52 +2047,40 @@ class ValidationRunner:
                 print(f"  WARNING: {LEGACY_WARNING}")
                 print(f"  Legacy results go to {self.output_dir}")
             return
-        from .head_models import TruthForward
+        from .realistic import RealisticTruths
         info = self.pipeline_components['info']
-        self._truth_forward = TruthForward(info, self.pipeline_components['bem_simulation'])
         if self.regime.recorded_background:
             from .noise import RecordedBackground
             bg = val_config['background']
-            files = bg.get('files') if isinstance(bg, dict) else bg
-            sfreq = float(val_config.get('dipole', {}).get('sfreq', 500.0))
-            self._background = RecordedBackground(files, info['ch_names'], sfreq)
+            self._background = RecordedBackground(bg.get('files') if isinstance(bg, dict) else bg, info['ch_names'])
             if self.verbose:
                 print(f"  Recorded background: {len(self._background.files)} file(s), "
-                      f"{self._background.n_segments} segments")
+                      f"{self._background.n_segments} segments at {self._background.sfreq:g} Hz")
+        self._realistic = RealisticTruths(self.regime, info, self.pipeline_components['bem_simulation'],
+                                          background=self._background)
         if self.verbose:
             print(f"  Validation regime: realistic ({self.regime.n_head_models} truth head models; "
                   f"{'recorded' if self._background else 'generated'} noise; noise-only control on)")
 
-    def _truth_gains(self, test_points) -> Optional[Dict[str, Any]]:
-        """Realistic regime: each head model's leadfield at every requested test position. None in legacy."""
+    def _truth_gains(self, test_points) -> Optional[bool]:
+        """Realistic regime: cache each head model's leadfield at every requested test position. None in legacy."""
         if self.regime.is_legacy:
             return None
-        from dataclasses import asdict
-        from .head_models import HeadModelPrior
-        prior = HeadModelPrior(**self.regime.head_model_prior)
-        models = prior.draw_many(self.regime.n_head_models, self.regime.seed)
         positions = np.array([np.asarray(p[0], float) for p in test_points])
         if self.verbose:
-            print(f"  Truth leadfields: {len(models)} head models x {len(positions)} positions...")
-        G, kept = self._truth_forward.gains_for_models(models, positions)
-        self._truth_meta = {
-            'prior': dict(self.regime.head_model_prior),
-            'models': [asdict(m) for m in models],
-            'n_positions': int(len(positions)),
-            # Positions MNE excludes (outside the inner skull) fall back to the simulation forward at the
-            # snapped source, as in the legacy regime; the count is recorded so it is never silent.
-            'n_positions_snapped_fallback': int((~kept).sum()),
-        }
+            print(f"  Truth leadfields: {len(self._realistic.models)} head models x {len(positions)} positions...")
+        kept = self._realistic.precompute(positions)
         if self.verbose and (~kept).any():
             print(f"    {int((~kept).sum())} position(s) outside the inner skull: simulated at the snapped source")
-        return {'G': G, 'kept': kept}
+        self._truth_meta = self._realistic.meta()
+        return True
 
     def _simulate_truth(self, simulator, test_pos, i, trial, snr_db, dipole_config, truth):
         """One simulated trial under the run's regime (:mod:`.regime`).
 
         Legacy: exactly the pre-0.6.0 call (simulation forward at the snapped source, generated noise, same seed).
-        Realistic: the truth's leadfield at the requested position under a head model drawn from the run's pool,
-        plus recorded background noise when configured.
+        Realistic: the truth's leadfield at the requested position under a head model drawn from the run's pool
+        (:mod:`.realistic`), plus recorded background noise when configured.
         """
         kwargs = dict(
             position_mm=test_pos,
@@ -2106,13 +2094,13 @@ class ValidationRunner:
         )
         if truth is None:
             return simulator.simulate_dipole(**kwargs)
-        rng = np.random.default_rng([self.regime.seed, i, trial])
-        k = int(rng.integers(truth['G'].shape[0]))
-        gain = truth['G'][k, i] if truth['kept'][i] else None
+        k, rng = self._realistic.choose(i, trial)
+        gain = self._realistic.gain(test_pos, k)
         n_times = int(kwargs['duration_s'] * kwargs['sfreq'])
-        background = self._background.draw(n_times, rng) if self._background is not None else None
+        background = self._realistic.background_for(n_times, kwargs['sfreq'], rng)
         eeg, meta = simulator.simulate_dipole(truth_gain=gain, background=background, **kwargs)
         meta['head_model_index'] = k if gain is not None else None
+        self._truth_meta = self._realistic.meta()
         return eeg, meta
 
     def _noise_only_control(self) -> Dict[str, Any]:
@@ -2137,7 +2125,7 @@ class ValidationRunner:
         rng = np.random.default_rng([self.regime.seed, 999])
         for t in range(self.regime.noise_only_trials):
             if self._background is not None:
-                noise = self._background.draw(n_times, rng)
+                noise = self._background.draw(n_times, rng, sfreq=sfreq)
             else:
                 noise = generate_noise(len(info['ch_names']), n_times, np.random.RandomState(10_000 + t),
                                        noise_type='white',

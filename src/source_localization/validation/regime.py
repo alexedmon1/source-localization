@@ -37,7 +37,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 __all__ = ["REALISTIC", "LEGACY", "REGIMES", "DEFAULT_REGIME", "LEGACY_WARNING", "Regime", "resolve_regime",
-           "regime_name", "describe", "legacy_only", "noise_only_summary"]
+           "regime_name", "describe", "noise_only_summary"]
 
 REALISTIC = "realistic"
 LEGACY = "legacy"
@@ -123,18 +123,6 @@ def resolve_regime(val_config: Optional[Mapping[str, Any]] = None, override: Opt
     return Regime(name=REALISTIC, perturbed_truths=True, recorded_background=bool(val_config.get("background")),
                   noise_only_control=True, head_model_prior=prior, n_head_models=int(thm.get("n_models", 16)),
                   noise_only_trials=int(noc.get("n_trials", 200)), seed=seed)
-
-
-def legacy_only(component: str) -> Dict[str, Any]:
-    """For validation components not yet ported to the realistic regime (v0.6.0: ``BatchValidationRunner`` and
-    ``RobustnessTest``). Logs that they run under the legacy assumptions and returns the :func:`describe` block they
-    record in their outputs, so their numbers are never mistaken for realistic-regime numbers."""
-    logger.warning("%s runs in the 'legacy' validation regime only (not yet ported to 'realistic'). %s",
-                   component, LEGACY_WARNING)
-    out = describe(Regime(name=LEGACY, perturbed_truths=False, recorded_background=False, noise_only_control=False))
-    out["component"] = component
-    out["note"] = "this component has no realistic regime yet; see docs/validation/DESIGN_validation_upgrade.md"
-    return out
 
 
 def describe(regime: Regime) -> Dict[str, Any]:

@@ -190,6 +190,37 @@ def posterior_parcel_probs(
     return pmap.aggregate(post)
 
 
+def noise_only_parcel_control(
+    dp: DipolePosterior,
+    pmap: ParcelMap,
+    snr_db: float,
+    n_trials: int,
+    rng: np.random.Generator,
+    moment_std: Optional[float] = 1.0,
+) -> dict:
+    """Parcel probabilities on noise alone (the noise-only control of :mod:`.regime`).
+
+    Noise is white at the level a typical source would have at ``snr_db``
+    (:meth:`DipolePosterior.noise_std_at_snr`). Reports how often the most probable parcel reaches 0.5 and 0.9 on
+    noise (a calibrated posterior should almost never be confident about a parcel that has no source), and how
+    concentrated the noise-only argmax parcels are (:func:`.regime.noise_only_summary`).
+    """
+    from .regime import noise_only_summary
+    sigma = dp.noise_std_at_snr(snr_db)
+    top, top_p = [], []
+    for _ in range(int(n_trials)):
+        probs = posterior_parcel_probs(dp, rng.normal(0.0, sigma, dp._G.shape[1]), sigma, pmap, moment_std)
+        k = int(np.argmax(probs))
+        top.append(k + 1)
+        top_p.append(float(probs[k]))
+    top_p = np.asarray(top_p)
+    out = noise_only_summary(top, np.arange(1, pmap.n_parcels + 1))
+    out.update(unit='parcel (index + 1)', parcel_names=list(pmap.parcel_names), snr_db=float(snr_db),
+               noise_std=sigma, frac_top_parcel_ge_0_5=float((top_p >= 0.5).mean()),
+               frac_top_parcel_ge_0_9=float((top_p >= 0.9).mean()), median_top_parcel_prob=float(np.median(top_p)))
+    return out
+
+
 # --------------------------------------------------------------- truth sampling
 
 def sample_truth_positions(
