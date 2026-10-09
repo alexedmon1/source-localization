@@ -714,6 +714,10 @@ files are in which convention.
 
 ## Validation
 
+> **Full guide: [docs/validation/README.md](docs/validation/README.md).** It covers which tool answers which
+> question, validating a **new atlas** step by step, what to report, and which earlier results not to quote.
+> Planned changes are in [docs/validation/DESIGN_validation_upgrade.md](docs/validation/DESIGN_validation_upgrade.md).
+
 The package includes a dipole simulation framework for validating source
 localization accuracy without EEG data.
 
@@ -729,7 +733,9 @@ the inverse solution attempts to recover the original location. Metrics include:
 
 By default the same forward model is used for simulation and inversion (an
 "inverse crime") with white noise, so the reported numbers are best-case. The
-runner supports mismatched conductivities and colored noise for a harder test.
+runner supports mismatched conductivities (`validation.forward_model_mismatch`)
+for a harder test; coloured noise is in `RobustnessTest` and the sweep scripts
+(see the [validation guide](docs/validation/README.md)).
 
 ### Setting Up a Validation Study
 

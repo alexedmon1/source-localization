@@ -1,0 +1,305 @@
+# Validating source localization (and a new atlas)
+
+This is the user guide to `source_localization.validation`: what each tool answers, how to run it, how to
+validate a **new atlas** end to end, and what to report. It describes the code as it is in v0.5.1. Planned
+changes are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The older
+module reference (v0.4.0, API-level detail) is
+[`src/source_localization/validation/README.md`](../../src/source_localization/validation/README.md).
+
+## Contents
+
+1. [What validation can and cannot tell you](#1-what-validation-can-and-cannot-tell-you)
+2. [Which tool answers which question](#2-which-tool-answers-which-question)
+3. [Validating a new atlas, step by step](#3-validating-a-new-atlas-step-by-step)
+4. [Forward-inverse accuracy: the `validate` CLI](#4-forward-inverse-accuracy-the-validate-cli)
+5. [Parcel certainty and displacement](#5-parcel-certainty-and-displacement)
+6. [Calibrated location and two sources](#6-calibrated-location-and-two-sources)
+7. [Connectivity](#7-connectivity)
+8. [What to report](#8-what-to-report)
+9. [Results you should not quote](#9-results-you-should-not-quote)
+10. [Troubleshooting](#10-troubleshooting)
+
+---
+
+## 1. What validation can and cannot tell you
+
+Every tool here plants sources with a known position, simulates the scalp EEG through a forward model, and scores
+what comes back against the truth. The answers are only as honest as the simulation. In v0.5.1, three defaults
+make them **optimistic**:
+
+| Default | Effect | What to do now |
+|---|---|---|
+| **Same forward model** for simulating and inverting (the "inverse crime") | No model error: accuracy is a ceiling | Report it as best-case. For a mismatch check set `validation.forward_model_mismatch: true` with `ground_truth_conductivities: [brain, skull, scalp]` (the only mismatch the runner supports) |
+| **White Gaussian noise** in the CLI runner. Synthetic correlated and 1/f noise (`noise.py`) only in `RobustnessTest` and the sweep scripts | Real backgrounds have structure no generator reproduces | Sweep noise types (`scripts/run_noise_type_sweep.py` or `RobustnessTest.run_noise_type_test`) and say which you used |
+| **No noise-only condition** | A method that reports a confident location from pure noise still passes | For any confidence statement, also run the same readout on noise alone (section 6) |
+
+All three are **planned** to become honest defaults, with a legacy switch: truths under freshly drawn head models,
+real recorded backgrounds, and a noise-only control in every suite. See the design, section 3.
+
+**Validation is a property of the configuration** (montage, BEM, source space, inverse method, sampling mode, atlas
+and SNR), not of the package. Re-run it for the configuration you use, and report depth-stratified results.
+
+## 2. Which tool answers which question
+
+| Question | Tool | Entry point | Status |
+|---|---|---|---|
+| Is the atlas consistent with the template? | `atlas_bundle` | `load_bundle(...)` | current |
+| How far off is the reconstructed peak, by depth and SNR? | `runner`, `robustness`, `metrics` | `source-localization validate` | current (inverse crime by default) |
+| How often does the pipeline name the right parcel, and how much should a named parcel be believed? | `roi_certainty` | `scripts/run_roi_certainty.py` | current |
+| How far, in mm, is an attribution off? | `displacement` | Python API | current (the MS1 statistic) |
+| Given the data, where is the source, with calibrated credible regions? | `posterior` (`DipolePosterior`) | `scripts/run_posterior_orbital.py` | current; assumes an exact forward model and white noise |
+| Are there two sources, and how far apart? | `two_source` | `scripts/run_two_source_posterior.py` | current |
+| How blurred is the operator (noise-free)? | `resolution` | `scripts/run_resolution_map.py` | partly superseded (section 9) |
+| Can two blobs be seen at a threshold? | `separability` | `scripts/run_separability.py` | superseded framing (section 9) |
+| Is a connectivity network resolvable? | `connectivity` | — | **no ground truth; not a validation** (section 7). Planned replacement: planted-network validation |
+
+## 3. Validating a new atlas, step by step
+
+You need:
+- the package installed (`uv venv && uv pip install -e .`);
+- your montage's electrode CSV;
+- one EEG recording from that montage (`.set`). It is used only to build the geometry; its data are not scored.
+
+### Step 1. Register the atlas
+
+1. Put the label volume and its `roi_mapping.json` (and optionally `roi_categories.yaml`) under
+   `src/source_localization/data/atlas/<your_atlas>/`.
+2. Add an entry to `src/source_localization/data/atlas/registry.yaml` (copy an `allen32`-style entry; `inputs:`
+   are paths, `meta:` is descriptive). That is the only step needed to make `--atlas <name>` selectable in both
+   CLIs.
+3. Check the bundle **before anything else**: template and labels must share one voxel grid and one affine
+   convention.
+
+   ```python
+   from source_localization.validation import load_bundle
+   bundle = load_bundle(template="data/atlas/Atlas_3DRois.nii",
+                        labels="data/atlas/<your_atlas>/labels.nii.gz",
+                        roi_mapping="data/atlas/<your_atlas>/roi_mapping.json",
+                        name="<your_atlas>")
+   print(bundle.summary())       # raises BundleConsistencyError on a mismatch
+   ```
+
+   Details: [Adding an atlas](../guides/adding_an_atlas.md).
+4. Add its parcel count and coverage to `meta:`. `tests/test_atlas_registry.py` checks them against the files, so
+   run `pytest tests/test_atlas_registry.py`.
+
+### Step 2. Build one pipeline run for the geometry
+
+The scripts in sections 5-6 read the BEM, montage and source space from a pipeline run (`--pipeline-dir`). They
+need an **ellipsoid BEM**, so use an ellipsoid preset. `shell_ellipsoid` is what `sloreta_attributor` expects:
+
+```bash
+source-localization run --preset shell_ellipsoid --atlas <your_atlas> \
+    --eeg /path/to/one_recording.set --output /path/to/val/pipeline_shell_ellipsoid
+```
+
+The run directory must contain `bem_cache/ellipsoid_3layer.pkl`, `data/step1_info.pkl`,
+`data/step3_source_space.pkl`, `data/step3_source_coords_mm.npy` and `data/step4_forward.pkl`. Keep it: every
+later step reuses it.
+
+### Step 3. Forward-inverse accuracy with your atlas
+
+See section 4. In short:
+
+```bash
+source-localization validate --test-dir /path/to/val --config configs/ --all \
+    --atlas <your_atlas> --test-mode combined --snr 0 10 20 --trials 25
+```
+
+### Step 4. Parcel certainty and displacement
+
+See section 5. In short:
+
+```bash
+python scripts/run_roi_certainty.py --pipeline-dir /path/to/val/pipeline_shell_ellipsoid \
+    --output-dir /path/to/val/roi_certainty --atlas <your_atlas> --n-per-parcel 30
+```
+
+Then compute peak displacement from the same confusion matrix (section 5.2).
+
+### Step 5. Decide what the atlas can support
+
+- Parcels with low recall **or** low precision cannot carry a per-parcel claim at that SNR and depth.
+- Report them merged with the parcels they are confused with, or not at all.
+- The confusion matrix from step 4 shows the merges. A displacement near the parcel's radius means "this parcel
+  or its neighbour".
+- Always state the SNR: an atlas that resolves at +20 dB may collapse at 0 dB.
+
+## 4. Forward-inverse accuracy: the `validate` CLI
+
+### Layout
+
+```
+my_validation/
+├── configs/                 # one pipeline config per configuration under test
+│   └── shell_ellipsoid_sLORETA.yaml
+└── results/                 # written by the runner, one directory per config (atlas-suffixed if not antwerp)
+```
+
+### Config
+
+A validation config is a normal pipeline config plus a `validation:` block (full example in the main README,
+[Validation config format](../../README.md#validation-config-format)):
+
+```yaml
+validation:
+  snr_levels: [0, 10, 20]   # dB
+  n_trials: 25              # per test position
+  test_mode: combined       # roi_centroids | uniform_grid | combined (recommended)
+  grid_spacing_mm: 1.0
+  dipole: {amplitude_nAm: 50.0, duration_s: 1.0, sfreq: 500.0}
+```
+
+### Commands
+
+```bash
+source-localization validate --test-dir ./my_validation --config configs/ --list     # what will run
+source-localization validate --test-dir ./my_validation --config configs/ --all --atlas <your_atlas>
+source-localization validate --test-dir ./my_validation --config configs/ --all --quick   # 5 ROIs, 1 trial, SNR 10
+source-localization validate --summarize ./my_validation/results/                      # depth-stratified summary
+source-localization validate --compare ./my_validation/results/a/ ./my_validation/results/b/
+```
+
+| Option | Meaning |
+|---|---|
+| `--atlas` | Any registry name. **The validation CLI defaults to `full` (= Antwerp)**, so always pass it |
+| `--test-mode` | `roi_centroids` (ROI accuracy at parcel centroids), `uniform_grid` (localization error and depth), `combined` |
+| `--snr`, `--trials`, `--rois` | Override the config |
+| `--batch --presets ... --methods ...` | Sweep presets × inverse methods (`batch_runner`) |
+
+**Outputs:** `results/<config>/metrics.json` (per SNR: localization error, ROI accuracy, depth-stratified
+error), `validation_report.html` and `figures/`.
+
+**Forward mismatch:** set `forward_model_mismatch: true` and `ground_truth_conductivities: [brain, skull, scalp]`
+in the `validation:` block. The data are then simulated with those conductivities and inverted with the config's
+own. This is the only model-error test in v0.5.1.
+
+**Robustness sweeps** (`robustness.RobustnessTest.from_pipeline_dir(...)`) cover SNR (`run_snr_test`), noise level
+(`run_noise_test`), noise type (`run_noise_type_test`), amplitude (`run_amplitude_test`), two dipoles
+(`run_two_dipole_test`) and resolvability (`run_resolvability_test`). Section 9 lists which of their
+conclusions are superseded.
+
+## 5. Parcel certainty and displacement
+
+### 5.1 `run_roi_certainty.py`
+
+It scores two arms on the same simulated truths and noise:
+- the **ceiling:** the calibrated posterior's best parcel;
+- the **deployed:** the sLORETA peak's parcel on the pipeline's shell.
+
+```bash
+python scripts/run_roi_certainty.py --pipeline-dir DIR --output-dir OUT --atlas <your_atlas> \
+    [--spacing-mm 0.5] [--n-per-parcel 30] [--headline-snr 10] [--seed 0] [--replot]
+```
+
+| Output | What it shows |
+|---|---|
+| `roi_accuracy_vs_snr.png` | Overall parcel accuracy by SNR, both arms |
+| `roi_confusion.png` | True × attributed parcel, at the headline SNR |
+| `roi_reliability.png` | Calibration: when the posterior says p for a parcel, is it right p of the time? |
+| `roi_tolerance.png` | Accuracy if a neighbouring parcel counts as correct |
+| `roi_belief_by_parcel.png` | How much belief each true parcel receives |
+| `cache/roi_certainty_<atlas>_*.npz` | The simulated data; `--replot` redraws from it |
+
+Truths are balanced across parcels (`n_per_parcel` each), so small parcels are not drowned out by large ones.
+
+### 5.2 Peak displacement (Python)
+
+`displacement` turns a confusion matrix into millimetres: the expected distance between a source's parcel and the
+parcel it is credited to, with a chance reference (`null_displacement_mm`) and `information_gain` (1 = perfect,
+0 = chance). The example below runs as written (checked 2026-10-09 against a shell-ellipsoid run):
+
+```python
+import numpy as np
+import pandas as pd
+from source_localization.validation.posterior import DipolePosterior
+from source_localization.validation import roi_certainty as rc
+from source_localization.validation.displacement import parcel_geometry, displacement_table
+
+PIPE, ATLAS = "/path/to/val/pipeline_shell_ellipsoid", "<your_atlas>"
+dp = DipolePosterior.from_pipeline_dir(PIPE, spacing_mm=0.5, cache_dir="out/cache")
+pmap = rc.ParcelMap(dp.positions_mm, atlas=ATLAS, electrode_pos_mm=dp.electrode_pos_mm)
+rng = np.random.default_rng(0)
+truth = rc.sample_truth_positions(pmap, n_per_parcel=30, rng=rng)
+
+attribute = rc.sloreta_attributor(PIPE, ATLAS)          # or rc.posterior_attributor(dp, pmap)
+pooled, _ = rc.confusion_matrices(attribute, dp, pmap, truth, snr_db=10.0, estimator="sloreta", rng=rng)
+confusion = pd.DataFrame(pooled.counts, index=pooled.parcel_names, columns=pooled.parcel_names)
+
+name_of = dict(zip(pmap.parcel_ids, pmap.parcel_names))
+geometry = parcel_geometry(dp.positions_mm, [name_of.get(l) for l in pmap.labels])
+print(displacement_table(confusion, geometry))           # per true parcel, sorted by displacement
+```
+
+- **Scoring a different operator** (Monte Carlo, hybrid): use `displacement.operator_attributor(operator,
+  operator_parcels, pmap.parcel_names)` as the attributor.
+- **Comparing operators:** score them against the **same** centroids, or the comparison is not matched.
+
+## 6. Calibrated location and two sources
+
+These do not depend on the atlas (they work on positions), but they answer the question an atlas claim rests on.
+
+```bash
+# single source: does a p% credible region contain the truth p% of the time? Plus "orbital" figures
+python scripts/run_posterior_orbital.py --pipeline-dir DIR --output-dir OUT [--spacing-mm 0.5] [--n-trials N]
+
+# two sources: Bayes factor (two vs one) against a matched one-source null, separation posterior
+python scripts/run_two_source_posterior.py --pipeline-dir DIR --output-dir OUT [--depth-series] [--replot]
+```
+
+- `DipolePosterior` assumes the forward model is exact and the noise white with known size. Its coverage is
+  verified under those assumptions, not under model error (design, A4).
+- **Noise-only check (do this yourself until it is built in):** run the readout on noise alone, i.e. simulated
+  data with zero source amplitude. Report how often the largest posterior probability, or the two-source Bayes
+  factor, exceeds the level you would call confident. A method that is confident on noise is not interpretable.
+
+## 7. Connectivity
+
+**`validation.connectivity` is not a validation.** It compares electrode and ROI connectivity on real data with
+no ground truth (means, SDs and density above 0.5), using mne-connectivity rather than your analysis's metrics.
+It cannot tell you whether a network is resolvable.
+
+What is known for the MEA30 30-electrode array, from a planted-network simulation (coupled sources planted under
+fresh head models into real resting EEG):
+- Coupling is **detected** (AUC 0.92-0.99 at +5 dB), but **no node pair is resolvable** in electrodes, parcels or
+  merged regions. The strongest edge is usually a neighbour of the true pair.
+- **Direction** is not readable on the cortical axes. dPLI's sign follows the sources' polarity, and DTF is
+  biased toward the stronger source.
+- Details: source-analytics `docs/methods/CONNECTIVITY_METHODS.md`, "Validation on MEA30".
+
+**Planned:** `source-localization validate networks` produces, for any montage and atlas, the table of which
+networks are resolvable at which SNR, with your own connectivity metrics injected (design, component B). Until
+then, report edge-level connectivity results as "coupling changed near these nodes", not "between them".
+
+## 8. What to report
+
+For any validation number, state:
+- the **configuration:** preset, BEM, source space, inverse method and SNR parameter, source sampling mode, atlas
+  (registry name), package version;
+- **depth-stratified** results, never a pooled headline;
+- **several SNRs** (e.g. 0, 10, 20 dB): resolvability is strongly SNR-dependent;
+- the **noise model** (white, correlated or 1/f, recorded) and whether the forward model was **mismatched**;
+- for confidence statements, the **noise-only** false-confidence rate;
+- for parcel claims, recall **and** precision (or displacement) for the parcels claimed.
+
+## 9. Results you should not quote
+
+From earlier validation rounds, now replaced by the calibrated-posterior work:
+- **Spatial dispersion** (`resolution`): it scores 78-96% of what a completely flat map would, so it has almost no
+  dynamic range. Peak localization error from the same module stands.
+- **Threshold separability percentages** ("two blobs at 25% of peak"): a display threshold, not an auditable
+  probability. The depth-matching finding (unequal reconstructed amplitudes across depth) stands.
+- **Any resolvability claim from a single SNR or pooled across depth,** e.g. "cannot resolve two sources at any
+  separation". Resolvability depends strongly on SNR and depth.
+- **A single headline ROI accuracy** for a preset: accuracy depends on depth, atlas and source space.
+
+## 10. Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| ROI accuracy collapses (e.g. ~5%) or all sources map to a few ROIs | Affine-convention mismatch between labels and template. Run `load_bundle`, and read any label volume through `utils/atlas.py` (`get_true_affine`), never `nii.affine` |
+| `--atlas` rejected | Name not in `registry.yaml`. The validation CLI also accepts the legacy names `full` (antwerp) and `coarse_22roi` (coarse22) |
+| Results land in an unexpected directory | The validation CLI suffixes results with the atlas name unless it is Antwerp |
+| Small parcels missing from the confusion matrix | No grid position strictly inside them at the chosen `--spacing-mm`; use 0.5 mm or check coverage in `registry.yaml` `meta:` |
+| A script cannot find `bem_cache/ellipsoid_3layer.pkl` | The pipeline run used a sphere BEM; rebuild with an ellipsoid preset (step 2) |
+| Validation numbers differ from an older report | Check the configuration list in section 8. Atlas, sampling mode and noise model all change the numbers |

@@ -1,3 +1,11 @@
+> **Start with the user guide: [docs/validation/README.md](../../../docs/validation/README.md)** (2026-10). It covers
+> what each tool answers, how to validate a new atlas step by step, what to report, and which earlier results not
+> to quote. Planned changes are in
+> [docs/validation/DESIGN_validation_upgrade.md](../../../docs/validation/DESIGN_validation_upgrade.md).
+> This file is the older module reference (v0.4.0); check its API examples against the code. It predates the
+> calibrated-posterior work, and some conclusions it describes (spatial dispersion, threshold separability,
+> single-SNR resolvability) are superseded; see section 9 of the guide.
+
 # Validation Module
 
 **Created:** 2025-12-01

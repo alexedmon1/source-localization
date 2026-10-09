@@ -34,6 +34,9 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Publishing this site: PUBLISHING.md
+  - Validation:
+      - Validation guide: validation/README.md
+      - "Design: honest-by-default validation": validation/DESIGN_validation_upgrade.md
   - Guides:
       - Adding an atlas: guides/adding_an_atlas.md
       - Electrode coordinate setup: guides/ELECTRODE_COORDINATE_SETUP.md
