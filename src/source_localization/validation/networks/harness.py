@@ -50,8 +50,14 @@ class NetworkSpec:
     backgrounds: List[Dict[str, Any]]
     pairs: List[Dict[str, str]]
     metrics: Dict[str, Any]
+    # Default readouts (probability-atlas Phase 11, MEA30): electrodes attribute cortical pairs best; volume parcels
+    # collapsed into Deep are slightly better for cortical pairs; the full parcels (scored at the truth level) are
+    # better for cortex-Deep pairs. Merged regions are opt-in: they hide coupling inside a merged region and lost the
+    # frontal pairs there.
     readouts: List[Dict[str, Any]] = field(default_factory=lambda: [
-        {"name": "R-el", "type": "electrodes"}, {"name": "R-parcel", "type": "nodes", "collapse_volume": True}])
+        {"name": "R-el", "type": "electrodes"},
+        {"name": "R-parcel", "type": "nodes", "collapse_volume": True},
+        {"name": "R-parcel-full", "type": "nodes", "collapse_volume": False}])
     truth_labels: Dict[str, Any] = field(default_factory=lambda: {"collapse_volume": True})
     n_epochs: int = 30
     n_truths: int = 50
@@ -85,10 +91,11 @@ def load_spec(path) -> NetworkSpec:
         lag_ms: [5, 25]                     # lagged coupling: uniform lag range
         head_model_prior: {shift_sd_mm: 0.3, skull_factor_range: [0.5, 2.0]}
         truth_labels: {collapse_volume: true}         # the node names pairs refer to (volume parcels -> Deep)
-        readouts:
+        readouts:                           # default: R-el, R-parcel and R-parcel-full (below, without R-region)
           - {name: R-el, type: electrodes}            # 30 electrodes, each assigned to a truth node
           - {name: R-parcel, type: nodes, collapse_volume: true}
-          - {name: R-region, type: nodes, collapse_volume: true, merge_map: regions.json}   # {parcel: region}
+          - {name: R-parcel-full, type: nodes, collapse_volume: false}   # volume parcels kept; scored at truth level
+          - {name: R-region, type: nodes, collapse_volume: true, merge_map: regions.json}   # opt-in; {parcel: region}
         pairs:
           - {class: dorsal_far, a: Frontal_Anterior, b: Retrosplenial_L}
         metrics:

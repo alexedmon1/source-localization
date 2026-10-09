@@ -352,9 +352,10 @@ n_truths: 50
 bands: {theta: [6, 8], beta: [15, 25], low_gamma: [35, 45]}
 snrs_db: [-10, -5, 0, 5]
 truth_labels: {collapse_volume: true}   # pair node names: parcels, volume parcels as one "Deep"
-readouts:
+readouts:                               # these three are the default; R-region is opt-in
   - {name: R-el, type: electrodes}
   - {name: R-parcel, type: nodes, collapse_volume: true}
+  - {name: R-parcel-full, type: nodes, collapse_volume: false}   # volume parcels kept, scored at the truth level
   - {name: R-region, type: nodes, collapse_volume: true, merge_map: regions.json}    # {parcel: region}
 pairs:
   - {class: dorsal_far, a: Frontal_Anterior, b: Retrosplenial_L, axis: AP}   # axis only for the directed stage
@@ -397,8 +398,17 @@ one BLAS thread each.
   - the readout sees that coupling changed, but names a neighbouring pair ("ghost interactions");
   - report edge-level results as "coupling changed near these nodes", not "between them";
   - or merge the nodes it confuses and re-run.
-- **A merged node hides the coupling inside it** by construction. Choosing regions over parcels trades away every
-  network within a region.
+- **Choosing nodes (MEA30, probability-atlas Phase 11):**
+  - all readouts **detect** planted coupling about equally (median AUC 0.94-0.98);
+  - what differs is **attribution**:
+    - electrodes attribute cortical pairs best;
+    - volume parcels collapsed into one Deep node are slightly better than the full parcels for cortical pairs;
+    - the **full parcels** (the 11 deep parcels kept as separate filters, scored as Deep) are better for
+      **cortex-Deep** pairs (e.g. Motor_L-Deep top-1 0.37 vs 0.09), though they cannot name *which* deep
+      structure (top-1 <= 0.08).
+  - **Merged regions hide the coupling inside them** by construction, and on MEA30 lost the frontal pairs. Use
+    them only for region-level questions.
+  - None of these makes a network resolvable.
 - **Direction:**
   - a measure whose direction flips with the planted orientation, and stays quiet on the controls, reads
     direction;
