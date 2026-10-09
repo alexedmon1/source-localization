@@ -4,8 +4,8 @@ This is the user guide to `source_localization.validation`: what each tool answe
 validate a **new atlas** end to end, and what to report. It describes the code as it is in v0.6.0. Changes not
 yet made are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The methods
 supplements behind sections 5-6 (single source, two sources, ROI certainty, and their reasoning record) are in
-[`methods/`](methods/). The older module reference (v0.4.0, API-level detail) is
-[`src/source_localization/validation/README.md`](../../src/source_localization/validation/README.md).
+[`methods/`](methods/SINGLE_SOURCE_VALIDATION.md) (single source, two sources, ROI certainty, reasoning record). The older module reference (v0.4.0, API-level detail) is
+[`src/source_localization/validation/README.md`](https://github.com/alexedmon1/source-localization/blob/main/src/source_localization/validation/README.md).
 
 ## Contents
 
@@ -156,7 +156,7 @@ my_validation/
 ### Config
 
 A validation config is a normal pipeline config plus a `validation:` block (full example in the main README,
-[Validation config format](../../README.md#validation-config-format)):
+[Validation config format](https://github.com/alexedmon1/source-localization/blob/main/README.md#validation-config-format)):
 
 ```yaml
 validation:
