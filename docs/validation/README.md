@@ -1,8 +1,8 @@
 # Validating source localization (and a new atlas)
 
 This is the user guide to `source_localization.validation`: what each tool answers, how to run it, how to
-validate a **new atlas** end to end, and what to report. It describes the code as it is in v0.5.1. Planned
-changes are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The older
+validate a **new atlas** end to end, and what to report. It describes the code as it is in v0.6.0. Changes not
+yet made are in [the validation design](DESIGN_validation_upgrade.md) and are marked **planned** below. The older
 module reference (v0.4.0, API-level detail) is
 [`src/source_localization/validation/README.md`](../../src/source_localization/validation/README.md).
 
@@ -24,17 +24,30 @@ module reference (v0.4.0, API-level detail) is
 ## 1. What validation can and cannot tell you
 
 Every tool here plants sources with a known position, simulates the scalp EEG through a forward model, and scores
-what comes back against the truth. The answers are only as honest as the simulation. In v0.5.1, three defaults
-make them **optimistic**:
+what comes back against the truth. The answers are only as honest as the simulation, so every run states its
+**regime**. Both regimes are defined in one place, `source_localization.validation.regime`:
 
-| Default | Effect | What to do now |
+| | **`realistic`** (default from v0.6.0) | **`legacy`** (v0.5.x behaviour) |
 |---|---|---|
-| **Same forward model** for simulating and inverting (the "inverse crime") | No model error: accuracy is a ceiling | Report it as best-case. For a mismatch check set `validation.forward_model_mismatch: true` with `ground_truth_conductivities: [brain, skull, scalp]` (the only mismatch the runner supports) |
-| **White Gaussian noise** in the CLI runner. Synthetic correlated and 1/f noise (`noise.py`) only in `RobustnessTest` and the sweep scripts | Real backgrounds have structure no generator reproduces | Sweep noise types (`scripts/run_noise_type_sweep.py` or `RobustnessTest.run_noise_type_test`) and say which you used |
-| **No noise-only condition** | A method that reports a confident location from pure noise still passes | For any confidence statement, also run the same readout on noise alone (section 6) |
+| Truth signal | At the **requested** position, through a head model drawn from a prior: registration shift N(0, 0.3 mm) per axis and skull conductivity 0.5-2x. The inverse keeps the nominal model, so model error is present | The inversion's **own** forward model, at the nearest source-grid position (the "inverse crime") |
+| Noise | **Recorded** background from your files if `validation.background` is set; otherwise generated, and the output says so | Always generated (white by default) |
+| Noise-only control | Run, and reported as `noise_only_control` | None |
+| Use it for | All new results | **Only** reproducing numbers produced before v0.6.0 |
 
-All three are **planned** to become honest defaults, with a legacy switch: truths under freshly drawn head models,
-real recorded backgrounds, and a noise-only control in every suite. See the design, section 3.
+**"Legacy" means exactly the right-hand column and nothing else.** It is not "deprecated code" or "old atlas", and
+it is unrelated to the legacy *atlas names* (`full`, `coarse_22roi`) the validation CLI accepts. Legacy numbers are
+best-case and **not comparable** with realistic numbers. A legacy run logs a warning, and every output records
+which regime produced it (`validation_regime` in `metrics.json`).
+
+**Not yet ported (legacy only in v0.6.0):** `BatchValidationRunner` (`validate --batch`) and `RobustnessTest`
+simulate on their own path. They log that they run under the legacy regime, and record it in their outputs.
+Porting them is planned (design, section 4).
+
+Select the regime with `validation.regime` in the config, or `--regime realistic|legacy` on the CLI (section 4).
+In the realistic regime, other model errors still exist: head size, array rotation, per-electrode misplacement, BEM
+shape. The prior covers registration and skull conductivity only. A forward-mismatch check with fixed ground-truth
+conductivities is `validation.forward_model_mismatch: true` plus `ground_truth_conductivities: [brain, skull,
+scalp]`; in the realistic regime the head-model prior perturbs around those ground-truth conductivities.
 
 **Validation is a property of the configuration** (montage, BEM, source space, inverse method, sampling mode, atlas
 and SNR), not of the package. Re-run it for the configuration you use, and report depth-stratified results.
@@ -148,7 +161,23 @@ validation:
   test_mode: combined       # roi_centroids | uniform_grid | combined (recommended)
   grid_spacing_mm: 1.0
   dipole: {amplitude_nAm: 50.0, duration_s: 1.0, sfreq: 500.0}
+
+  # --- the regime (section 1); everything below is optional ---
+  regime: realistic                       # or legacy (v0.5.x assumptions; reproducing old numbers only)
+  truth_head_model:                       # realistic only
+    shift_sd_mm: 0.3                      # registration SD per axis, or [x, y, z]
+    skull_factor_range: [0.5, 2.0]        # log-uniform multiple of the skull conductivity
+    n_models: 16                          # head models drawn per run; each trial uses one at random
+  background:                             # realistic only: recorded noise instead of generated
+    files: "/data/rest/*.set"             # EEGLAB .set (epoched or continuous), or a list of paths
+  noise_only_control: {n_trials: 200}     # realistic only
+  regime_seed: 20261009
 ```
+
+**Backgrounds** must contain every montage channel by name, at the simulation's sampling rate (resample first
+otherwise). Each trial takes a random window of `duration_s` from a random epoch, average-referenced. Use
+recordings from the same montage and preparation as the data you will analyse. Real backgrounds contain real
+activity, which is the point.
 
 ### Commands
 
@@ -164,17 +193,26 @@ source-localization validate --compare ./my_validation/results/a/ ./my_validatio
 |---|---|
 | `--atlas` | Any registry name. **The validation CLI defaults to `full` (= Antwerp)**, so always pass it |
 | `--test-mode` | `roi_centroids` (ROI accuracy at parcel centroids), `uniform_grid` (localization error and depth), `combined` |
+| `--regime` | `realistic` (default) or `legacy`; overrides `validation.regime` (section 1) |
 | `--snr`, `--trials`, `--rois` | Override the config |
-| `--batch --presets ... --methods ...` | Sweep presets × inverse methods (`batch_runner`) |
+| `--batch --presets ... --methods ...` | Sweep presets × inverse methods (`batch_runner`). **Legacy regime only** in v0.6.0 |
 
-**Outputs:** `results/<config>/metrics.json` (per SNR: localization error, ROI accuracy, depth-stratified
-error), `validation_report.html` and `figures/`.
+**Outputs:** `results/<config>/metrics.json`, `validation_report.html` and `figures/`. `metrics.json` holds:
+- per SNR: localization error, ROI accuracy, depth-stratified error;
+- `validation_regime`: which regime produced the numbers, with its full description;
+- realistic regime only:
+  - `truth_head_models`: the prior and the drawn models, and how many positions fell outside the inner skull
+    (those are simulated at the snapped grid source);
+  - `noise_only_control`: on noise alone, the share of answers going to the most-named ROI (`top_share`), its
+    ratio to a uniform spread (`ratio_to_uniform`; flagged above 3), and `normalized_entropy` (1 = spread like
+    uniform). A flagged control means that ROI attracts the readout from noise. Treat that ROI's accuracy with
+    suspicion.
 
 **Forward mismatch:** set `forward_model_mismatch: true` and `ground_truth_conductivities: [brain, skull, scalp]`
 in the `validation:` block. The data are then simulated with those conductivities and inverted with the config's
-own. This is the only model-error test in v0.5.1.
+own. In the realistic regime the head-model prior perturbs around them.
 
-**Robustness sweeps** (`robustness.RobustnessTest.from_pipeline_dir(...)`) cover SNR (`run_snr_test`), noise level
+**Robustness sweeps** (**legacy regime only** in v0.6.0) (`robustness.RobustnessTest.from_pipeline_dir(...)`) cover SNR (`run_snr_test`), noise level
 (`run_noise_test`), noise type (`run_noise_type_test`), amplitude (`run_amplitude_test`), two dipoles
 (`run_two_dipole_test`) and resolvability (`run_resolvability_test`). Section 9 lists which of their
 conclusions are superseded.
@@ -249,9 +287,10 @@ python scripts/run_two_source_posterior.py --pipeline-dir DIR --output-dir OUT [
 
 - `DipolePosterior` assumes the forward model is exact and the noise white with known size. Its coverage is
   verified under those assumptions, not under model error (design, A4).
-- **Noise-only check (do this yourself until it is built in):** run the readout on noise alone, i.e. simulated
-  data with zero source amplitude. Report how often the largest posterior probability, or the two-source Bayes
-  factor, exceeds the level you would call confident. A method that is confident on noise is not interpretable.
+- **Noise-only check (built into the `validate` runner; do it yourself here until these scripts have it,
+  planned):** run the readout on noise alone, i.e. simulated data with zero source amplitude. Report how often the
+  largest posterior probability, or the two-source Bayes factor, exceeds the level you would call confident. A
+  method that is confident on noise is not interpretable.
 
 ## 7. Connectivity
 
@@ -274,6 +313,7 @@ then, report edge-level connectivity results as "coupling changed near these nod
 ## 8. What to report
 
 For any validation number, state:
+- the **regime** (`realistic` or `legacy`; from `validation_regime` in the output). Never compare across regimes;
 - the **configuration:** preset, BEM, source space, inverse method and SNR parameter, source sampling mode, atlas
   (registry name), package version;
 - **depth-stratified** results, never a pooled headline;

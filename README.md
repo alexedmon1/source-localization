@@ -2,7 +2,7 @@
 
 **Created:** 2025-11-26
 **Last Updated:** 2026-09-03
-**Version:** 0.5.1
+**Version:** 0.6.0
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -731,11 +731,18 @@ the inverse solution attempts to recover the original location. Metrics include:
 - **ROI accuracy (%)**: whether the estimated source is in the correct parcel
 - **Depth-stratified analysis**: performance by source depth from electrodes
 
-By default the same forward model is used for simulation and inversion (an
-"inverse crime") with white noise, so the reported numbers are best-case. The
-runner supports mismatched conductivities (`validation.forward_model_mismatch`)
-for a harder test; coloured noise is in `RobustnessTest` and the sweep scripts
-(see the [validation guide](docs/validation/README.md)).
+Every run states its **regime** (`validation.regime`, or `--regime`):
+
+- **`realistic`** (default from 0.6.0): truths at the requested positions through head
+  models drawn from a prior (registration shift, skull conductivity), recorded background
+  noise when `validation.background` is set, and a noise-only control.
+- **`legacy`**: the v0.5.x assumptions (the inversion's own forward model at grid-snapped
+  positions, the "inverse crime"; generated noise; no noise-only control). Kept only to
+  reproduce pre-0.6.0 numbers, which are best-case and not comparable with realistic ones.
+  Results go to `<config>_legacy/`.
+
+`metrics.json` records the regime under `validation_regime`. The
+[validation guide](docs/validation/README.md) defines both regimes and their options.
 
 ### Setting Up a Validation Study
 
@@ -1004,11 +1011,21 @@ source_localization/
 
 ## History
 
-The package version is `0.5.1`. Earlier revisions of this README carried a
+The package version is `0.6.0`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
+
+Notable changes in 0.6.0:
+
+- **Validation regime.** The validation runner defaults to the `realistic` regime: truths at the requested
+  positions through head models drawn from a prior (registration shift, skull conductivity), recorded background
+  noise when configured, and a noise-only control. `legacy` (`--regime legacy`) reproduces the v0.5.x assumptions
+  for old numbers only; its results go to `<config>_legacy/`. `BatchValidationRunner` and `RobustnessTest` run
+  under the legacy regime only, and say so. See [docs/validation/README.md](docs/validation/README.md) and
+  `source_localization.validation.regime`
+- **Validation numbers change:** realistic-regime results are not comparable with earlier ones
 
 Notable changes in 0.5.1 (`v0.5.1`):
 

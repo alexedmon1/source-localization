@@ -190,6 +190,9 @@ class RobustnessTest:
         self.inverse_method = inverse_method.lower()
         self.inverse_snr = inverse_snr
         self.verbose = verbose
+        # Robustness sweeps simulate on their own path, under the legacy regime only (see .regime).
+        from .regime import legacy_only
+        self.validation_regime = legacy_only('RobustnessTest')
 
         # Create simulator
         self.simulator = DipoleSimulator(fwd, info, src, verbose=False)
@@ -2315,7 +2318,8 @@ class RobustnessTest:
                 'n_sources': int(self.n_sources),
                 'inverse_method': self.inverse_method,
                 'inverse_snr': float(self.inverse_snr),
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'validation_regime': self.validation_regime,
             },
             'results': {name: result.to_dict() for name, result in self.results.items()},
             'summary': convert_numpy(self.get_summary())

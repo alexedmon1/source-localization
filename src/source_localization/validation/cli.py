@@ -156,6 +156,19 @@ Directory Structure:
              'combined (recommended: runs both, reports ROI acc from centroids + loc error from grid)'
     )
 
+    parser.add_argument(
+        '--regime',
+        choices=['realistic', 'legacy'],
+        default=None,
+        help="Simulation regime (overrides validation.regime in the config; default 'realistic'). "
+             "'realistic': truths at the requested positions through head models drawn from a prior "
+             "(registration shift + skull conductivity), recorded background noise if configured, and a "
+             "noise-only control. 'legacy': the v0.5.x assumptions (the inversion's own forward model at "
+             "grid-snapped positions, generated noise, no noise-only control), kept only to reproduce numbers "
+             "produced before v0.6.0; best-case and not comparable with 'realistic'. "
+             "Defined in source_localization.validation.regime."
+    )
+
     # Modes
     parser.add_argument(
         '--quick', '-q',
@@ -365,7 +378,8 @@ def run_validation_cli(args: argparse.Namespace) -> int:
             quick=args.quick,
             verbose=verbose,
             atlas=args.atlas,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            regime=args.regime
         )
 
         if not results:

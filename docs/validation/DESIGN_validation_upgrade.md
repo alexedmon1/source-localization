@@ -1,7 +1,13 @@
 # Design: honest-by-default validation, and planted-network validation
 
-**Status:** proposed 2026-10-09, for the maintainer's approval. Nothing here is implemented yet. The user guide
-for what exists today is [the validation README](README.md).
+**Status:** approved 2026-10-09. **PR 1 implemented (v0.6.0)** for the CLI validation runner: A1, A2, A3 and the
+regime switch, defined in `validation/regime.py`. Not yet done:
+- the realistic regime in `BatchValidationRunner` and `RobustnessTest` (both annotated as legacy-only);
+- the noise-only control in the posterior, two-source and ROI-certainty scripts;
+- B (planted networks);
+- A4 (deferred).
+
+The user guide is [the validation README](README.md).
 
 ## 1. Why
 
@@ -31,8 +37,13 @@ studies have. Its **validation components** are what this design brings into the
 
 ## 2. Decisions (taken with the maintainer, 2026-10-09)
 
-1. **The honest settings become the defaults** (A1-A3 below). A `legacy` switch restores today's behaviour, so
-   old numbers can be reproduced. Old and new numbers are not comparable, and reports must say which they used.
+1. **The honest settings become the defaults** (A1-A3 below). Implemented as the **regime**:
+   `validation.regime: realistic | legacy`, or `--regime`.
+   - Both regimes are defined once, in `validation/regime.py`.
+   - **`legacy` means exactly the v0.5.x simulation assumptions** (own forward at snapped positions, generated
+     noise, no noise-only control), kept only to reproduce old numbers.
+   - Legacy runs log a warning and write to `<config>_legacy/`, and every output records `validation_regime`.
+   - Old and new numbers are not comparable, and reports must say which regime they used.
 2. **Planted-network validation takes its connectivity metrics as an injected callable.** Neither this package
    nor source-analytics depends on the other. source-analytics' `compute_connectivity_matrix` already has the
    required signature.
@@ -53,23 +64,28 @@ studies have. Its **validation components** are what this design brings into the
     electrodes, cached by a key built from the geometry, model and positions.
 - **Use:** every simulated truth draws its own head model from the prior (seeded), and simulates through it. The
   inverse keeps the nominal model.
-- **Config:** `validation.truth_head_model: {prior: default | legacy, shift_sd_mm, skull_range}`.
-  - `legacy` = the inversion's own forward (today's behaviour).
-  - The existing `forward_model_mismatch` option (fixed ground-truth conductivities) becomes the special case
-    `shift_sd_mm: 0` with a fixed skull factor.
+- **Config (as implemented):** `validation.truth_head_model: {shift_sd_mm, skull_factor_range, n_models}`, used
+  only in the realistic regime.
+  - The legacy regime is the inversion's own forward (the v0.5.x behaviour).
+  - With `forward_model_mismatch`, the prior perturbs around the ground-truth conductivities.
+- **Pool:** each run draws `n_models` head models (default 16, seeded). Each trial uses one at random, with
+  leadfields computed at the requested positions. Positions MNE excludes (outside the inner skull) fall back to
+  the snapped grid source, and the count is recorded.
 - **Known caveat, carried over:** MNE projects shifted electrodes back onto the BEM scalp, so a z shift acts about
   a third as strongly as the same shift in x or y. Documented, not corrected.
 
 ### A2. Real-noise backgrounds
 
-- **`noise.py` gains `RecordedBackground`:** epochs from the user's own recordings (EEGLAB `.set` or MNE
-  epochs).
+- **`noise.py` gains `RecordedBackground`:** epochs from the user's own recordings (EEGLAB `.set`, epoched or
+  continuous).
   - Channels are matched to the montage by name, then average-referenced.
-  - Each simulated recording draws N epochs without replacement, from a seeded, alternating draw over
+  - **Runner (as implemented):** each trial takes a random `duration_s` window from a random epoch of a random
+    recording, at unit power, then scaled to the SNR.
+  - **For B:** each simulated recording draws N epochs without replacement, from a seeded, alternating draw over
     recordings. Groups can be balanced, as probability-atlas balanced KO and WT.
-- **SNR definitions** (both available):
-  - the existing broadband ratio;
-  - the band-power ratio at each source's most sensitive electrode. This is the planted-network one, needed for
+- **SNR definitions:**
+  - the existing broadband ratio (the runner, as implemented);
+  - for B, the band-power ratio at each source's most sensitive electrode. This is the planted-network one, needed for
     oscillatory signals.
 - **The no-plant reference:** every statistic that compares a planted condition with a null uses **the same
   background, unplanted**. Real backgrounds contain real structure, which this removes.
@@ -121,14 +137,15 @@ likelihood. It is not scheduled: revisit if a study needs calibrated location un
 
 | PR | Content | Changes numbers? |
 |---|---|---|
-| 1 | A1 + A2 + A3, the `legacy` switch, tests, README updates. Housekeeping: fix stale examples (`source-localization validate --test ...` in the main CLI help; `run_validation(test_name=...)` in `runner.py`'s docstring; neither exists) | **Yes:** validation results under the new defaults differ from earlier ones |
+| 1 (**done, v0.6.0**) | A1 + A2 + A3 in the CLI runner, the regime switch, tests (`tests/test_validation_regime.py`, including a bit-identical check of the legacy path), README updates. Housekeeping: fix stale examples (`source-localization validate --test ...` in the main CLI help; `run_validation(test_name=...)` in `runner.py`'s docstring; neither exists) | **Yes:** validation results under the new defaults differ from earlier ones |
+| 1b | The realistic regime in `BatchValidationRunner` and `RobustnessTest`; the noise-only control in the posterior, two-source and ROI-certainty scripts | Yes, for those components |
 | 2 | B, with the acceptance test against Phase 9/10; remove `connectivity.py` (or keep it as `legacy` for one release) | New capability |
 | 3 | Docs: move the validation write-ups from the external staging area (`validation-tests/docs/`) into `docs/validation/` | No |
 
 ## 5. Compatibility
 
 - **Version:** 0.5.1 → 0.6.0 for PR 1 (the defaults change).
-- **Reproducibility:** `validation.legacy: true`, or `--legacy` on the CLI, reproduces 0.5.x numbers.
+- **Reproducibility:** `validation.regime: legacy`, or `--regime legacy`, reproduces 0.5.x numbers.
 - Every validation output records the truth head-model prior, the background source (recorded or synthetic) and
   the noise-only results. A result without them is a 0.5.x result.
 

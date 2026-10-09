@@ -107,6 +107,9 @@ class ValidationOutputSchema:
     timestamp: str = ""
     duration_seconds: float = 0.0
     version: str = VALIDATION_OUTPUT_VERSION
+    # Which simulation regime produced these numbers (source_localization.validation.regime). Batch validation
+    # runs under the legacy regime only in v0.6.0.
+    validation_regime: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -222,6 +225,9 @@ class BatchValidationRunner:
         self.n_test_sources = n_test_sources
         self.atlas = atlas
         self.test_mode = test_mode  # 'roi_centroids', 'uniform_grid', or 'combined'
+        # Batch validation simulates on its own path, under the legacy regime only (see .regime).
+        from .regime import legacy_only
+        self.validation_regime = legacy_only('BatchValidationRunner')
 
         # Results storage
         self.results: Dict[str, ValidationOutputSchema] = {}
@@ -504,7 +510,8 @@ class BatchValidationRunner:
                         roi_n_valid=len(roi_results),
                         error_by_depth=error_by_depth,
                         timestamp=datetime.now().isoformat(),
-                        duration_seconds=duration
+                        duration_seconds=duration,
+                        validation_regime=self.validation_regime
                     )
 
                     # Save results
@@ -624,6 +631,7 @@ class BatchValidationRunner:
         summary = {
             'timestamp': datetime.now().isoformat(),
             'n_configs': len(self.results),
+            'validation_regime': self.validation_regime,
             'results': {name: r.to_dict() for name, r in self.results.items()},
             'best_overall': sorted_configs[0][0] if sorted_configs else None
         }
