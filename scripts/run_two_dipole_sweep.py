@@ -81,6 +81,10 @@ def main():
     parser.add_argument('--inverse-snr', type=float, default=3.0)
     parser.add_argument('--noise-types', nargs='+', default=list(NOISE_TYPES),
                         choices=list(NOISE_TYPES))
+    parser.add_argument('--regime', choices=['realistic', 'legacy'], default=None,
+        help="'realistic' (default): truths through head models drawn from a prior; 'legacy': the "
+             "v0.5.x assumptions, for reproducing pre-0.6.0 numbers only. See "
+             "source_localization.validation.regime.")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -91,8 +95,8 @@ def main():
         args.pipeline_dir,
         inverse_method=args.inverse_method,
         inverse_snr=args.inverse_snr,
-        verbose=True
-    )
+        verbose=True,
+        regime=args.regime)
 
     started = datetime.now()
     result = test.run_two_dipole_test(

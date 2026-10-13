@@ -709,7 +709,7 @@ Commands:
 
 Examples:
   source-localization run --preset ellipsoid_surface --eeg data.set
-  source-localization validate --test original --config V01 V08
+  source-localization validate --test-dir ./my_validation --config configs/ --all --atlas allen32
   source-localization study init /path/to/data --name "MyStudy"
   source-localization study run study_config.yaml --jobs 4
 

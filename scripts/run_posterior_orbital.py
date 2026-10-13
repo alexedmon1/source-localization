@@ -211,6 +211,8 @@ def main():
                          'stays on --spacing-mm since it needs many trials')
     ap.add_argument('--n-trials', type=int, default=200)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--noise-only-trials', type=int, default=200,
+                    help='noise-only control: trials per SNR (0 to skip); see source_localization.validation.regime')
     args = ap.parse_args()
 
     out = Path(args.output_dir)
@@ -234,6 +236,20 @@ def main():
 
     with open(out / 'posterior_calibration.json', 'w') as f:
         json.dump(cal, f, indent=2)
+
+    # Noise-only control: the posterior on noise alone, at each SNR's noise level, should stay diffuse.
+    if args.noise_only_trials > 0:
+        rng = np.random.default_rng([args.seed, 999])
+        noc = {f"{snr:g}": dp.noise_only_control(snr, args.noise_only_trials, rng) for snr in SNRS}
+        with open(out / 'posterior_noise_only_control.json', 'w') as f:
+            json.dump(noc, f, indent=2)
+        print(f"Saved: {out / 'posterior_noise_only_control.json'}")
+        print("\nNOISE-ONLY CONTROL (posterior on noise alone; whole grid radius "
+              f"{next(iter(noc.values()))['whole_grid_radius_mm']:.2f} mm)")
+        print(f"{'SNR':>7}{'50% radius':>13}{'90% radius':>13}   (median; small = confident about nothing)")
+        for snr in SNRS:
+            c = noc[f"{snr:g}"]['credible_radius_mm']
+            print(f"{snr:>+6.0f}dB{c['0.5']['median']:>10.2f}mm{c['0.9']['median']:>10.2f}mm")
 
     print("\nCALIBRATED LOCALIZATION PRECISION (marginal posterior)")
     print(f"{'SNR':>7}{'50% region':>14}{'95% region':>14}{'95% radius':>13}"

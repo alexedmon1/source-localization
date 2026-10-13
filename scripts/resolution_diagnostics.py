@@ -55,11 +55,16 @@ def main():
     ap.add_argument('--output-dir', default=None)
     ap.add_argument('--inverse-method', default='sLORETA')
     ap.add_argument('--inverse-snr', type=float, default=3.0)
+    ap.add_argument('--regime', choices=['realistic', 'legacy'], default=None,
+        help="'realistic' (default): truths through head models drawn from a prior; 'legacy': the "
+             "v0.5.x assumptions, for reproducing pre-0.6.0 numbers only. See "
+             "source_localization.validation.regime.")
     args = ap.parse_args()
 
     t = RobustnessTest.from_pipeline_dir(
         args.pipeline_dir, inverse_method=args.inverse_method,
-        inverse_snr=args.inverse_snr, verbose=False)
+        inverse_snr=args.inverse_snr, verbose=False,
+        regime=args.regime)
     sp, d = t.source_pos_mm, t.source_depths
 
     # --- single-source localization error, noise-free, per source ---

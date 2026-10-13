@@ -36,7 +36,7 @@ Examples
 import numpy as np
 from typing import Optional
 
-__all__ = ['generate_noise', 'spatial_covariance', 'NOISE_TYPES']
+__all__ = ['generate_noise', 'spatial_covariance', 'NOISE_TYPES', 'RecordedBackground']
 
 #: Supported noise types. 'colored' applies both spatial and temporal shaping.
 NOISE_TYPES = ('white', 'spatial', 'temporal', 'colored')
@@ -224,3 +224,103 @@ def generate_noise(
             "temporal_exponent."
         )
     return noise / std
+
+
+class RecordedBackground:
+    """
+    Noise taken from real recordings: the ``realistic`` validation regime's background.
+
+    Synthetic generators cannot reproduce the structure of real EEG backgrounds (non-stationary, spatially
+    structured activity of real networks). This draws background segments from the user's own recordings
+    instead. Each draw is a contiguous window from a randomly chosen epoch of a randomly chosen recording,
+    average-referenced, resampled to the caller's rate if it differs from the recordings', and returned at
+    **unit mean power**. Callers scale it to a target SNR with the same arithmetic as :func:`generate_noise`.
+
+    Parameters
+    ----------
+    files : str or sequence of str
+        EEGLAB ``.set`` files (epoched or continuous), or a glob pattern. Continuous files are cut into
+        non-overlapping segments of ``segment_s``. All files must share one sampling rate.
+    ch_names : sequence of str
+        The montage's channel order. Every name must be present in every recording.
+    segment_s : float, default=2.0
+        Segment length for continuous recordings.
+
+    Notes
+    -----
+    Real backgrounds contain real coupling and real sources. Any statistic that compares a planted condition
+    with a null should therefore use the *same* background, unplanted, as the null; see
+    :mod:`source_localization.validation.regime`.
+    """
+
+    def __init__(self, files, ch_names, segment_s: float = 2.0):
+        import glob as _glob
+        import mne
+        if isinstance(files, str):
+            paths = sorted(_glob.glob(files)) or [files]
+        else:
+            paths = [str(f) for f in files]
+        if not paths:
+            raise ValueError("RecordedBackground: no files")
+        self.ch_names = list(ch_names)
+        self.files = paths
+        self.sfreq = None
+        self._data = []
+        for path in paths:
+            try:
+                ep = mne.read_epochs_eeglab(path, verbose='error')
+                X = ep.get_data(picks=self._picks(ep.ch_names, path))
+                fs = float(ep.info['sfreq'])
+            except (ValueError, TypeError, KeyError):
+                raw = mne.io.read_raw_eeglab(path, preload=True, verbose='error')
+                fs = float(raw.info['sfreq'])
+                Y = raw.get_data(picks=self._picks(raw.ch_names, path))
+                n = int(round(segment_s * fs))
+                k = Y.shape[1] // n
+                if k == 0:
+                    raise ValueError(f"{path}: shorter than one {segment_s} s segment")
+                X = Y[:, :k * n].reshape(Y.shape[0], k, n).transpose(1, 0, 2)
+            if self.sfreq is None:
+                self.sfreq = fs
+            elif abs(fs - self.sfreq) > 1e-6:
+                raise ValueError(f"{path}: sampling rate {fs} Hz differs from the first file's {self.sfreq} Hz")
+            X = X - X.mean(axis=1, keepdims=True)              # average reference
+            self._data.append(X)
+
+    def _picks(self, available, path):
+        missing = [c for c in self.ch_names if c not in available]
+        if missing:
+            raise ValueError(f"{path}: channels missing from the recording: {missing}")
+        return [available.index(c) for c in self.ch_names]
+
+    @property
+    def n_segments(self) -> int:
+        return int(sum(len(x) for x in self._data))
+
+    def draw(self, n_times: int, rng, sfreq: Optional[float] = None) -> np.ndarray:
+        """
+        One background window, shape (n_channels, n_times), average-referenced, unit mean power.
+
+        ``rng`` is a ``numpy.random.Generator`` or ``RandomState``. ``sfreq`` is the caller's sampling rate
+        (default: the recordings'); a window of the same duration is taken at the recordings' rate and resampled.
+        """
+        native = n_times if sfreq is None or abs(sfreq - self.sfreq) < 1e-9 else \
+            int(round(n_times * self.sfreq / float(sfreq)))
+        rec = self._data[_randint(rng, len(self._data))]
+        seg = rec[_randint(rng, len(rec))]
+        if seg.shape[1] < native:
+            raise ValueError(f"background segments have {seg.shape[1]} samples; the simulation needs {native}")
+        start = _randint(rng, seg.shape[1] - native + 1)
+        x = seg[:, start:start + native].copy()
+        if native != n_times:
+            from scipy.signal import resample
+            x = resample(x, n_times, axis=1)
+        p = np.mean(x ** 2)
+        if p <= 0:
+            raise ValueError("background window has zero power")
+        return x / np.sqrt(p)
+
+
+def _randint(rng, n: int) -> int:
+    """An integer in [0, n) from a ``numpy.random.Generator`` or a legacy ``RandomState``."""
+    return int(rng.integers(n)) if hasattr(rng, 'integers') else int(rng.randint(n))

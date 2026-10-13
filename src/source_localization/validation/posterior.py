@@ -47,7 +47,7 @@ DipolePosterior
 """
 import json
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -509,6 +509,37 @@ class DipolePosterior:
         """
         v = self.credible_volume_mm3(posterior, level)
         return float((3.0 * v / (4.0 * np.pi)) ** (1.0 / 3.0))
+
+    # ------------------------------------------------------------ noise-only control
+    def noise_std_at_snr(self, snr_db: float) -> float:
+        """The noise SD a typical source (median grid column power, orientations averaged, unit moment) would have
+        at ``snr_db``. Used to put noise-only data at the level of a planted condition."""
+        col_power = (self._G ** 2).sum(axis=2).mean(axis=1) / 3.0          # per position, per channel
+        return float(np.sqrt(np.median(col_power) / (10.0 ** (snr_db / 10.0))))
+
+    def noise_only_control(self, snr_db: float, n_trials: int, rng: np.random.Generator,
+                           moment_std: Optional[float] = 1.0, levels: Sequence[float] = (0.5, 0.9)) -> dict:
+        """Posterior on noise alone (the noise-only control of :mod:`source_localization.validation.regime`).
+
+        Noise is white at :meth:`noise_std_at_snr`. A calibrated posterior should stay diffuse on noise: its
+        credible regions should be about as large as the head. Compact regions on noise mean the posterior reports a
+        location where there is none.
+
+        Returns credible radii (mm) per level: median and 10th percentile over trials, and the same for the whole
+        grid volume as the reference.
+        """
+        sigma = self.noise_std_at_snr(snr_db)
+        radii = {lv: [] for lv in levels}
+        for _ in range(int(n_trials)):
+            post = self.posterior(rng.normal(0.0, sigma, self._G.shape[1]), sigma, moment_std=moment_std)
+            for lv in levels:
+                radii[lv].append(self.credible_radius_mm(post, lv))
+        whole = float((3.0 * self.n_positions * self.spacing_mm ** 3 / (4.0 * np.pi)) ** (1.0 / 3.0))
+        return {"snr_db": float(snr_db), "noise_std": sigma, "n_trials": int(n_trials),
+                "whole_grid_radius_mm": whole,
+                "credible_radius_mm": {f"{lv:g}": {"median": float(np.median(r)),
+                                                   "p10": float(np.percentile(r, 10))}
+                                       for lv, r in radii.items()}}
 
     # ------------------------------------------------------------ simulation
     def simulate(

@@ -20,26 +20,21 @@ deep_merge
 
 Examples
 --------
->>> from source_localization.validation.runner import (
-...     ValidationRunner, ValidationConfigLoader, run_validation
-... )
+>>> from pathlib import Path
+>>> from source_localization.validation.runner import ValidationRunner, run_validation
 
->>> # Run all original validation tests
->>> results = run_validation(test_name='original')
+>>> # Run configs from a validation directory (results/<config>/ under it)
+>>> results = run_validation(test_dir='my_validation',
+...                          config_files=[Path('my_validation/configs/shell_check.yaml')],
+...                          snr_levels=[0, 10, 20], atlas='allen32')
 
->>> # Run specific configs
->>> results = run_validation(
-...     test_name='dipole_size',
-...     config_names=['D01', 'D02']
-... )
-
->>> # Use ValidationRunner directly
->>> loader = ValidationConfigLoader()
->>> config_path = loader.discover_configs('original', config_names=['V01'])[0]
->>> runner = ValidationRunner(config_path, output_dir='./results/V01')
+>>> # One config, with more control; regime='legacy' reproduces pre-0.6.0 numbers only
+>>> runner = ValidationRunner('my_validation/configs/shell_check.yaml', output_dir='results/shell_check')
 >>> runner.setup()
->>> metrics = runner.run(snr_levels=[10], n_trials=100)
+>>> metrics = runner.run(snr_levels=[10], n_trials=25)
 >>> runner.save_results(metrics)
+
+Every result records its regime under ``validation_regime`` (see :mod:`source_localization.validation.regime`).
 """
 
 # ---------------------------------------------------------------------------
@@ -273,9 +268,16 @@ class ValidationRunner:
         config_path: Union[Path, str],
         output_dir: Optional[Union[Path, str]] = None,
         verbose: bool = True,
-        atlas_overrides: Optional[Dict[str, str]] = None
+        atlas_overrides: Optional[Dict[str, str]] = None,
+        regime: Optional[str] = None
     ):
+        """
+        ``regime`` overrides ``validation.regime`` in the config: ``'realistic'`` (default) or ``'legacy'``
+        (v0.5.x assumptions, for reproducing pre-0.6.0 numbers only). Both are defined in
+        :mod:`source_localization.validation.regime`.
+        """
         self.config_path = Path(config_path)
+        self._regime_override = regime
         self.config = ValidationConfigLoader.load_config(self.config_path)
         self.config_name = self.config_path.stem
         self.verbose = verbose
@@ -306,6 +308,13 @@ class ValidationRunner:
             else:
                 # No config output dir - use default
                 self.output_dir = Path.cwd() / 'validation' / 'results' / self.config_name
+
+        # Legacy-regime results never share a directory with realistic ones (see .regime): decided here, before
+        # setup writes any intermediate output.
+        from .regime import regime_name, LEGACY
+        if (regime_name(self.config.get('validation', {}), self._regime_override) == LEGACY
+                and not self.output_dir.name.endswith('_legacy')):
+            self.output_dir = self.output_dir.with_name(self.output_dir.name + '_legacy')
 
         # Will be populated by setup()
         self.pipeline_components = {}
@@ -473,12 +482,44 @@ class ValidationRunner:
             'source_coords_mm': source_coords_mm,
             'scale_factor': scale_factor,
             'forward_mismatch': forward_mismatch,
-            'ground_truth_conductivities': ground_truth_conductivities
+            'ground_truth_conductivities': ground_truth_conductivities,
+            # The BEM the truths are simulated with: the ground-truth one under forward_model_mismatch.
+            'bem_simulation': (step2_ground_truth['bem'] if (forward_mismatch and ground_truth_conductivities)
+                               else step2_outputs['bem']),
         }
+        self._setup_regime()
 
         self._setup_complete = True
 
     def run(
+        self,
+        snr_levels: Optional[List[float]] = None,
+        n_trials: Optional[int] = None,
+        roi_indices: Optional[List[int]] = None,
+        test_mode: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Run the validation simulation loop (see :meth:`_run_impl` for the parameters).
+
+        Every result carries ``validation_regime`` (:func:`.regime.describe`): which regime produced the numbers.
+        In the ``realistic`` regime it also carries ``truth_head_models`` and ``noise_only_control``.
+        """
+        results = self._run_impl(snr_levels=snr_levels, n_trials=n_trials, roi_indices=roi_indices,
+                                 test_mode=test_mode)
+        from .regime import describe
+        results['validation_regime'] = describe(self.regime)
+        if self.regime.perturbed_truths and self._truth_meta is not None:
+            results['truth_head_models'] = self._truth_meta
+        if self.regime.noise_only_control:
+            results['noise_only_control'] = self._noise_only_control()
+            if self.verbose:
+                noc = results['noise_only_control']
+                print(f"  Noise-only control: top ROI share {noc.get('top_share', float('nan')):.2f} "
+                      f"({noc.get('ratio_to_uniform', float('nan')):.1f}x uniform)"
+                      f"{'  FLAGGED' if noc.get('flagged') else ''}")
+        return results
+
+    def _run_impl(
         self,
         snr_levels: Optional[List[float]] = None,
         n_trials: Optional[int] = None,
@@ -683,6 +724,8 @@ class ValidationRunner:
             n_test_positions = len(test_points)
 
         n_rois = len(set(p[1] for p in test_points if p[1] > 0))
+        self._roi_mapping = roi_mapping
+        truth = self._truth_gains(test_points)   # None in the legacy regime
 
         # Initialize results structure
         all_results = {
@@ -750,16 +793,8 @@ class ValidationRunner:
 
                 for trial in range(n_trials):
                     # Simulate dipole at test position
-                    eeg_data, sim_meta = simulator.simulate_dipole(
-                        position_mm=test_pos,
-                        amplitude_nAm=dipole_config.get('amplitude_nAm', 50.0),
-                        duration_s=dipole_config.get('duration_s', 1.0),
-                        sfreq=dipole_config.get('sfreq', 500.0),
-                        snr_db=snr_db,
-                        noise_seed=trial * 1000 + i,
-                        noise_mode=dipole_config.get('noise_mode', 'snr'),
-                        noise_variance_uV2=dipole_config.get('noise_variance_uV2', 1.0)
-                    )
+                    eeg_data, sim_meta = self._simulate_truth(
+                        simulator, test_pos, i, trial, snr_db, dipole_config, truth)
 
                     # Create MNE Raw object
                     raw = simulator.create_mne_raw(eeg_data, sfreq=dipole_config.get('sfreq', 500.0))
@@ -1266,6 +1301,8 @@ class ValidationRunner:
             n_test_positions = len(test_points)
 
         n_rois = len(set(p[1] for p in test_points if p[1] > 0))
+        self._roi_mapping = roi_mapping
+        truth = self._truth_gains(test_points)   # None in the legacy regime
 
         # Initialize results
         all_results = {
@@ -1327,16 +1364,8 @@ class ValidationRunner:
             for i, (test_pos, true_roi_id, pos_name) in enumerate(test_points):
                 for trial in range(n_trials):
                     # Simulate dipole
-                    eeg_data, sim_meta = simulator.simulate_dipole(
-                        position_mm=test_pos,
-                        amplitude_nAm=dipole_config.get('amplitude_nAm', 50.0),
-                        duration_s=dipole_config.get('duration_s', 1.0),
-                        sfreq=dipole_config.get('sfreq', 500.0),
-                        snr_db=snr_db,
-                        noise_seed=trial * 1000 + i,
-                        noise_mode=dipole_config.get('noise_mode', 'snr'),
-                        noise_variance_uV2=dipole_config.get('noise_variance_uV2', 1.0)
-                    )
+                    eeg_data, sim_meta = self._simulate_truth(
+                        simulator, test_pos, i, trial, snr_db, dipole_config, truth)
 
                     raw = simulator.create_mne_raw(eeg_data, sfreq=dipole_config.get('sfreq', 500.0))
                     stc = self._apply_inverse(raw, fwd_inversion, info, config['inverse'])
@@ -1503,6 +1532,7 @@ class ValidationRunner:
         Path
             Path to saved metrics.json
         """
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         results_path = self.output_dir / 'metrics.json'
 
         def json_serializer(obj):
@@ -2003,6 +2033,112 @@ class ValidationRunner:
         if self.verbose:
             print(f"  HTML report saved to: {output_path}")
 
+    # ------------------------------------------------------------ validation regime
+    def _setup_regime(self) -> None:
+        """Resolve the regime (:mod:`.regime`) and build what the realistic regime needs (:mod:`.realistic`)."""
+        from .regime import resolve_regime, LEGACY_WARNING
+        val_config = self.config.get('validation', {})
+        self.regime = resolve_regime(val_config, override=self._regime_override)
+        self._realistic = None
+        self._background = None
+        self._truth_meta = None
+        if self.regime.is_legacy:
+            if self.verbose:
+                print(f"  WARNING: {LEGACY_WARNING}")
+                print(f"  Legacy results go to {self.output_dir}")
+            return
+        from .realistic import RealisticTruths
+        info = self.pipeline_components['info']
+        if self.regime.recorded_background:
+            from .noise import RecordedBackground
+            bg = val_config['background']
+            self._background = RecordedBackground(bg.get('files') if isinstance(bg, dict) else bg, info['ch_names'])
+            if self.verbose:
+                print(f"  Recorded background: {len(self._background.files)} file(s), "
+                      f"{self._background.n_segments} segments at {self._background.sfreq:g} Hz")
+        self._realistic = RealisticTruths(self.regime, info, self.pipeline_components['bem_simulation'],
+                                          background=self._background)
+        if self.verbose:
+            print(f"  Validation regime: realistic ({self.regime.n_head_models} truth head models; "
+                  f"{'recorded' if self._background else 'generated'} noise; noise-only control on)")
+
+    def _truth_gains(self, test_points) -> Optional[bool]:
+        """Realistic regime: cache each head model's leadfield at every requested test position. None in legacy."""
+        if self.regime.is_legacy:
+            return None
+        positions = np.array([np.asarray(p[0], float) for p in test_points])
+        if self.verbose:
+            print(f"  Truth leadfields: {len(self._realistic.models)} head models x {len(positions)} positions...")
+        kept = self._realistic.precompute(positions)
+        if self.verbose and (~kept).any():
+            print(f"    {int((~kept).sum())} position(s) outside the inner skull: simulated at the snapped source")
+        self._truth_meta = self._realistic.meta()
+        return True
+
+    def _simulate_truth(self, simulator, test_pos, i, trial, snr_db, dipole_config, truth):
+        """One simulated trial under the run's regime (:mod:`.regime`).
+
+        Legacy: exactly the pre-0.6.0 call (simulation forward at the snapped source, generated noise, same seed).
+        Realistic: the truth's leadfield at the requested position under a head model drawn from the run's pool
+        (:mod:`.realistic`), plus recorded background noise when configured.
+        """
+        kwargs = dict(
+            position_mm=test_pos,
+            amplitude_nAm=dipole_config.get('amplitude_nAm', 50.0),
+            duration_s=dipole_config.get('duration_s', 1.0),
+            sfreq=dipole_config.get('sfreq', 500.0),
+            snr_db=snr_db,
+            noise_seed=trial * 1000 + i,
+            noise_mode=dipole_config.get('noise_mode', 'snr'),
+            noise_variance_uV2=dipole_config.get('noise_variance_uV2', 1.0),
+        )
+        if truth is None:
+            return simulator.simulate_dipole(**kwargs)
+        k, rng = self._realistic.choose(i, trial)
+        gain = self._realistic.gain(test_pos, k)
+        n_times = int(kwargs['duration_s'] * kwargs['sfreq'])
+        background = self._realistic.background_for(n_times, kwargs['sfreq'], rng)
+        eeg, meta = simulator.simulate_dipole(truth_gain=gain, background=background, **kwargs)
+        meta['head_model_index'] = k if gain is not None else None
+        self._truth_meta = self._realistic.meta()
+        return eeg, meta
+
+    def _noise_only_control(self) -> Dict[str, Any]:
+        """Realistic regime: run the readout on noise alone and report how concentrated its answers are.
+
+        The readout is the same as for planted trials: the parcel of the largest source with a valid ROI. A readout
+        that keeps naming one parcel from noise would make that parcel look "found" in real data.
+        """
+        from .regime import noise_only_summary
+        from .noise import generate_noise
+        from . import DipoleSimulator
+        val_config = self.config.get('validation', {})
+        dipole_config = val_config.get('dipole', {})
+        sfreq = float(dipole_config.get('sfreq', 500.0))
+        n_times = int(float(dipole_config.get('duration_s', 1.0)) * sfreq)
+        info = self.pipeline_components['info']
+        fwd_inversion = self.pipeline_components['fwd_inversion']
+        simulator = DipoleSimulator(self.pipeline_components['fwd_simulation'], info,
+                                    self.pipeline_components['src'], verbose=False)
+        roi_mapping = np.asarray(self._roi_mapping)
+        attributed = []
+        rng = np.random.default_rng([self.regime.seed, 999])
+        for t in range(self.regime.noise_only_trials):
+            if self._background is not None:
+                noise = self._background.draw(n_times, rng, sfreq=sfreq)
+            else:
+                noise = generate_noise(len(info['ch_names']), n_times, np.random.RandomState(10_000 + t),
+                                       noise_type='white',
+                                       electrode_positions_mm=simulator.electrode_positions_mm)
+            raw = simulator.create_mne_raw(noise * 1e-6, sfreq=sfreq)
+            stc = self._apply_inverse(raw, fwd_inversion, info, self.config['inverse'])
+            order = np.argsort(np.abs(stc.data).mean(axis=1))[::-1]
+            peak = next((int(j) for j in order if roi_mapping[j] != 0), int(order[0]))
+            attributed.append(int(roi_mapping[peak]))
+        out = noise_only_summary(attributed, roi_mapping[roi_mapping > 0])
+        out['noise_source'] = 'recorded background' if self._background is not None else 'generated (white)'
+        return out
+
     def _apply_inverse(self, raw, fwd, info, inverse_config):
         """Apply inverse method to simulated data."""
         import mne
@@ -2259,10 +2395,14 @@ def run_validation(
     quick: bool = False,
     verbose: bool = True,
     atlas: str = 'full',
-    test_mode: Optional[str] = None
+    test_mode: Optional[str] = None,
+    regime: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Run validation on multiple configurations.
+
+    ``regime`` overrides each config's ``validation.regime``: ``'realistic'`` (default) or ``'legacy'`` (v0.5.x
+    assumptions, for reproducing pre-0.6.0 numbers only); see :mod:`source_localization.validation.regime`.
 
     Parameters
     ----------
@@ -2347,7 +2487,8 @@ def run_validation(
                 config_path,
                 output_dir=output_dir,
                 verbose=verbose,
-                atlas_overrides=atlas_overrides
+                atlas_overrides=atlas_overrides,
+                regime=regime
             )
             runner.setup()
             results = runner.run(

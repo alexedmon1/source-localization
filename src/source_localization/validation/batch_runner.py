@@ -107,6 +107,10 @@ class ValidationOutputSchema:
     timestamp: str = ""
     duration_seconds: float = 0.0
     version: str = VALIDATION_OUTPUT_VERSION
+    # Which simulation regime produced these numbers (source_localization.validation.regime).
+    validation_regime: Dict[str, Any] = field(default_factory=dict)
+    truth_head_models: Optional[Dict[str, Any]] = None       # realistic regime only
+    noise_only_control: Optional[Dict[str, Any]] = None      # realistic regime only
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -210,8 +214,16 @@ class BatchValidationRunner:
         test_all_sources: bool = True,
         n_test_sources: Optional[int] = None,
         atlas: str = 'full',
-        test_mode: str = 'roi_centroids'
+        test_mode: str = 'roi_centroids',
+        regime: Optional[str] = None,
+        regime_options: Optional[Dict[str, Any]] = None
     ):
+        """
+        ``regime`` is ``'realistic'`` (default) or ``'legacy'`` (v0.5.x assumptions; reproducing old numbers only),
+        as defined in :mod:`source_localization.validation.regime`. ``regime_options`` takes the same keys as a
+        validation config's ``validation:`` block (``truth_head_model``, ``background``, ``noise_only_control``,
+        ``regime_seed``).
+        """
         self.presets = presets
         self.methods = methods
         self.eeg_file = Path(eeg_file)
@@ -222,6 +234,15 @@ class BatchValidationRunner:
         self.n_test_sources = n_test_sources
         self.atlas = atlas
         self.test_mode = test_mode  # 'roi_centroids', 'uniform_grid', or 'combined'
+        from .regime import describe, resolve_regime, LEGACY
+        self.regime_options = dict(regime_options or {})
+        self.regime = resolve_regime(self.regime_options, override=regime)
+        self.validation_regime = describe(self.regime)
+        self.validation_regime['component'] = 'BatchValidationRunner'
+        if self.regime.name == LEGACY and not self.output_dir.name.endswith('_legacy'):
+            # Legacy results never share a directory with realistic ones.
+            self.output_dir = self.output_dir.with_name(self.output_dir.name + '_legacy')
+        self._background = None
 
         # Results storage
         self.results: Dict[str, ValidationOutputSchema] = {}
@@ -229,6 +250,26 @@ class BatchValidationRunner:
 
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _noise_only(self, simulator, fwd, inverse_functions, method, source_coords_mm, realistic):
+        """Realistic regime: localize noise alone (1 s at 500 Hz, as the planted trials) and summarise how
+        concentrated the peak sources are (:func:`.regime.noise_only_summary`)."""
+        from .noise import generate_noise
+        from .regime import noise_only_summary
+        n = self.regime.noise_only_trials
+        rng = np.random.default_rng([self.regime.seed, 999])
+        inv = inverse_functions.get(method.upper(), inverse_functions['sLORETA'])
+        peaks = []
+        for t in range(n):
+            noise = realistic.background_for(500, 500.0, rng)
+            if noise is None:
+                noise = generate_noise(simulator.n_channels, 500, np.random.RandomState(10_000 + t),
+                                       noise_type='white', electrode_positions_mm=simulator.electrode_positions_mm)
+            mag, _ = inv(fwd, noise * 1e-6, snr=3.0, verbose=False)
+            peaks.append(int(np.argmax(np.abs(mag).mean(axis=1) if mag.ndim == 2 else np.abs(mag))))
+        out = noise_only_summary(np.asarray(peaks) + 1, np.arange(1, len(source_coords_mm) + 1))
+        out['unit'] = 'source (index + 1)'
+        return out
 
     def run_all(
         self,
@@ -350,6 +391,17 @@ class BatchValidationRunner:
                         info=info,
                         source_space=src
                     )
+                    # Realistic regime: truths through head models drawn from the prior (see .regime/.realistic)
+                    realistic = None
+                    if not self.regime.is_legacy:
+                        from .realistic import RealisticTruths
+                        bg_opt = self.regime_options.get('background')
+                        if bg_opt and self._background is None:
+                            from .noise import RecordedBackground
+                            self._background = RecordedBackground(
+                                bg_opt.get('files') if isinstance(bg_opt, dict) else bg_opt, info['ch_names'])
+                        realistic = RealisticTruths(self.regime, info, pipeline_results['bem_model']['bem'],
+                                                    background=self._background)
 
                     # Determine test positions based on test_mode
                     n_sources = len(source_coords_mm)
@@ -415,6 +467,8 @@ class BatchValidationRunner:
 
                     if verbose:
                         print(f"  Testing {len(test_positions)} positions × {self.n_trials} trials")
+                    if realistic is not None:
+                        realistic.precompute(np.asarray(test_positions, float))
 
                     # Compute source depths for source positions (used for ROI assignment)
                     depths = compute_source_depths(source_coords_mm, electrode_coords_mm)
@@ -436,11 +490,21 @@ class BatchValidationRunner:
                             src_idx = test_indices[pos_idx]
 
                         for trial in range(self.n_trials):
-                            # Simulate dipole
-                            eeg_data, meta = simulator.simulate_dipole(
-                                position_mm=src_pos,
-                                snr_db=self.snr_db
-                            )
+                            # Simulate dipole (legacy: the unchanged call; realistic: see .realistic)
+                            if realistic is None:
+                                eeg_data, meta = simulator.simulate_dipole(
+                                    position_mm=src_pos,
+                                    snr_db=self.snr_db
+                                )
+                            else:
+                                k, rng = realistic.choose(pos_idx, trial)
+                                eeg_data, meta = simulator.simulate_dipole(
+                                    position_mm=src_pos,
+                                    snr_db=self.snr_db,
+                                    noise_seed=int(rng.integers(2**31 - 1)),
+                                    truth_gain=realistic.gain(src_pos, k),
+                                    background=realistic.background_for(500, 500.0, rng)
+                                )
 
                             # Apply inverse using the appropriate method
                             inverse_func = inverse_functions.get(method.upper(), apply_inverse_custom_sLORETA)
@@ -504,7 +568,12 @@ class BatchValidationRunner:
                         roi_n_valid=len(roi_results),
                         error_by_depth=error_by_depth,
                         timestamp=datetime.now().isoformat(),
-                        duration_seconds=duration
+                        duration_seconds=duration,
+                        validation_regime=self.validation_regime,
+                        truth_head_models=realistic.meta() if realistic is not None else None,
+                        noise_only_control=(self._noise_only(simulator, fwd, inverse_functions, method,
+                                                             source_coords_mm, realistic)
+                                            if realistic is not None else None)
                     )
 
                     # Save results
@@ -624,6 +693,7 @@ class BatchValidationRunner:
         summary = {
             'timestamp': datetime.now().isoformat(),
             'n_configs': len(self.results),
+            'validation_regime': self.validation_regime,
             'results': {name: r.to_dict() for name, r in self.results.items()},
             'best_overall': sorted_configs[0][0] if sorted_configs else None
         }

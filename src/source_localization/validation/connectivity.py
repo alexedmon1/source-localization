@@ -1,5 +1,11 @@
 """Connectivity Validation Module.
 
+.. deprecated:: 0.6.0
+   This module has no ground truth: it compares electrode and ROI connectivity distributions on real data and cannot
+   say whether any network is resolvable. Use planted-network validation instead
+   (:mod:`source_localization.validation.networks`, ``source-localization validate --networks spec.yaml``). Kept for
+   one release; calls warn.
+
 Compares connectivity patterns between:
 1. Electrode-level connectivity (from raw EEG)
 2. ROI-level connectivity (from source-localized data)
@@ -205,6 +211,8 @@ def compare_connectivity_patterns(
     comparison : dict
         Comparison metrics for each frequency band
     """
+    import warnings
+    warnings.warn(_DEPRECATION, DeprecationWarning, stacklevel=2)
     comparison = {}
 
     for band in electrode_conn.keys():
@@ -246,6 +254,10 @@ def compare_connectivity_patterns(
     return comparison
 
 
+_DEPRECATION = ("validation.connectivity has no ground truth and is deprecated (0.6.0); use planted-network "
+                "validation: source_localization.validation.networks / `validate --networks`")
+
+
 def validate_connectivity(
     eeg_file: Union[str, Path],
     roi_timeseries_file: Union[str, Path],
@@ -278,6 +290,8 @@ def validate_connectivity(
     results : dict
         Validation results including connectivity matrices and comparisons
     """
+    import warnings
+    warnings.warn(_DEPRECATION, DeprecationWarning, stacklevel=2)
     import matplotlib.pyplot as plt
 
     eeg_file = Path(eeg_file)
