@@ -7,12 +7,12 @@ Synthetic leadfields, as in test_posterior.py. These pin:
 - ``mass_above`` scores credible-region membership the same way as ``credible_mask``;
 - coverage is nominal when the model is exact;
 - with a head-model mismatch the raw map under-covers and the calibration recovers coverage.
-The calibrated constants themselves (VOLUMETRIC) were validated on the MEA30 geometry in bayes-sl, not here.
+The calibrated constants themselves (VOLUMETRIC, SURFACE) were validated on the MEA30 geometry in bayes-sl, not here.
 """
 import numpy as np
 import pytest
 
-from source_localization.validation.ensemble_posterior import (UNCALIBRATED, VOLUMETRIC, EnsemblePosterior,
+from source_localization.validation.ensemble_posterior import (SURFACE, UNCALIBRATED, VOLUMETRIC, EnsemblePosterior,
                                                                MapCalibration, blur_kernel, coverage, mass_above)
 from source_localization.validation.posterior import DipolePosterior
 
@@ -135,3 +135,4 @@ def test_head_model_mismatch_under_covers_and_calibration_recovers(geom):
 
 def test_validated_constant_is_recorded():
     assert VOLUMETRIC == MapCalibration(temperature=1.5, blur_mm=0.25)
+    assert SURFACE == MapCalibration(temperature=2.5, blur_mm=0.0)

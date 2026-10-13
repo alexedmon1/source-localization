@@ -42,6 +42,12 @@ apply only to the MEA30 geometry, the 33-model ensemble and the 0.5 mm grid:
     SNR, for both cortical and deep truths (80%: 79-81%; 95%: 92-94%). The median
     90% region is 3-8 mm3 at primary SNR.
 
+``SURFACE = MapCalibration(2.5, 0.0)``
+    For the cortical/cerebellar/olfactory surface readout, the best single setting
+    on the grid. It is approximately calibrated: the 90% region holds the truth
+    88-91% of the time at half and primary SNR, but only 83-85% at double SNR.
+    Blurring made it worse.
+
 **What calibration cannot fix.** Coverage is calibrated for single-source truths.
 A response with more than one source is still read as one confident point between
 the sources. For mirrored bilateral auditory cortex, the calibrated 90% region
@@ -70,7 +76,7 @@ from scipy.special import logsumexp
 
 from .posterior import DipolePosterior
 
-__all__ = ['EnsemblePosterior', 'MapCalibration', 'UNCALIBRATED', 'VOLUMETRIC',
+__all__ = ['EnsemblePosterior', 'MapCalibration', 'UNCALIBRATED', 'VOLUMETRIC', 'SURFACE',
            'blur_kernel', 'mass_above', 'coverage']
 
 
@@ -173,6 +179,7 @@ class MapCalibration:
 
 UNCALIBRATED = MapCalibration()
 VOLUMETRIC = MapCalibration(temperature=1.5, blur_mm=0.25)
+SURFACE = MapCalibration(temperature=2.5, blur_mm=0.0)
 
 
 def blur_kernel(positions_mm: np.ndarray, sigma_mm: float) -> sparse.csr_matrix:

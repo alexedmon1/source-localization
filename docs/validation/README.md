@@ -65,7 +65,7 @@ and SNR), not of the package. Re-run it for the configuration you use, and repor
 | How often does the pipeline name the right parcel, and how much should a named parcel be believed? | `roi_certainty` | `scripts/run_roi_certainty.py` | current |
 | How far, in mm, is an attribution off? | `displacement` | Python API | current (the MS1 statistic) |
 | Given the data, where is the source, with calibrated credible regions? | `posterior` (`DipolePosterior`) | `scripts/run_posterior_orbital.py` | current; assumes an exact forward model and white noise |
-| The same, with the head model uncertain (ensemble of head models; calibrated map) | `ensemble_posterior` (`EnsemblePosterior`, `MapCalibration`, `VOLUMETRIC`) | (bayes-sl `scripts/tb11_calibrate_maps.py`, `tb12_select_calibration.py`) | current on `feat/bayes-group`; whitened inputs; calibrated for single sources only |
+| The same, with the head model uncertain (ensemble of head models; calibrated map) | `ensemble_posterior` (`EnsemblePosterior`, `MapCalibration`, `VOLUMETRIC`, `SURFACE`) | (bayes-sl `scripts/tb11_calibrate_maps.py`, `tb12_select_calibration.py`) | current on `feat/bayes-group`; whitened inputs; calibrated for single sources only |
 | Are there two sources, and how far apart? | `two_source` | `scripts/run_two_source_posterior.py` | current |
 | How blurred is the operator (noise-free)? | `resolution` | `scripts/run_resolution_map.py` | partly superseded (section 9) |
 | Can two blobs be seen at a threshold? | `separability` | `scripts/run_separability.py` | superseded framing (section 9) |
@@ -292,7 +292,9 @@ likelihood over an ensemble of head models (nominal + `HeadModelPrior` draws) on
 raw map is overconfident when the truth's head model is a fresh draw. On MEA30 its 90% region held the truth about
 60% of the time. `MapCalibration` tempers the log posterior and then blurs it. `VOLUMETRIC = MapCalibration(1.5, 0.25)`
 gives 88-89% coverage on held-out simulations at half to double SNR, for cortical and deep truths, with a median 90%
-region of 3-8 mm3 (bayes-sl `reports/TB_map_calibration.md`, 2026-10-13). This holds for single-source truths only.
+region of 3-8 mm3 (bayes-sl `reports/TB_map_calibration.md`, 2026-10-13). For the surface readout,
+`SURFACE = MapCalibration(2.5, 0)` is approximately calibrated: 88-91% at half and primary SNR, but 83-85% at
+double SNR. This holds for single-source truths only.
 A field with several sources (e.g. bilateral auditory cortex) is still read as one confident point between them.
 
 ```bash
