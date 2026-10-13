@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from source_localization.validation.ensemble_posterior import (SURFACE, UNCALIBRATED, VOLUMETRIC, EnsemblePosterior,
+                                                               MirrorPairPosterior, mirror_pairs, model_probabilities,
                                                                MapCalibration, blur_kernel, coverage, mass_above)
 from source_localization.validation.posterior import DipolePosterior
 
@@ -35,9 +36,9 @@ def geom():
 
 
 def _simulate(G_truth, rng, snr, cols=4):
-    """Patterns from free-orientation dipoles with leadfields G_truth (n, m, 3), plus unit white noise."""
-    n, m, _ = G_truth.shape
-    mom = rng.standard_normal((n, 3, cols))
+    """Patterns from free-orientation dipoles with leadfields G_truth (n, m, 3 x sources), plus unit white noise."""
+    n, m, d = G_truth.shape
+    mom = rng.standard_normal((n, d, cols))
     s = np.einsum('nmk,nkc->nmc', G_truth, mom)
     s *= np.sqrt(snr * m / (np.sum(s ** 2, axis=(1, 2), keepdims=True) / cols))
     return s + rng.standard_normal(s.shape)
@@ -136,3 +137,50 @@ def test_head_model_mismatch_under_covers_and_calibration_recovers(geom):
 def test_validated_constant_is_recorded():
     assert VOLUMETRIC == MapCalibration(temperature=1.5, blur_mm=0.25)
     assert SURFACE == MapCalibration(temperature=2.5, blur_mm=0.0)
+
+
+@pytest.fixture
+def sym():
+    """A grid symmetric about x = 0 under a symmetric sensor array, so mirror pairs are exact."""
+    rng = np.random.default_rng(10)
+    gx = np.arange(-2.25, 2.3, 0.5)
+    pos = np.array(np.meshgrid(gx, np.arange(0, 4, 0.5), np.arange(0, 2, 0.5), indexing='ij')).reshape(3, -1).T
+    half = rng.uniform([0.3, -3, 6], [5, 7, 9], size=(8, 3))
+    sensors = np.concatenate([half, half * np.array([-1, 1, 1])])
+    return pos, sensors
+
+
+def test_mirror_pairs_are_mirror_images(sym):
+    pos, _ = sym
+    pairs = mirror_pairs(pos, 0.0, 0.3)
+    assert np.all(pos[pairs[:, 0], 0] > 0.3)
+    assert np.allclose(pos[pairs[:, 1]], pos[pairs[:, 0]] * np.array([-1, 1, 1]))
+
+
+def test_set_evidence_prefers_the_true_source_set(sym):
+    pos, sensors = sym
+    G = _leadfield(pos, sensors)[None]
+    one = EnsemblePosterior(G, pos, 0.5)
+    two = MirrorPairPosterior(G, pos, 0.5)
+    rng = np.random.default_rng(11)
+    n = 100
+    far = np.flatnonzero(np.abs(pos[two.configs[:, 0], 0]) > 1.0)   # pairs near the midline look like one source
+    i, j = two.configs[rng.choice(far, n)].T
+    Y_pair = _simulate(np.concatenate([_leadfield(pos[i], sensors), _leadfield(pos[j], sensors)], axis=2), rng,
+                       snr=50.0)
+    side = np.flatnonzero(np.abs(pos[:, 0]) > 1.0)
+    Y_one = _simulate(_leadfield(pos[rng.choice(side, n)], sensors), rng, snr=50.0)
+    p_pair = model_probabilities({'one': one.log_evidence(Y_pair), 'pair': two.log_evidence(Y_pair)})['pair']
+    p_one = model_probabilities({'one': one.log_evidence(Y_one), 'pair': two.log_evidence(Y_one)})['one']
+    assert np.mean(p_pair > 0.5) > 0.85
+    assert np.mean(p_one > 0.5) > 0.9
+
+
+def test_pair_position_map_puts_mass_on_both_members(sym):
+    pos, sensors = sym
+    two = MirrorPairPosterior(_leadfield(pos, sensors)[None], pos, 0.5)
+    p = two.posterior(_simulate(np.concatenate([_leadfield(pos[[two.configs[5, 0]]], sensors),
+                                                _leadfield(pos[[two.configs[5, 1]]], sensors)], axis=2),
+                                np.random.default_rng(12), snr=5.0)[0])
+    assert p.sum() == pytest.approx(1.0)
+    assert two.position_map(p).sum() == pytest.approx(2.0)

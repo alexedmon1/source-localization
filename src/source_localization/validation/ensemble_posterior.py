@@ -54,6 +54,14 @@ the sources. For mirrored bilateral auditory cortex, the calibrated 90% region
 holds either source in only 29-57% of maps, and both in at most 5%. Read real
 auditory maps with that in mind.
 
+**More than one source.** :class:`SourceSetPosterior` is the same likelihood for a
+configuration of several dipoles (a stacked leadfield block per configuration).
+:class:`EnsemblePosterior` is its one-dipole case. :class:`MirrorPairPosterior`
+places dipoles at a position and its mirror image across the midline (a bilateral
+response). :meth:`SourceSetPosterior.log_evidence` averages the likelihood over a
+set's configurations, so :func:`model_probabilities` can compare "one source"
+with "a mirrored pair" on the same data.
+
 Functions
 ---------
 blur_kernel
@@ -64,6 +72,10 @@ mass_above
     scores coverage at every level.
 coverage
     Empirical coverage per level from ``mass_above`` values.
+mirror_pairs
+    (right, left) index pairs of mirror-image positions.
+model_probabilities
+    Posterior probabilities of source sets from their log evidences.
 """
 from dataclasses import dataclass
 from functools import lru_cache
@@ -74,13 +86,121 @@ from scipy import sparse
 from scipy.spatial import cKDTree
 from scipy.special import logsumexp
 
-from .posterior import DipolePosterior
-
-__all__ = ['EnsemblePosterior', 'MapCalibration', 'UNCALIBRATED', 'VOLUMETRIC', 'SURFACE',
-           'blur_kernel', 'mass_above', 'coverage']
+__all__ = ['SourceSetPosterior', 'EnsemblePosterior', 'MirrorPairPosterior', 'MapCalibration', 'UNCALIBRATED',
+           'VOLUMETRIC', 'SURFACE', 'blur_kernel', 'mass_above', 'coverage', 'mirror_pairs', 'model_probabilities']
 
 
-class EnsemblePosterior:
+class SourceSetPosterior:
+    """
+    Posterior over configurations of a fixed set of dipoles, averaged over head models.
+
+    A configuration q places d / 3 free-orientation dipoles; its whitened leadfield
+    block G_q (n_channels x d) stacks theirs. Per column j,
+    ``y_j | q, k ~ N(0, s I + tau^2 G_qk G_qk^T)`` (each dipole's moment ~ N(0, tau^2 I3),
+    independent), averaged over the K head models. The moment scale is the
+    empirical-Bayes estimate per pattern: the pattern's power above the noise
+    floor divided by the median of ||G_q||_F^2 under the nominal model. With
+    several sources, tau^2 is therefore a per-source variance.
+
+    Up to a constant common to every configuration, model and set size, the log
+    likelihood is ``-1/2 y' C^-1 y - 1/2 log det C`` summed over columns. Its
+    average over configurations, :meth:`log_evidence`, is comparable across source
+    sets (a uniform prior over each set's configurations).
+
+    Parameters
+    ----------
+    blocks : ndarray, shape (K, n_configs, n_channels, d)
+        Whitened leadfield blocks of each configuration under each head model; the
+        first model is the nominal one.
+    """
+
+    def __init__(self, blocks: np.ndarray):
+        blocks = np.asarray(blocks, float)
+        if blocks.ndim == 3:
+            blocks = blocks[None]
+        self.n_models, self.n_configs, self.n_channels, self.d = blocks.shape
+        self._svd = []
+        for G in blocks:
+            U, S, _ = np.linalg.svd(G, full_matrices=False)                          # (Q, m, d), (Q, d)
+            self._svd.append((U, S))
+        self.gain2 = float(np.median(np.sum(self._svd[0][1] ** 2, axis=1)))
+
+    @staticmethod
+    def _as_patterns(data):
+        Y = np.asarray(data, float)
+        single = Y.ndim < 3
+        if Y.ndim == 1:
+            Y = Y[:, None]
+        if Y.ndim == 2:
+            Y = Y[None]
+        return Y, single
+
+    def moment_variance(self, Y: np.ndarray, noise_var: float = 1.0) -> np.ndarray:
+        """Per-pattern empirical-Bayes tau^2 for patterns (n, m, c)."""
+        n, m, c = Y.shape
+        return np.maximum(np.sum(Y ** 2, axis=(1, 2)) / c - noise_var * m, 1e-3 * m) / self.gain2
+
+    def log_likelihood(self, data: np.ndarray, noise_var: float = 1.0, moment_var: Optional[float] = None,
+                       chunk: int = 64) -> np.ndarray:
+        """
+        Unnormalized log p(y | configuration), averaged over head models.
+
+        Returns (n_patterns, n_configs), or (n_configs,) for one pattern.
+        """
+        Y, single = self._as_patterns(data)
+        n_all, m, c = Y.shape
+        d = self.d
+        out = np.empty((n_all, self.n_configs))
+        for s in range(0, n_all, chunk):
+            Yb = Y[s:s + chunk]
+            n = len(Yb)
+            total = np.sum(Yb ** 2, axis=(1, 2))                                   # (n,)
+            tau2 = self.moment_variance(Yb, noise_var) if moment_var is None else np.full(n, float(moment_var))
+            Y2 = Yb.transpose(1, 2, 0).reshape(m, c * n)
+            lps = []
+            for U, S in self._svd:
+                Q = U.shape[0]
+                proj = (U.transpose(0, 2, 1).reshape(Q * d, m) @ Y2).reshape(Q, d, c, n)
+                pe = np.sum(proj ** 2, axis=2)                                      # (Q, d, n)
+                s2 = S ** 2
+                denom = noise_var + tau2[None, None, :] * s2[:, :, None]
+                quad = (total[None, :] - np.sum(tau2[None, None, :] * s2[:, :, None] / denom * pe, axis=1)) / noise_var
+                log_det = np.sum(np.log(denom), axis=1) - d * np.log(noise_var)
+                lps.append(-0.5 * quad - 0.5 * c * log_det)                         # (Q, n)
+            out[s:s + n] = (logsumexp(np.array(lps), axis=0) - np.log(len(lps))).T
+        return out[0] if single else out
+
+    def log_evidence(self, data: np.ndarray, noise_var: float = 1.0, moment_var: Optional[float] = None
+                     ) -> np.ndarray:
+        """log p(y | this source set): the likelihood averaged over configurations (uniform prior)."""
+        ll = np.atleast_2d(self.log_likelihood(data, noise_var, moment_var))
+        ev = logsumexp(ll, axis=1) - np.log(self.n_configs)
+        return ev[0] if np.ndim(data) < 3 else ev
+
+    def log_posterior(self, data: np.ndarray, noise_var: float = 1.0, moment_var: Optional[float] = None,
+                      chunk: int = 64) -> np.ndarray:
+        """
+        Normalized log posterior over configurations.
+
+        Parameters
+        ----------
+        data : ndarray, shape (n_channels,), (n_channels, n_columns) or
+            (n_patterns, n_channels, n_columns)
+            Whitened pattern(s).
+        noise_var : float
+            Noise variance of the whitened data (1 if the whitener is right).
+        moment_var : float, optional
+            Fixed moment prior variance tau^2. Default: the per-pattern empirical-Bayes estimate.
+
+        Returns
+        -------
+        ndarray, shape (n_patterns, n_configs), or (n_configs,) for one pattern
+        """
+        ll = self.log_likelihood(data, noise_var, moment_var, chunk)
+        return ll - logsumexp(ll, axis=-1, keepdims=True)
+
+
+class EnsemblePosterior(SourceSetPosterior):
     """
     Single-dipole location posterior averaged over an ensemble of head models.
 
@@ -95,64 +215,10 @@ class EnsemblePosterior:
     """
 
     def __init__(self, leadfields: np.ndarray, positions_mm: np.ndarray, spacing_mm: float):
-        leadfields = np.asarray(leadfields, float)
-        if leadfields.ndim == 3:
-            leadfields = leadfields[None]
-        K, P, m, _ = leadfields.shape
+        super().__init__(leadfields)
         self.positions_mm = np.asarray(positions_mm, float)
         self.spacing_mm = float(spacing_mm)
-        self.n_positions = P
-        self.models = [DipolePosterior(G.transpose(1, 0, 2).reshape(m, 3 * P), self.positions_mm, spacing_mm)
-                       for G in leadfields]
-        self.gain2 = float(np.median(np.sum(self.models[0]._S ** 2, axis=1)))
-
-    def log_posterior(self, data: np.ndarray, noise_var: float = 1.0, moment_var: Optional[float] = None,
-                      chunk: int = 64) -> np.ndarray:
-        """
-        Normalized log posterior over positions.
-
-        Parameters
-        ----------
-        data : ndarray, shape (n_channels,), (n_channels, n_columns) or
-            (n_patterns, n_channels, n_columns)
-            Whitened pattern(s).
-        noise_var : float
-            Noise variance of the whitened data (1 if the whitener is right).
-        moment_var : float, optional
-            Fixed moment prior variance tau^2. Default: the per-pattern empirical-Bayes estimate.
-
-        Returns
-        -------
-        ndarray, shape (n_patterns, n_positions), or (n_positions,) for one pattern
-        """
-        Y = np.asarray(data, float)
-        single = Y.ndim < 3
-        if Y.ndim == 1:
-            Y = Y[:, None]
-        if Y.ndim == 2:
-            Y = Y[None]
-        n_all, m, c = Y.shape
-        out = np.empty((n_all, self.n_positions))
-        for s in range(0, n_all, chunk):
-            Yb = Y[s:s + chunk]
-            n = len(Yb)
-            total = np.sum(Yb ** 2, axis=(1, 2))                                   # (n,)
-            tau2 = (np.maximum(total / c - noise_var * m, 1e-3 * m) / self.gain2 if moment_var is None
-                    else np.full(n, float(moment_var)))                              # (n,)
-            Y2 = Yb.transpose(1, 2, 0).reshape(m, c * n)
-            lps = []
-            for dp in self.models:
-                P = dp._U.shape[0]
-                proj = (dp._U.transpose(0, 2, 1).reshape(P * 3, m) @ Y2).reshape(P, 3, c, n)
-                pe = np.sum(proj ** 2, axis=2)                                      # (P, 3, n)
-                s2 = dp._S ** 2
-                denom = noise_var + tau2[None, None, :] * s2[:, :, None]
-                quad = (total[None, :] - np.sum(tau2[None, None, :] * s2[:, :, None] / denom * pe, axis=1)) / noise_var
-                log_det = np.sum(np.log(denom), axis=1) - 3.0 * np.log(noise_var)
-                lps.append(-0.5 * quad - 0.5 * c * log_det)                         # (P, n)
-            lp = logsumexp(np.array(lps), axis=0)
-            out[s:s + n] = (lp - logsumexp(lp, axis=0, keepdims=True)).T
-        return out[0] if single else out
+        self.n_positions = self.n_configs
 
     def posterior(self, data: np.ndarray, calibration: Optional['MapCalibration'] = None,
                   noise_var: float = 1.0, moment_var: Optional[float] = None) -> np.ndarray:
@@ -160,6 +226,71 @@ class EnsemblePosterior:
         lp = self.log_posterior(data, noise_var, moment_var)
         cal = calibration or UNCALIBRATED
         return cal.apply(lp, self.positions_mm)
+
+
+class MirrorPairPosterior(SourceSetPosterior):
+    """
+    Two dipoles at mirror-image positions across the midline (x -> 2 x0 - x).
+
+    Auditory and other sensory responses are generated bilaterally. A single-dipole
+    readout fitted to two mirrored sources puts one confident source between them
+    (``EnsemblePosterior``'s known failure). This model places one free-orientation
+    dipole at each of a position x on the right (x > x0 + ``min_offset_mm``) and its
+    mirror image, snapped to the nearest grid position. The moments are independent,
+    so coherent and incoherent pairs are both covered.
+
+    ``configs`` holds (right index, left index) into ``positions_mm``.
+    ``config_positions_mm`` is the right member, used to blur or map the posterior.
+    """
+
+    def __init__(self, leadfields: np.ndarray, positions_mm: np.ndarray, spacing_mm: float,
+                 midline_x_mm: float = 0.0, min_offset_mm: float = 0.3):
+        leadfields = np.asarray(leadfields, float)
+        if leadfields.ndim == 3:
+            leadfields = leadfields[None]
+        self.positions_mm = np.asarray(positions_mm, float)
+        self.spacing_mm = float(spacing_mm)
+        self.midline_x_mm = float(midline_x_mm)
+        self.configs = mirror_pairs(self.positions_mm, midline_x_mm, min_offset_mm)
+        i, j = self.configs.T
+        super().__init__(np.concatenate([leadfields[:, i], leadfields[:, j]], axis=-1))
+        self.config_positions_mm = self.positions_mm[i]
+
+    def posterior(self, data: np.ndarray, calibration: Optional['MapCalibration'] = None,
+                  noise_var: float = 1.0, moment_var: Optional[float] = None) -> np.ndarray:
+        """Posterior per configuration (sums to 1 per pattern); calibrated if ``calibration`` is given."""
+        lp = self.log_posterior(data, noise_var, moment_var)
+        cal = calibration or UNCALIBRATED
+        return cal.apply(lp, self.config_positions_mm)
+
+    def position_map(self, posterior: np.ndarray) -> np.ndarray:
+        """Spread a configuration posterior onto positions: each pair puts its mass on both members (sums to 2)."""
+        p = np.atleast_2d(posterior)
+        out = np.zeros((len(p), len(self.positions_mm)))
+        for col in (0, 1):
+            np.add.at(out.T, self.configs[:, col], p.T)
+        return out[0] if np.ndim(posterior) == 1 else out
+
+
+def mirror_pairs(positions_mm: np.ndarray, midline_x_mm: float = 0.0, min_offset_mm: float = 0.3) -> np.ndarray:
+    """(n_pairs, 2) indices (right, left): each position with x > x0 + offset and its nearest mirror image."""
+    pos = np.asarray(positions_mm, float)
+    right = np.flatnonzero(pos[:, 0] > midline_x_mm + min_offset_mm)
+    q = pos[right].copy()
+    q[:, 0] = 2 * midline_x_mm - q[:, 0]
+    _, left = cKDTree(pos).query(q)
+    return np.stack([right, left], axis=1)
+
+
+def model_probabilities(log_evidences: Dict[str, np.ndarray], prior: Optional[Dict[str, float]] = None
+                        ) -> Dict[str, np.ndarray]:
+    """Posterior probability of each source set from their log evidences (equal prior odds by default)."""
+    names = list(log_evidences)
+    E = np.stack([np.asarray(log_evidences[k], float) for k in names])
+    if prior is not None:
+        E = E + np.log([prior[k] for k in names]).reshape(-1, *[1] * (E.ndim - 1))
+    P = np.exp(E - logsumexp(E, axis=0, keepdims=True))
+    return {k: P[i] for i, k in enumerate(names)}
 
 
 @dataclass(frozen=True)
