@@ -59,6 +59,11 @@ class Config:
 
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict
+        # Presets do not merge over default_config.yaml, so a default the steps
+        # read with .get() would be absent from config_resolved.yaml. Written
+        # explicitly here, a run records which reference it used (X57).
+        if isinstance(self._config.get('forward'), dict):
+            self._config['forward'].setdefault('average_reference', True)
         self._validate()
 
     @classmethod

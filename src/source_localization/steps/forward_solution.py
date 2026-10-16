@@ -102,6 +102,19 @@ def run(config, previous_outputs):
     else:
         raise ValueError(f"Unknown BEM type: {bem_type}")
 
+    # The data are average-referenced (eeg_data step), so the leadfield must be
+    # too. MNE's EEG forward is not average-referenced: its channel mean is a
+    # median 0.75-0.84 of each column's RMS. MNE's own inverse applies the
+    # average-reference projector to both the gain and the data, but every
+    # inverse here is hand-rolled on fwd['sol']['data'] and epochs.get_data(),
+    # and until this existed the projector was added and never applied, so the
+    # operator was built from an unreferenced G and applied to data in whatever
+    # reference the file carried (X57). `forward.average_reference: false`
+    # restores that behaviour, to reproduce runs that predate the fix.
+    if config['forward'].get('average_reference', True):
+        average_reference_leadfield(fwd)
+        print(f"    Leadfield average-referenced (matches the data's average reference)")
+
     # Get forward solution statistics
     n_sources = fwd['nsource']
     n_channels = fwd['nchan']
@@ -185,6 +198,26 @@ def run(config, previous_outputs):
         'roi_assignments': roi_assignments,
         'kept_source_indices': kept,
     }
+
+
+def average_reference_leadfield(fwd):
+    """Subtract the across-channel mean from every EEG row of the leadfield, in place.
+
+    Both ``fwd['sol']['data']`` and ``fwd['_orig_sol']`` (which
+    ``mne.convert_forward_solution`` re-reads when an orientation constraint is
+    applied) are referenced, so every path to the gain sees the same reference.
+    This is ``P @ G`` with ``P = I - 11'/n``, the average-reference projector,
+    and is idempotent.
+    """
+    picks = mne.pick_types(fwd['info'], meg=False, eeg=True)
+    if len(picks) == 0:
+        return fwd
+    G = fwd['sol']['data']
+    G[picks] -= G[picks].mean(axis=0, keepdims=True)
+    orig = fwd.get('_orig_sol')
+    if orig is not None:
+        orig[picks] -= orig[picks].mean(axis=0, keepdims=True)
+    return fwd
 
 
 def kept_source_indices(src_before, src_after):

@@ -97,9 +97,14 @@ def run(config, previous_outputs):
             info_idx = info['ch_names'].index(ch_name)
             epochs.info['chs'][ch_idx]['loc'] = info['chs'][info_idx]['loc']
 
-        # Set average EEG reference (required for inverse modeling)
+        # Set average EEG reference (required for inverse modeling). The
+        # projector is applied, not only added: the inverse multiplies
+        # epochs.get_data(), which ignores an inactive projector, and the
+        # forward step references the leadfield to match (X57).
         print(f"    Setting average EEG reference...")
         epochs.set_eeg_reference(projection=True, verbose=False)
+        if config['forward'].get('average_reference', True):
+            epochs.apply_proj(verbose=False)
 
         print(f"    ✓ Loaded epochs: {len(epochs)} epochs, {epochs.info['sfreq']} Hz")
         print(f"      Channels: {len(epochs.ch_names)}")
@@ -126,6 +131,8 @@ def run(config, previous_outputs):
             # Set average EEG reference (required for inverse modeling)
             print(f"    Setting average EEG reference...")
             raw.set_eeg_reference(projection=True, verbose=False)
+            if config['forward'].get('average_reference', True):
+                raw.apply_proj(verbose=False)
 
             print(f"    ✓ Loaded raw: {len(raw.ch_names)} channels, {raw.info['sfreq']} Hz, {raw.times[-1]:.2f}s")
 

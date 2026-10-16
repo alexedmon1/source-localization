@@ -55,6 +55,9 @@ forward:
   meg: false
   eeg: true
   mindist: 0.0
+  average_reference: true  # average-reference the leadfield and apply the data's
+                           # average-reference projector, so the inverse sees one
+                           # reference (X57). false reproduces runs before 0.7.0.
 
 inverse:
   method: dSPM  # Options: MNE, dSPM, sLORETA (uses custom mouse-brain-optimized implementations)

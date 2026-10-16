@@ -2,7 +2,7 @@
 
 **Created:** 2025-11-26
 **Last Updated:** 2026-09-03
-**Version:** 0.6.0
+**Version:** 0.7.0
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -1011,11 +1011,23 @@ source_localization/
 
 ## History
 
-The package version is `0.6.0`. Earlier revisions of this README carried a
+The package version is `0.7.0`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
+
+Notable changes in 0.7.0:
+
+- **One reference for the leadfield and the data (X57).** The forward step average-references the EEG
+  leadfield (`sol` and `_orig_sol`), and the EEG step applies the average-reference projector it adds, which
+  until now was added and never applied. Before this, every hand-rolled inverse was built from an
+  unreferenced leadfield (channel mean a median 0.75-0.84 of each column's RMS) and applied to data in whatever
+  reference the file carried
+- **Every number changes.** ROI and source outputs from earlier versions are not comparable with 0.7.0 ones;
+  re-run rather than mix. `study` batches skip subjects whose outputs exist, so clear old outputs first
+- `forward.average_reference: false` restores the earlier behaviour, to reproduce old runs only. Each run's
+  `config_resolved.yaml` records the setting
 
 Notable changes in 0.6.0:
 
