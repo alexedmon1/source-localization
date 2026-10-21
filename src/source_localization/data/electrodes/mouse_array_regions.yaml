@@ -1,0 +1,26 @@
+# Electrode regions for the 30-site mouse MEA in mouse_array_coords.csv.
+#
+# Numbering starts at the posterior left (E1), runs forward up the left side to
+# the anterior tip (E14-E17), and returns down the right side to the posterior
+# right (E30). Each region is one hemisphere x one anterior-posterior band, the
+# six clusters of Jonak et al. (2020).
+#
+#   AP (mm from bregma)   left      region     right
+#   +2.3, +1.0            E12-E15   Frontal    E16-E19
+#   -0.5, -2.0            E7-E11    Medial     E20-E24
+#   -3.1, -4.2            E1-E6     Posterior  E25-E30
+#
+# "Medial" is the middle AP band, not the midline; the name is kept for
+# consistency with other studies.
+#
+# Before 2026-10-21, study configs (FORGE and others) used the same six clusters
+# with the names inverted: E1-E6/E25-E30 as "Frontal" and E12-E19 as "Temporal".
+# Membership was right; only the Frontal and Posterior names change.
+# tests/test_electrode_regions.py checks this file against the coordinates.
+electrode_categories:
+  Left Frontal: [E12, E13, E14, E15]
+  Right Frontal: [E16, E17, E18, E19]
+  Left Medial: [E7, E8, E9, E10, E11]
+  Right Medial: [E20, E21, E22, E23, E24]
+  Left Posterior: [E1, E2, E3, E4, E5, E6]
+  Right Posterior: [E25, E26, E27, E28, E29, E30]

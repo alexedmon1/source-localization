@@ -79,7 +79,10 @@ claim about anatomy.
 - **Orientation constraint**: fixed to the cortical normal on the anatomical
   surface, free elsewhere
 - **Registered atlases** selectable with `--atlas` (see [Atlas Selection](#atlas-selection))
-- **30-channel electrode array** coordinates included
+- **30-channel electrode array** coordinates included, with the canonical six
+  electrode regions (Left/Right Frontal, Medial, Posterior) in
+  `data/electrodes/mouse_array_regions.yaml`; copy that block into a study's
+  `electrode_categories`
 
 ### Multi-Subject Study Processing
 - BIDS-inspired folder hierarchy, YAML study configuration
