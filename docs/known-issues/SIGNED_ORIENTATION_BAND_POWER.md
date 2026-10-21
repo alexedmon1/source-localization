@@ -20,6 +20,9 @@ Filed: 2026-10-21, from bayes-sl's end-to-end leakage check (EE2, `reports/2026-
 - FORGE's ROI-average Low Gamma group contrasts keep their direction under three other readouts (sizes move up to
   0.3 SD). Per-ROI contrasts move by up to 1.4 SD, and under the leadfield option four contrasts above 0.5 SD
   change sign.
+- A strong focal plant reads largest at its own ROI in 4 of 12 checks under per-epoch and 7 of 12 under vector.
+  - Per-epoch's sink, Hippocampus_Post_R, is the component choice.
+  - Vector still leaks, to Frontal_Anterior: that leak is the kernel's own.
 
 ## The rule
 
@@ -61,6 +64,48 @@ the orientation and the background:
 - **Non-monotone:** in Frontal_Anterior (sub-801) a stronger plant *lowered* the ROI's Low Gamma by up to 3.5 dB
   over a 20 dB range of amplitudes. Plausibly the flips at neighbouring sources leave the ROI mean averaging
   components that now disagree in sign, which cancels power; not yet isolated.
+
+### Where a strong focal plant reads: per-epoch vs vector
+
+bayes-sl `scripts/ee2_check_plant_vector.py`; outputs in bayes-sl `scratch/ee2/check_plant_vector*.csv`.
+
+**Set-up.**
+- One planted Low Gamma dipole per focal region, at a random position within the ROI and a random orientation.
+- It sits 20 dB above the base level, so it dominates its source.
+- Nominal head model; 3 backgrounds (sub-801, sub-912, sub-955).
+- The planted ROI is ranked among the 26 by Low Gamma increase over the same mouse without the plant, under two
+  readouts: per-epoch (FORGE's) and vector (option 1 below, which makes no component choice).
+- Same plants and seeds under both readouts. The per-epoch rows reproduce bayes-sl's original check (EE2) to
+  4e-15 dB.
+
+**What it separates.** What still fails under vector is the kernel's own leakage. What passes under vector but not
+under per-epoch is the component choice.
+
+| Planted region | Planted ROI reads largest: per-epoch → vector | Ranks per-epoch / vector | Where it reads largest instead |
+|---|---|---|---|
+| Frontal_Anterior | 3/3 → 3/3 | 1, 1, 1 / 1, 1, 1 | |
+| Somatosensory_R | 1/3 → 2/3 | 1, 6, 24 / 1, 1, 2 | per-epoch: Thalamus, Somatosensory_L; vector: Frontal_Anterior |
+| Thalamus | 0/3 → 2/3 | 3, 6, 3 / 2, 1, 1 | per-epoch: Hippocampus_Post_R (all 3); vector: Frontal_Anterior |
+| Hippocampus_Ant_R | 0/3 → 0/3 | 4, 22, 3 / 4, 20, 2 | per-epoch: Hippocampus_Post_R (all 3); vector: Frontal_Anterior (all 3) |
+
+- **Hippocampus_Post_R as a sink is the component choice.** It is the top ROI in 6 of the 12 per-epoch checks and in
+  none under vector.
+- **A smaller leak is the kernel's own, and it goes to Frontal_Anterior.**
+  - Frontal_Anterior is the top or second ROI in 9 of the 12 vector checks.
+  - Where the planted ROI does win under vector, it often wins narrowly (Thalamus, sub-912: +12.7 vs +12.0 dB).
+  - Why Frontal_Anterior collects it is not yet explained.
+- **Hippocampus_Ant_R fails under both.** In sub-912 its plant is hardly seen at its own ROI by either readout
+  (rank 22 per-epoch, 20 vector).
+- **Scope:** 3 backgrounds and one plant position and orientation each. These are directions, not rates. The rates
+  over whole cohorts are bayes-sl's end-to-end check (EE3-EE4).
+
+**At ordinary amplitudes** (bayes-sl `reports/2026-10-19_end_to_end_plan.md` section 3.6; per-epoch readout only, 60
+backgrounds x 8 head models):
+- Plants are set so the median mouse gains +1.76 dB at the target.
+- Thalamus, Hippocampus_Ant_R and Somatosensory_R plants read above 0.1 between-mouse SD in 24-26 of 26 ROIs.
+- Hippocampus_Post_R reads as large as, or larger than, the planted ROI for both deep plants.
+- Bands with no plant move: Epsilon (80-100 Hz) falls by up to 0.6 dB under a Low Gamma plant. Only a change of the
+  kept component can do that.
 
 ## Why it matters
 
@@ -135,7 +180,9 @@ ROI-average contrast vs WT_VEH (SD):
 1. **Vector power for band-power analytics** (proposed): take each ROI's mean of each Cartesian component as its own
    series and sum their band powers. No choice, no sign cancellation between components, linear in power, and every
    orientation counts. Not a single signed series, so not for phase or connectivity. On FORGE it keeps the
-   ROI-average contrasts' direction and moves per-ROI contrasts (section above).
+   ROI-average contrasts' direction and moves per-ROI contrasts (section above). It removes the Hippocampus_Post_R
+   sink but not the kernel's own leak to Frontal_Anterior. Per-ROI band power under it is still an effect in the
+   readout, not a location.
 2. **`inverse.signed_orientation: leadfield`** (exists since `bc4c63f`): one fixed direction per source (the
    dominant leadfield direction, signs aligned within each parcel), the same for every epoch and recording. Band
    power is then linear in the source amplitude and the phase cost (X56) goes too. But only the projection on that
