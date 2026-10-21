@@ -47,3 +47,4 @@ nav:
   - Known issues:
       - Shell ROI coverage (215 vertices): known-issues/SHELL_ROI_COVERAGE.md
       - Regularization scaling: known-issues/REGULARIZATION_SCALING_ISSUE.md
+      - Signed orientation and band power: known-issues/SIGNED_ORIENTATION_BAND_POWER.md
