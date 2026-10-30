@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=62.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -78,7 +78,7 @@ where = ["src"]
 source_localization = [
     "config/*.yaml",
     "config/presets/*.yaml",
-    "data/atlas/*",
+    "data/atlas/**/*",
     "data/electrodes/*",
     "data/calibration/*",
     "validation/config/default_tests/**/*.yaml",
