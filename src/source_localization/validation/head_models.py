@@ -23,12 +23,21 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
-__all__ = ["HeadModel", "HeadModelPrior", "TruthForward"]
+__all__ = ["HeadModel", "HeadModelPrior", "TruthForward", "draw_ensemble"]
 
 
 # HeadModel and HeadModelPrior live in locate.head_ensemble (field-method plan, phase F1): one definition for the
 # location posteriors and the validation regime.
 from ..locate.head_ensemble import HeadModel, HeadModelPrior  # noqa: E402
+
+
+def draw_ensemble(prior: HeadModelPrior, n_draws: int, rng: np.random.Generator, include_nominal: bool = True) -> list:
+    """The nominal model (first, if ``include_nominal``) plus ``n_draws`` draws from ``prior``.
+
+    The nominal model comes first because an ensemble posterior takes its moment prior's gain scale from its first model.
+    """
+    models = [HeadModel()] if include_nominal else []
+    return models + [prior.draw(rng) for _ in range(n_draws)]
 
 
 class TruthForward:
