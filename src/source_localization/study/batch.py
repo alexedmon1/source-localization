@@ -20,13 +20,14 @@ import json
 import logging
 import shutil
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .config import StudyConfig, SubjectInfo
+from ..utils.parallel import process_pool
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +263,7 @@ def process_study(
                 progress_callback(i + 1, n_subjects, subject.subject_id, result.success)
     else:
         # Parallel processing
-        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        with process_pool(n_jobs) as executor:
             future_to_subject = {
                 executor.submit(process_subject, config, subject, skip_existing, skip_roi_extraction): subject
                 for subject in subjects_to_process

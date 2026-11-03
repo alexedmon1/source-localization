@@ -204,9 +204,8 @@ class DirectedNetworkValidation:
                 results = (self._one(c) for c in cells)
                 self._collect(results, arr, lags, index)
         else:
-            from multiprocessing import get_context
-            from .harness import _worker_init
-            with get_context("fork").Pool(workers, initializer=_worker_init) as mp:
+            from ...utils.parallel import mp_pool
+            with mp_pool(workers, threads=1) as mp:
                 self._collect(mp.imap_unordered(DirectedNetworkValidation._one, cells, chunksize=2), arr, lags, index)
         meta = pd.DataFrame([dict(k=k, pair=p, band=b, snr=s, cond=c, truth=i,
                                   kind="none" if c < 0 else CONDS[c][0],

@@ -42,6 +42,9 @@ dependencies = [
     # and required outright by the anatomical surface source space, which
     # extracts a cortical isosurface with skimage.measure.marching_cubes.
     "scikit-image>=0.19",
+    # utils/parallel.py caps each pool worker's BLAS/OpenMP threads with it. Installed
+    # already through scikit-learn; declared because this package imports it directly.
+    "threadpoolctl>=3.1",
 ]
 
 [project.optional-dependencies]

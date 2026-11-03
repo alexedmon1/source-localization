@@ -423,8 +423,8 @@ class NetworkValidation:
                 for n, c in enumerate(cells):
                     rows.extend(self._one(c))
         else:
-            from multiprocessing import get_context
-            with get_context("fork").Pool(workers, initializer=_worker_init) as mp:
+            from ...utils.parallel import mp_pool
+            with mp_pool(workers, threads=1) as mp:
                 for n, out in enumerate(mp.imap_unordered(NetworkValidation._one, cells, chunksize=4)):
                     rows.extend(out)
                     if self.verbose and (n + 1) % 1000 == 0:
@@ -471,8 +471,3 @@ class NetworkValidation:
         (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
         self._log(f"done: {n_res} of {len(tabs['resolvable'])} cells resolvable; outputs in {out}")
         return summary
-
-
-def _worker_init():
-    from threadpoolctl import threadpool_limits
-    threadpool_limits(1)

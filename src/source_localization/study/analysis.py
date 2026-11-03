@@ -25,10 +25,12 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 import numpy as np
 import pandas as pd
+
+from ..utils.parallel import process_pool
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +360,7 @@ def analyze_study(
                 logger.error(f"Subject {subject.subject_id}: {e}")
     else:
         # Parallel processing
-        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        with process_pool(n_jobs) as executor:
             futures = {}
             for subject in subjects_to_analyze:
                 output_dir = config.get_subject_output_dir(subject)
