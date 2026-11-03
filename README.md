@@ -132,6 +132,9 @@ uv pip install -e .
 
 # For connectivity analysis (optional)
 uv pip install -e ".[connectivity]"
+
+# For the study's localization summary in the shared results format (optional, Python 3.10+)
+uv pip install -e ".[results]"
 ```
 
 ### Reproducing a published analysis
@@ -256,6 +259,25 @@ source-localization study collect study_config.yaml
 # Quality control report
 source-localization study qc study_config.yaml
 ```
+
+### The study's localization summary
+
+With the optional `results` extra installed (neurobox-dev, the results
+specification shared with source-analytics and neurofaune), `study qc` also
+writes the study's localization as one **diagnostic analysis** in `qc/`, beside
+`qc_report.html`, so a study gallery or any reader can show how the recordings
+were localized without this package:
+
+| file | what it holds |
+|---|---|
+| `analysis.json` | `role: diagnostic`, `domain: localization`, the atlas, and caveats: recordings that failed or are missing, a recipe that differs between recordings, parcels the montage cannot resolve, QC outliers |
+| `recordings.csv` (+ `.json`) | one row per recording in the study config: subject, session, recording, group, its output folder, status (and the logged error), the paths of its `pipeline_report.html`, electrode-registration check and step figures, the version that localized it, its QC metrics and, under Monte Carlo sampling, its lowest coverage and gain and its count of collinear and undersampled parcels |
+| `parcel_coverage.csv` (+ `.json`) | Monte Carlo only: one row per parcel over the recordings: coverage, gain, its highest collinearity and the parcel it is most often collinear with, and `reliable` (never collinear at r >= 0.99, never below 0.5 coverage) |
+| `provenance.json` | the localization recipe (preset, atlas, BEM, source space, sampling, inverse) and whether every recording used the same one |
+
+Paths are relative to `qc/`, and each recording is named by its fields, so a
+reader never parses folder names such as `sub-801_ses-01`. Check it with
+`python -m neurobox check qc/`. Without the extra, `study qc` is unchanged.
 
 ### Python API
 

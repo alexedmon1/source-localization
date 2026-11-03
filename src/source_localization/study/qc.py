@@ -13,7 +13,7 @@ import gc
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -339,6 +339,18 @@ def generate_qc_plots(
     fig_dir.mkdir(parents=True, exist_ok=True)
     paths: List[Path] = []
 
+    # Metrics a run does not produce are None (a Monte Carlo run has no source
+    # estimate, so every stc_* is None). As object columns they crash matplotlib,
+    # which used to leave figures/ empty for every Monte Carlo study; as numbers
+    # they are NaN, and a plot whose metric has no values is skipped.
+    df = df.copy()
+    for col in df.columns:
+        if col not in ("subject_id", "group", "outlier_flag"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    def _has(col: str) -> bool:
+        return col in df.columns and bool(df[col].notna().any())
+
     # Order subjects by treatment group so every plot shows group structure.
     if "group" in df.columns:
         df = df.sort_values(["group", "subject_id"]).reset_index(drop=True)
@@ -365,21 +377,24 @@ def generate_qc_plots(
     x_labels = df["subject_id"].tolist()
     x = np.arange(len(x_labels))
 
-    # --- Plot 1: Source amplitude by subject ---
-    if "stc_amp_mean" in df.columns:
+    # --- Plot 1: Source amplitude by subject (ROI amplitude when there is no
+    # source estimate, as under Monte Carlo sampling) ---
+    amp, amp_sd, amp_name = (("stc_amp_mean", "stc_amp_std", "Source") if _has("stc_amp_mean")
+                             else ("roi_amp_mean", "roi_amp_std", "ROI"))
+    if _has(amp):
         fig, ax = plt.subplots(figsize=(max(10, len(x_labels) * 0.4), 5))
-        bars = ax.bar(
-            x, df["stc_amp_mean"], color=_group_colors(df),
-            edgecolor=_edge_colors(df, "stc_amp_mean"),
-            linewidth=_edge_widths(df, "stc_amp_mean"),
+        ax.bar(
+            x, df[amp].fillna(0), color=_group_colors(df),
+            edgecolor=_edge_colors(df, amp),
+            linewidth=_edge_widths(df, amp),
         )
-        if "stc_amp_std" in df.columns:
-            ax.errorbar(x, df["stc_amp_mean"], yerr=df["stc_amp_std"],
+        if _has(amp_sd):
+            ax.errorbar(x, df[amp], yerr=df[amp_sd],
                         fmt="none", ecolor="gray", alpha=0.5, capsize=2)
         ax.set_xticks(x)
         ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=7)
-        ax.set_ylabel("Source Amplitude (mean)")
-        ax.set_title("Source Amplitude by Subject")
+        ax.set_ylabel(f"{amp_name} Amplitude (mean)")
+        ax.set_title(f"{amp_name} Amplitude by Subject")
         # Legend
         for g in sorted(palette):
             ax.bar([], [], color=palette[g], label=g)
@@ -391,7 +406,7 @@ def generate_qc_plots(
         plt.close(fig)
 
     # --- Plot 2: Forward condition number ---
-    if "forward_condition_number" in df.columns:
+    if _has("forward_condition_number"):
         fig, ax = plt.subplots(figsize=(max(10, len(x_labels) * 0.4), 5))
         vals = df["forward_condition_number"].fillna(0)
         ax.bar(
@@ -411,7 +426,7 @@ def generate_qc_plots(
         plt.close(fig)
 
     # --- Plot 3: Total timepoints per subject ---
-    if "stc_n_times" in df.columns:
+    if _has("stc_n_times"):
         fig, ax = plt.subplots(figsize=(max(10, len(x_labels) * 0.4), 5))
         ax.bar(
             x, df["stc_n_times"].fillna(0), color=_group_colors(df),
@@ -429,7 +444,7 @@ def generate_qc_plots(
         plt.close(fig)
 
     # --- Plot 4: Sources per ROI ---
-    if "sources_per_roi_mean" in df.columns:
+    if _has("sources_per_roi_mean"):
         fig, ax = plt.subplots(figsize=(max(10, len(x_labels) * 0.4), 5))
         vals = df["sources_per_roi_mean"].fillna(0)
         errs = df["sources_per_roi_std"].fillna(0) if "sources_per_roi_std" in df.columns else None
@@ -466,7 +481,7 @@ def generate_qc_plots(
         "forward_condition_number", "stc_amp_mean", "stc_amp_max",
         "stc_amp_std", "stc_n_times", "roi_amp_mean",
     ]
-    available = [c for c in z_cols if c in df.columns]
+    available = [c for c in z_cols if _has(c)]
     if available:
         z_df = df[available].apply(pd.to_numeric, errors="coerce")
         z_df = (z_df - z_df.mean()) / z_df.std()
@@ -797,6 +812,7 @@ def run_qc(
     """
     from .config import StudyConfig
 
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     derivatives_dir = config.derivatives_dir
     qc_dir = Path(output_dir) if output_dir else config.root_dir / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
@@ -886,6 +902,16 @@ def run_qc(
     generate_qc_report(config, df, outlier_flags, warnings, plot_paths, report_path)
     if verbose:
         print(f"  Report saved to {report_path}")
+
+    # The study's localization in the shared results specification (optional
+    # `results` extra): analysis.json, recordings.csv, parcel_coverage.csv.
+    # Never fails the QC.
+    from .results_spec import write as write_localization_summary
+
+    summary = write_localization_summary(config, qc_dir, df, outlier_flags, warnings, plot_paths, started)
+    if verbose and summary is not None:
+        print(f"  Localization summary: {qc_dir / 'analysis.json'} "
+              f"({'conforms' if summary.ok else 'does not conform: ' + '; '.join(summary.errors)})")
 
     # Summary to stdout
     n_flagged = len(all_flagged)
