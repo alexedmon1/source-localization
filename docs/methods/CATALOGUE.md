@@ -1,6 +1,6 @@
 # Model catalogue
 
-Every probability model this package uses to say where a signal comes from: the location posteriors, the priors they rest on, and the calibrations applied to their maps. Each has a stable **id** and a **version**; results name the ids and versions that produced them.
+Every probability model this package uses to say where a signal comes from: the location posteriors, the priors they rest on, the calibrations applied to their maps and the noise whitening they assume. Each has a stable **id** and a **version**; results name the ids and versions that produced them.
 
 *Generated from `source_localization/methods.py` (`python -m source_localization.methods > docs/methods/CATALOGUE.md`); do not edit by hand. `tests/test_catalogue.py` checks it is current.*
 
@@ -33,9 +33,9 @@ One dipole, averaged over a head-model ensemble.
 - **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`
 - **Validity:** Inputs must be whitened (the caller fits the whitener). Raw maps are overconfident; use a calibration from this catalogue inside its domain. Calibrated for single-source truths only.
 - **Caveat:** A response with more than one source is read as one confident point between them; compare with locate.mirror_pair or locate.source_set through prior.model_odds_equal.
-- **Implementation:** `source_localization.validation.ensemble_posterior:EnsemblePosterior`
+- **Implementation:** `source_localization.locate.ensemble_posterior:EnsemblePosterior`
 - **Tests:** `tests/test_ensemble_posterior.py`
-- **Reference:** module docstring of source_localization.validation.ensemble_posterior; bayes-sl reports/TB_map_calibration.md
+- **Reference:** module docstring of source_localization.locate.ensemble_posterior; bayes-sl reports/TB_map_calibration.md
 
 ### `locate.mirror_pair` (version 1)
 
@@ -45,7 +45,7 @@ A dipole and its mirror image across the midline.
 - **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`
 - **Validity:** As locate.single_source. The single-source calibration carries over to pair maps on MEA30 (90% region: 92-93% coverage for auditory-cortex pairs, 81-83% for random pairs; bayes-sl reports/TB_mirror_pair.md).
 - **Caveat:** Pairs very close to the midline look like one central source; at high SNR a single deep source can pass for a near-midline pair (bayes-sl tb16 control).
-- **Implementation:** `source_localization.validation.ensemble_posterior:MirrorPairPosterior`
+- **Implementation:** `source_localization.locate.ensemble_posterior:MirrorPairPosterior`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_mirror_pair.md
 
@@ -56,9 +56,9 @@ Any fixed set of dipoles, with model evidence.
 - **Model:** A configuration q places d/3 free-orientation dipoles with stacked whitened leadfield G_q. Per column: y_j | q, k ~ N(0, I + tau^2 G_qk G_qk^T), each moment ~ N(0, tau^2 I3) independently, averaged over head models. log_evidence averages the likelihood over the set's configurations, so different sets can be compared.
 - **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`
 - **Validity:** As locate.single_source; calibration checked for one source and for mirror pairs only.
-- **Implementation:** `source_localization.validation.ensemble_posterior:SourceSetPosterior`
+- **Implementation:** `source_localization.locate.ensemble_posterior:SourceSetPosterior`
 - **Tests:** `tests/test_ensemble_posterior.py`
-- **Reference:** module docstring of source_localization.validation.ensemble_posterior
+- **Reference:** module docstring of source_localization.locate.ensemble_posterior
 
 ## Priors of the location posteriors
 
@@ -77,7 +77,7 @@ Uniform over candidate positions or configurations.
 - **Model:** p(x) constant over the grid points inside the brain (or over a source set's configurations).
 - **Values:** uniform; the grid spacing sets its resolution (0.5 mm by default)
 - **Caveat:** Because gain falls with depth, deep sources get broad posteriors under it; that is a statement about the data, not the prior.
-- **Implementation:** `source_localization.validation.ensemble_posterior:SourceSetPosterior`
+- **Implementation:** `source_localization.locate.ensemble_posterior:SourceSetPosterior`
 
 ### `prior.moment_empirical_bayes` (version 1)
 
@@ -85,7 +85,7 @@ Dipole moments Gaussian, scale estimated per pattern.
 
 - **Model:** Each dipole moment ~ N(0, tau^2 I3). tau^2 is an empirical-Bayes estimate per data pattern: max(||y||^2 / c - s m, 1e-3 m) / median_x ||G_x,nominal||_F^2 (c columns, m channels, noise variance s = 1 after whitening). With several dipoles it is a per-source variance.
 - **Values:** tau^2 from the data, not a fixed prior; floor 1e-3 m
-- **Implementation:** `source_localization.validation.ensemble_posterior:SourceSetPosterior.moment_variance`
+- **Implementation:** `source_localization.locate.ensemble_posterior:SourceSetPosterior.moment_variance`
 - **Reference:** probability-atlas pa.posterior (the reference implementation)
 
 ### `prior.moment_given_sd` (version 1)
@@ -104,8 +104,9 @@ Head-model uncertainty: the 33-model ensemble.
 - **Model:** The nominal head model plus 32 draws from HeadModelPrior: electrode-registration shift ~ N(0, 0.3 mm) per axis, skull-conductivity factor log-uniform on [0.5, 2.0]. Draws from numpy default_rng([20261005, 1, 0]); leadfields on the 0.5 mm volumetric grid, unreferenced as MNE returns them.
 - **Values:** shift SD 0.3 mm (x, y, z), skull factor log-uniform 0.5-2.0, K = 1 nominal + 32 draws, seed [20261005, 1, 0]
 - **Validity:** MEA30 on the ellipsoid BEM. Every calibration in this catalogue was measured with this ensemble.
-- **Implementation:** `external:probability-atlas pa/ensemble.py draw_ensemble, ensemble_leadfields; scripts/phase2_simulate.py VARIANTS["primary"] (moves here in phase F1)`
-- **Reference:** source_localization.validation.head_models:HeadModelPrior has the same parameters
+- **Implementation:** `source_localization.locate.head_ensemble:ENSEMBLE_PA_PHASE2`
+- **Tests:** `tests/test_locate.py`
+- **Reference:** Ported from probability-atlas Phase 2 (pa/ensemble.py, scripts/phase2_simulate.py VARIANTS["primary"], K_ENS 32, rng_for(1, 0)); draws identical, leadfields equal to a relative 2e-16 on the Sentinel grid (field-method plan, F1)
 
 ### `prior.model_odds_equal` (version 1)
 
@@ -114,7 +115,7 @@ Equal prior odds between source sets.
 - **Model:** P(set | y) from the sets' log evidences (locate.source_set.log_evidence) with equal prior probability for each set compared (for example one source vs a mirror pair).
 - **Values:** equal prior probability per set
 - **Validity:** P(pair) roughly calibrated, slightly overconfident, on MEA30 (patterns with P(pair) 0.95-1.0 were pairs 94.5% of the time; bayes-sl reports/TB_mirror_pair.md).
-- **Implementation:** `source_localization.validation.ensemble_posterior:model_probabilities`
+- **Implementation:** `source_localization.locate.ensemble_posterior:model_probabilities`
 
 ## Map calibrations
 
@@ -131,7 +132,7 @@ The raw averaged posterior.
 - **Model:** Temperature 1, no blur.
 - **Values:** temperature 1.0, blur 0 mm
 - **Caveat:** Overconfident under head-model error: the 90% region held the truth about 55-65% of the time on MEA30 (bayes-sl reports/TB_map_focality.md).
-- **Implementation:** `source_localization.validation.ensemble_posterior:UNCALIBRATED`
+- **Implementation:** `source_localization.locate.ensemble_posterior:UNCALIBRATED`
 
 ### `calibration.volumetric` (version 1)
 
@@ -140,7 +141,7 @@ Tempered and blurred, for volumetric maps.
 - **Model:** Normalized log posterior divided by T = 1.5, then an isotropic Gaussian blur of 0.25 mm over the candidate positions (mass-conserving).
 - **Values:** temperature 1.5, blur 0.25 mm
 - **Validity:** MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, single-source truths, whitened real noise. 90% region held the truth 88-89% of the time at half, primary and double SNR (80%: 79-81%; 95%: 92-94%). Chosen on one simulated set, checked on another.
-- **Implementation:** `source_localization.validation.ensemble_posterior:VOLUMETRIC`
+- **Implementation:** `source_localization.locate.ensemble_posterior:VOLUMETRIC`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_map_calibration.md
 
@@ -151,6 +152,56 @@ Tempered, for the cortical surface readout.
 - **Model:** Normalized log posterior divided by T = 2.5; no blur (blurring made it worse).
 - **Values:** temperature 2.5, blur 0 mm
 - **Validity:** MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory surface positions. Approximately calibrated: 90% region 88-91% at half and primary SNR, 83-85% at double SNR.
-- **Implementation:** `source_localization.validation.ensemble_posterior:SURFACE`
+- **Implementation:** `source_localization.locate.ensemble_posterior:SURFACE`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_map_calibration.md
+
+## Noise whitening
+
+| id | version | what it is |
+|---|---|---|
+| `whiten.sample` | 1 | pooled sample covariance shape, per-recording scale |
+| `whiten.ledoit_wolf` | 1 | Ledoit-Wolf shrinkage covariance shape, per-recording scale |
+| `whiten.oas` | 1 | OAS shrinkage covariance shape, per-recording scale |
+| `whiten.diagonal` | 1 | independent electrode noise, then referenced |
+
+### `whiten.sample` (version 1)
+
+Pooled sample covariance shape, per-recording scale.
+
+- **Model:** Data and leadfields are projected onto the n-1 average-reference directions (the reference electrode drops out). Each recording's noise scale is the RMS of its referenced noise samples; the spatial covariance shape C is pooled over recordings from their scale-normalised samples, estimated by the plain sample covariance. Whitener W = C^(-1/2) B'; a recording's pattern y becomes W y / scale. Noise samples are, for trial averages, (odd-trial average - even-trial average) / 2, so their variance is the noise in the full average; complex steady-state noise enters as [Re, Im] columns.
+- **Values:** estimator "sample"
+- **Validity:** Assumes every recording shares one noise shape and differs only in size. Which estimator to use is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule).
+- **Caveat:** Amplifies noise it was not fitted on (held-out whitened power 2.2x for ASSR, 15-24x for chirp peaks in probability-atlas Phase 1); prefer a shrinkage estimator.
+- **Implementation:** `source_localization.locate.whitening:NoiseWhitener`
+- **Tests:** `tests/test_locate.py`
+
+### `whiten.ledoit_wolf` (version 1)
+
+Ledoit-Wolf shrinkage covariance shape, per-recording scale.
+
+- **Model:** Data and leadfields are projected onto the n-1 average-reference directions (the reference electrode drops out). Each recording's noise scale is the RMS of its referenced noise samples; the spatial covariance shape C is pooled over recordings from their scale-normalised samples, estimated by scikit-learn's Ledoit-Wolf shrinkage (zero-mean samples). Whitener W = C^(-1/2) B'; a recording's pattern y becomes W y / scale. Noise samples are, for trial averages, (odd-trial average - even-trial average) / 2, so their variance is the noise in the full average; complex steady-state noise enters as [Re, Im] columns.
+- **Values:** estimator "ledoit_wolf"
+- **Validity:** Assumes every recording shares one noise shape and differs only in size. Which estimator to use is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule).
+- **Implementation:** `source_localization.locate.whitening:NoiseWhitener`
+- **Tests:** `tests/test_locate.py`
+
+### `whiten.oas` (version 1)
+
+OAS shrinkage covariance shape, per-recording scale.
+
+- **Model:** Data and leadfields are projected onto the n-1 average-reference directions (the reference electrode drops out). Each recording's noise scale is the RMS of its referenced noise samples; the spatial covariance shape C is pooled over recordings from their scale-normalised samples, estimated by scikit-learn's oracle approximating shrinkage (OAS; zero-mean samples). Whitener W = C^(-1/2) B'; a recording's pattern y becomes W y / scale. Noise samples are, for trial averages, (odd-trial average - even-trial average) / 2, so their variance is the noise in the full average; complex steady-state noise enters as [Re, Im] columns.
+- **Values:** estimator "oas"
+- **Validity:** Assumes every recording shares one noise shape and differs only in size. Which estimator to use is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule). Used by the field method for the frozen Sentinel fields (surface-evoked localize_fields_bayes.py).
+- **Implementation:** `source_localization.locate.whitening:NoiseWhitener`
+- **Tests:** `tests/test_locate.py`
+
+### `whiten.diagonal` (version 1)
+
+Independent electrode noise, then referenced.
+
+- **Model:** Data and leadfields are projected onto the n-1 average-reference directions (the reference electrode drops out). Each recording's noise scale is the RMS of its referenced noise samples; the spatial covariance shape C is pooled over recordings from their scale-normalised samples, estimated by C = B' diag(d) B, d the per-electrode mean square of the samples (independent noise per electrode). Whitener W = C^(-1/2) B'; a recording's pattern y becomes W y / scale. Noise samples are, for trial averages, (odd-trial average - even-trial average) / 2, so their variance is the noise in the full average; complex steady-state noise enters as [Re, Im] columns.
+- **Values:** estimator "diagonal"
+- **Validity:** Assumes every recording shares one noise shape and differs only in size. Which estimator to use is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule).
+- **Implementation:** `source_localization.locate.whitening:NoiseWhitener`
+- **Tests:** `tests/test_locate.py`

@@ -146,8 +146,8 @@ def choices(options: Dict[str, Method]) -> list:
 # === The model catalogue ====================================================
 #
 # Every probability model this package uses to say *where* something is: the
-# location posteriors, each prior they rest on, and the calibrations applied to
-# their maps. One entry per model, with a stable identifier and a version, so a
+# location posteriors, each prior they rest on, the calibrations applied to
+# their maps, and the noise whitening they assume. One entry per model, with a stable identifier and a version, so a
 # result can name exactly what produced it and a reader can find its
 # assumptions. The rules (bayes-sl reports/2026-11-09_field_method_library_plan.md,
 # "Identification and documentation"):
@@ -186,7 +186,7 @@ class ModelSpec(NamedTuple):
     caveat: str = ""
 
 
-_EP = 'source_localization.validation.ensemble_posterior'
+_EP = 'source_localization.locate.ensemble_posterior'
 
 LOCATION_POSTERIORS: Dict[str, ModelSpec] = {
     'locate.single_source_exact': ModelSpec(
@@ -303,11 +303,11 @@ LOCATION_PRIORS: Dict[str, ModelSpec] = {
                 'K = 1 nominal + 32 draws', 'seed [20261005, 1, 0]'),
         validity='MEA30 on the ellipsoid BEM. Every calibration in this catalogue '
                  'was measured with this ensemble.',
-        implementation='external:probability-atlas pa/ensemble.py draw_ensemble, '
-                       'ensemble_leadfields; scripts/phase2_simulate.py VARIANTS["primary"] '
-                       '(moves here in phase F1)',
-        reference='source_localization.validation.head_models:HeadModelPrior has the '
-                  'same parameters'),
+        implementation='source_localization.locate.head_ensemble:ENSEMBLE_PA_PHASE2',
+        tests='tests/test_locate.py',
+        reference='Ported from probability-atlas Phase 2 (pa/ensemble.py, scripts/phase2_simulate.py '
+                  'VARIANTS["primary"], K_ENS 32, rng_for(1, 0)); draws identical, leadfields equal to '
+                  'a relative 2e-16 on the Sentinel grid (field-method plan, F1)'),
     'prior.model_odds_equal': ModelSpec(
         'prior.model_odds_equal', 1,
         'equal prior odds between source sets',
@@ -356,11 +356,50 @@ MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
         reference='bayes-sl reports/TB_map_calibration.md'),
 }
 
+_WH = 'source_localization.locate.whitening:NoiseWhitener'
+_WH_MODEL = ('Data and leadfields are projected onto the n-1 average-reference directions (the reference electrode '
+             'drops out). Each recording\'s noise scale is the RMS of its referenced noise samples; the spatial '
+             'covariance shape C is pooled over recordings from their scale-normalised samples, estimated by {est}. '
+             'Whitener W = C^(-1/2) B\'; a recording\'s pattern y becomes W y / scale. Noise samples are, for '
+             'trial averages, (odd-trial average - even-trial average) / 2, so their variance is the noise in the '
+             'full average; complex steady-state noise enters as [Re, Im] columns.')
+_WH_VALIDITY = ('Assumes every recording shares one noise shape and differs only in size. Which estimator to use '
+                'is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened '
+                'power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule).')
+
+WHITENERS: Dict[str, ModelSpec] = {
+    'whiten.sample': ModelSpec(
+        'whiten.sample', 1, 'pooled sample covariance shape, per-recording scale',
+        _WH_MODEL.format(est='the plain sample covariance'),
+        priors=('estimator "sample"',), validity=_WH_VALIDITY, implementation=_WH, tests='tests/test_locate.py',
+        caveat='Amplifies noise it was not fitted on (held-out whitened power 2.2x for ASSR, 15-24x for chirp '
+               'peaks in probability-atlas Phase 1); prefer a shrinkage estimator.'),
+    'whiten.ledoit_wolf': ModelSpec(
+        'whiten.ledoit_wolf', 1, 'Ledoit-Wolf shrinkage covariance shape, per-recording scale',
+        _WH_MODEL.format(est="scikit-learn's Ledoit-Wolf shrinkage (zero-mean samples)"),
+        priors=('estimator "ledoit_wolf"',), validity=_WH_VALIDITY, implementation=_WH,
+        tests='tests/test_locate.py'),
+    'whiten.oas': ModelSpec(
+        'whiten.oas', 1, 'OAS shrinkage covariance shape, per-recording scale',
+        _WH_MODEL.format(est="scikit-learn's oracle approximating shrinkage (OAS; zero-mean samples)"),
+        priors=('estimator "oas"',),
+        validity=_WH_VALIDITY + ' Used by the field method for the frozen Sentinel fields '
+                                '(surface-evoked localize_fields_bayes.py).',
+        implementation=_WH, tests='tests/test_locate.py'),
+    'whiten.diagonal': ModelSpec(
+        'whiten.diagonal', 1, 'independent electrode noise, then referenced',
+        _WH_MODEL.format(est="C = B' diag(d) B, d the per-electrode mean square of the samples "
+                             "(independent noise per electrode)"),
+        priors=('estimator "diagonal"',), validity=_WH_VALIDITY, implementation=_WH,
+        tests='tests/test_locate.py'),
+}
+
 #: The catalogue's sections, in the order the generated page lists them.
 CATALOGUE: Dict[str, Dict[str, ModelSpec]] = {
     'Location posteriors': LOCATION_POSTERIORS,
     'Priors of the location posteriors': LOCATION_PRIORS,
     'Map calibrations': MAP_CALIBRATIONS,
+    'Noise whitening': WHITENERS,
 }
 
 
@@ -373,8 +412,8 @@ def catalogue_markdown() -> str:
     """The catalogue as the Markdown page docs/methods/CATALOGUE.md."""
     out = ['# Model catalogue', '',
            'Every probability model this package uses to say where a signal comes from: the '
-           'location posteriors, the priors they rest on, and the calibrations applied to their '
-           'maps. Each has a stable **id** and a **version**; results name the ids and versions '
+           'location posteriors, the priors they rest on, the calibrations applied to their '
+           'maps and the noise whitening they assume. Each has a stable **id** and a **version**; results name the ids and versions '
            'that produced them.', '',
            '*Generated from `source_localization/methods.py` (`python -m '
            'source_localization.methods > docs/methods/CATALOGUE.md`); do not edit by hand. '

@@ -1032,6 +1032,8 @@ source_localization/
 │   │   ├── batch.py             # Batch processing
 │   │   └── analysis.py          # MNE wrapper analysis
 │   ├── source_analysis/         # Figures, atlas lookup, depth-weighted ROI utilities
+│   ├── methods.py               # Method vocabulary and the model catalogue (docs/methods/CATALOGUE.md)
+│   ├── locate/                  # Location posteriors, head-model ensembles, whitening, regions
 │   ├── validation/              # Dipole simulation validation
 │   ├── utils/atlas.py           # Affine-convention detection; always go through this
 │   ├── config/presets/          # 11 YAML presets
@@ -1057,6 +1059,12 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
 - **Model catalogue.** Every location posterior, prior and calibration is declared in `methods.py` with an id, a
   version, its priors and values and its validity domain; [docs/methods/CATALOGUE.md](docs/methods/CATALOGUE.md) is
   generated from it, and `source-localization list --catalogue` prints it
+- **`source_localization.locate`** (phase F1): the location posteriors moved here from `validation/` (the old import
+  path still works); the head-model prior and named ensembles (`ENSEMBLE_PA_PHASE2`: nominal + 32 draws, seeded),
+  ensemble leadfields with their cache, the head geometry, noise whitening (four catalogued estimators), region
+  labelling and `LocationSpace`, which bundles them for one study's head and records which ensemble and labelling
+  it used. Ported from probability-atlas, which is no longer needed: draws, whiteners and labels are identical, and
+  the 33 leadfields equal its cached ensemble to a relative 2e-16
 
 Notable changes in 0.7.0:
 
