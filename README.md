@@ -1034,6 +1034,7 @@ source_localization/
 │   ├── source_analysis/         # Figures, atlas lookup, depth-weighted ROI utilities
 │   ├── methods.py               # Method vocabulary and the model catalogue (docs/methods/CATALOGUE.md)
 │   ├── locate/                  # Location posteriors, head-model ensembles, whitening, regions
+│   ├── field/                   # Field templates and field definitions (the field method)
 │   ├── validation/              # Dipole simulation validation
 │   ├── utils/atlas.py           # Affine-convention detection; always go through this
 │   ├── config/presets/          # 11 YAML presets
@@ -1065,6 +1066,11 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
   labelling and `LocationSpace`, which bundles them for one study's head and records which ensemble and labelling
   it used. Ported from probability-atlas, which is no longer needed: draws, whiteners and labels are identical, and
   the 33 leadfields equal its cached ensemble to a relative 2e-16
+- **`source_localization.field`** (phase F2): field templates (schema `source_localization.field_template/1`: maps,
+  channel order, sign rules, catalogued definitions, sha256; `freeze` never overwrites; templates written before the
+  schema load unchanged) and field definitions from group data (`field.response_svd`, `.phase_aligned`, `.phase_free`,
+  `.csd_leading`). Re-defining surface-evoked's frozen Sentinel fields from their defining data reproduces all four
+  exactly. See [docs/methods/FIELD_TEMPLATES.md](docs/methods/FIELD_TEMPLATES.md)
 
 Notable changes in 0.7.0:
 

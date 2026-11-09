@@ -394,12 +394,56 @@ WHITENERS: Dict[str, ModelSpec] = {
         tests='tests/test_locate.py'),
 }
 
+_FD = 'source_localization.field.define'
+_FD_VALIDITY = ('Electrode space only: no head model. A field is the data\'s pattern, not a generator; where it '
+                'comes from is answered by locating it (locate.*). Its sign is fixed by the template\'s sign rule.')
+
+FIELD_DEFINITIONS: Dict[str, ModelSpec] = {
+    'field.response_svd': ModelSpec(
+        'field.response_svd', 1, 'leading spatial singular vectors of a group-mean evoked response',
+        'Per unit (for example a mouse-day): the mean of its recordings\' trial averages, scaled to unit Frobenius '
+        'norm over the time span, so every unit weighs the same. The fields are the first k left singular vectors '
+        'of the units\' mean over that span (orthogonal by construction).',
+        priors=('time span (Sentinel chirp: 5-300 ms)', 'k fields (Sentinel chirp: 2)'),
+        validity=_FD_VALIDITY + ' Reproduces Sentinel chirp_D and chirp_U2 (surface-evoked '
+                                'sentinel_fields_v1.json) to 1e-16 from their defining data.',
+        implementation=f'{_FD}:response_svd', tests='tests/test_field.py',
+        reference='surface-evoked troubleshooting log 67; docs/methods/FIELD_TEMPLATES.md',
+        caveat='Successive components are orthogonal; physiological fields may be mixtures of them.'),
+    'field.phase_aligned': ModelSpec(
+        'field.phase_aligned', 1, 'real pattern of a steady-state response, phase-aligned across recordings',
+        'Complex coefficients at the driving rate per recording. Iterate: normalise the pattern D; rotate each '
+        'recording onto D\'s phase and scale it to unit norm; average within units; D = real part of the units\' '
+        'mean. The result depends on the starting pattern only through which phase it aligns to.',
+        priors=('starting pattern', 'iterations (Sentinel ASSR: 3, from log 66\'s group pattern)'),
+        validity=_FD_VALIDITY + ' Reproduces Sentinel assr40_D and assr80_D exactly from their defining data.',
+        implementation=f'{_FD}:phase_aligned_pattern', tests='tests/test_field.py',
+        reference='surface-evoked troubleshooting log 69; docs/methods/FIELD_TEMPLATES.md'),
+    'field.phase_free': ModelSpec(
+        'field.phase_free', 1, 'leading eigenvector of the phase-free steady-state cross-product',
+        'The leading eigenvector of sum_r w_r Re(z_r z_r^H) / |z_r|^2 over recordings\' complex patterns z_r: no '
+        'starting pattern and no iteration.',
+        priors=('recording weights w (default equal)',),
+        validity=_FD_VALIDITY,
+        implementation=f'{_FD}:phase_free_pattern', tests='tests/test_field.py',
+        reference='surface-evoked method_crossover.FieldModel.decompose (ASSR)'),
+    'field.csd_leading': ModelSpec(
+        'field.csd_leading', 1, 'leading eigenvector of the mean trace-normalised cross-spectral density',
+        'For an ongoing band: each subject\'s band-integrated cross-spectral matrix (real part) divided by its trace, '
+        'averaged with weights; the field is the leading eigenvector.',
+        priors=('band (bayes-sl L2/L3: 30-55 Hz)', 'subject weights (default equal)'),
+        validity=_FD_VALIDITY,
+        implementation=f'{_FD}:csd_leading_pattern', tests='tests/test_field.py',
+        reference='surface-evoked method_crossover.FieldModel.decompose (rest); bayes-sl reports/2026-11-04_l3_plan.md'),
+}
+
 #: The catalogue's sections, in the order the generated page lists them.
 CATALOGUE: Dict[str, Dict[str, ModelSpec]] = {
     'Location posteriors': LOCATION_POSTERIORS,
     'Priors of the location posteriors': LOCATION_PRIORS,
     'Map calibrations': MAP_CALIBRATIONS,
     'Noise whitening': WHITENERS,
+    'Field definitions': FIELD_DEFINITIONS,
 }
 
 
@@ -413,7 +457,7 @@ def catalogue_markdown() -> str:
     out = ['# Model catalogue', '',
            'Every probability model this package uses to say where a signal comes from: the '
            'location posteriors, the priors they rest on, the calibrations applied to their '
-           'maps and the noise whitening they assume. Each has a stable **id** and a **version**; results name the ids and versions '
+           'maps, the noise whitening they assume, and the definitions of the electrode fields they locate. Each has a stable **id** and a **version**; results name the ids and versions '
            'that produced them.', '',
            '*Generated from `source_localization/methods.py` (`python -m '
            'source_localization.methods > docs/methods/CATALOGUE.md`); do not edit by hand. '

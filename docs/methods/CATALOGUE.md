@@ -1,6 +1,6 @@
 # Model catalogue
 
-Every probability model this package uses to say where a signal comes from: the location posteriors, the priors they rest on, the calibrations applied to their maps and the noise whitening they assume. Each has a stable **id** and a **version**; results name the ids and versions that produced them.
+Every probability model this package uses to say where a signal comes from: the location posteriors, the priors they rest on, the calibrations applied to their maps, the noise whitening they assume, and the definitions of the electrode fields they locate. Each has a stable **id** and a **version**; results name the ids and versions that produced them.
 
 *Generated from `source_localization/methods.py` (`python -m source_localization.methods > docs/methods/CATALOGUE.md`); do not edit by hand. `tests/test_catalogue.py` checks it is current.*
 
@@ -205,3 +205,57 @@ Independent electrode noise, then referenced.
 - **Validity:** Assumes every recording shares one noise shape and differs only in size. Which estimator to use is chosen per measure by held-out Gaussian log-likelihood among those whose held-out whitened power is within 1 +- 0.15 (choose_whitener; probability-atlas 2026-10-05 rule).
 - **Implementation:** `source_localization.locate.whitening:NoiseWhitener`
 - **Tests:** `tests/test_locate.py`
+
+## Field definitions
+
+| id | version | what it is |
+|---|---|---|
+| `field.response_svd` | 1 | leading spatial singular vectors of a group-mean evoked response |
+| `field.phase_aligned` | 1 | real pattern of a steady-state response, phase-aligned across recordings |
+| `field.phase_free` | 1 | leading eigenvector of the phase-free steady-state cross-product |
+| `field.csd_leading` | 1 | leading eigenvector of the mean trace-normalised cross-spectral density |
+
+### `field.response_svd` (version 1)
+
+Leading spatial singular vectors of a group-mean evoked response.
+
+- **Model:** Per unit (for example a mouse-day): the mean of its recordings' trial averages, scaled to unit Frobenius norm over the time span, so every unit weighs the same. The fields are the first k left singular vectors of the units' mean over that span (orthogonal by construction).
+- **Values:** time span (Sentinel chirp: 5-300 ms), k fields (Sentinel chirp: 2)
+- **Validity:** Electrode space only: no head model. A field is the data's pattern, not a generator; where it comes from is answered by locating it (locate.*). Its sign is fixed by the template's sign rule. Reproduces Sentinel chirp_D and chirp_U2 (surface-evoked sentinel_fields_v1.json) to 1e-16 from their defining data.
+- **Caveat:** Successive components are orthogonal; physiological fields may be mixtures of them.
+- **Implementation:** `source_localization.field.define:response_svd`
+- **Tests:** `tests/test_field.py`
+- **Reference:** surface-evoked troubleshooting log 67; docs/methods/FIELD_TEMPLATES.md
+
+### `field.phase_aligned` (version 1)
+
+Real pattern of a steady-state response, phase-aligned across recordings.
+
+- **Model:** Complex coefficients at the driving rate per recording. Iterate: normalise the pattern D; rotate each recording onto D's phase and scale it to unit norm; average within units; D = real part of the units' mean. The result depends on the starting pattern only through which phase it aligns to.
+- **Values:** starting pattern, iterations (Sentinel ASSR: 3, from log 66's group pattern)
+- **Validity:** Electrode space only: no head model. A field is the data's pattern, not a generator; where it comes from is answered by locating it (locate.*). Its sign is fixed by the template's sign rule. Reproduces Sentinel assr40_D and assr80_D exactly from their defining data.
+- **Implementation:** `source_localization.field.define:phase_aligned_pattern`
+- **Tests:** `tests/test_field.py`
+- **Reference:** surface-evoked troubleshooting log 69; docs/methods/FIELD_TEMPLATES.md
+
+### `field.phase_free` (version 1)
+
+Leading eigenvector of the phase-free steady-state cross-product.
+
+- **Model:** The leading eigenvector of sum_r w_r Re(z_r z_r^H) / |z_r|^2 over recordings' complex patterns z_r: no starting pattern and no iteration.
+- **Values:** recording weights w (default equal)
+- **Validity:** Electrode space only: no head model. A field is the data's pattern, not a generator; where it comes from is answered by locating it (locate.*). Its sign is fixed by the template's sign rule.
+- **Implementation:** `source_localization.field.define:phase_free_pattern`
+- **Tests:** `tests/test_field.py`
+- **Reference:** surface-evoked method_crossover.FieldModel.decompose (ASSR)
+
+### `field.csd_leading` (version 1)
+
+Leading eigenvector of the mean trace-normalised cross-spectral density.
+
+- **Model:** For an ongoing band: each subject's band-integrated cross-spectral matrix (real part) divided by its trace, averaged with weights; the field is the leading eigenvector.
+- **Values:** band (bayes-sl L2/L3: 30-55 Hz), subject weights (default equal)
+- **Validity:** Electrode space only: no head model. A field is the data's pattern, not a generator; where it comes from is answered by locating it (locate.*). Its sign is fixed by the template's sign rule.
+- **Implementation:** `source_localization.field.define:csd_leading_pattern`
+- **Tests:** `tests/test_field.py`
+- **Reference:** surface-evoked method_crossover.FieldModel.decompose (rest); bayes-sl reports/2026-11-04_l3_plan.md
