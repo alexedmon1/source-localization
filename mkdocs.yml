@@ -34,6 +34,8 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Publishing this site: PUBLISHING.md
+  - Methods:
+      - Model catalogue: methods/CATALOGUE.md
   - Validation:
       - Validation guide: validation/README.md
       - "Design: honest-by-default validation": validation/DESIGN_validation_upgrade.md

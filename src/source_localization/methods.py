@@ -141,3 +141,265 @@ def default_of(options: Dict[str, Method]) -> str | None:
 def choices(options: Dict[str, Method]) -> list:
     """Names in declaration order, for ``argparse(choices=...)``."""
     return list(options)
+
+
+# === The model catalogue ====================================================
+#
+# Every probability model this package uses to say *where* something is: the
+# location posteriors, each prior they rest on, and the calibrations applied to
+# their maps. One entry per model, with a stable identifier and a version, so a
+# result can name exactly what produced it and a reader can find its
+# assumptions. The rules (bayes-sl reports/2026-11-09_field_method_library_plan.md,
+# "Identification and documentation"):
+#
+# - ``id`` never changes once released; ``version`` goes up whenever what the
+#   model computes changes (not for docs or refactors).
+# - ``priors`` lists the ids of the priors a posterior rests on; each is its own
+#   entry, with its values.
+# - ``validity`` says where the model, or its calibration, has been checked. A
+#   calibration is valid only inside that domain.
+# - ``implementation`` is ``module:object`` importable from this package, or
+#   ``external:<where>`` for code that has not moved here yet (with the phase
+#   that moves it).
+# - ``docs/methods/CATALOGUE.md`` is generated from these entries
+#   (``python -m source_localization.methods > docs/methods/CATALOGUE.md``);
+#   ``tests/test_catalogue.py`` fails when it is stale, when an id repeats, when
+#   a prior id is not in the catalogue, or when an implementation does not import.
+
+
+class ModelSpec(NamedTuple):
+    """One catalogued model: what it computes, what it assumes, where it holds."""
+
+    id: str
+    version: int
+    summary: str
+    #: The model: likelihood, generative statement or procedure.
+    model: str
+    #: Ids of the priors it rests on (each a catalogue entry), or, for a prior,
+    #: its values.
+    priors: tuple = ()
+    #: Where it has been checked; for a calibration, the only domain it holds in.
+    validity: str = ""
+    implementation: str = ""
+    tests: str = ""
+    reference: str = ""
+    caveat: str = ""
+
+
+_EP = 'source_localization.validation.ensemble_posterior'
+
+LOCATION_POSTERIORS: Dict[str, ModelSpec] = {
+    'locate.single_source_exact': ModelSpec(
+        'locate.single_source_exact', 1,
+        'one dipole, exact head model',
+        'Single free-orientation dipole at grid position x, forward model taken as '
+        'exact, white sensor noise of known SD sigma. Default: the moment is profiled '
+        'out, log p(B | x) = -||B - Q_x Q_x^T B||^2 / (2 sigma^2). With a moment '
+        'variance given, it is marginalized instead: B | x ~ N(0, sigma^2 I + tau^2 '
+        'G_x G_x^T).',
+        priors=('prior.position_uniform', 'prior.moment_given_sd'),
+        validity='Coverage checked in simulation with the true head model '
+                 '(DipolePosterior.coverage_test). The fundamental limit for one '
+                 'dipole, not the pipeline estimator.',
+        implementation='source_localization.validation.posterior:DipolePosterior',
+        tests='tests/test_posterior.py',
+        reference='docs/validation/methods/SOURCE_CERTAINTY.md',
+        caveat='Assumes the head model is exact; for real data use '
+               'locate.single_source. Profiling is overconfident once noise is '
+               'comparable to the signal (at 0 dB its 68% region covered 53% of the '
+               'time); the marginalized form stays calibrated.'),
+    'locate.single_source': ModelSpec(
+        'locate.single_source', 1,
+        'one dipole, averaged over a head-model ensemble',
+        'Per whitened data column j: y_j | x, k ~ N(0, I + tau^2 G_xk G_xk^T), the '
+        'moment marginalized. The likelihood is averaged over the K head models '
+        '(not the posteriors), so the head model is marginalized: p(x | y) is '
+        'proportional to (1/K) sum_k p(y | x, k). The one-dipole case of '
+        'locate.source_set.',
+        priors=('prior.position_uniform', 'prior.moment_empirical_bayes',
+                'prior.head_ensemble_pa_phase2'),
+        validity='Inputs must be whitened (the caller fits the whitener). Raw maps '
+                 'are overconfident; use a calibration from this catalogue inside its '
+                 'domain. Calibrated for single-source truths only.',
+        implementation=f'{_EP}:EnsemblePosterior',
+        tests='tests/test_ensemble_posterior.py',
+        reference=f'module docstring of {_EP}; bayes-sl reports/TB_map_calibration.md',
+        caveat='A response with more than one source is read as one confident '
+               'point between them; compare with locate.mirror_pair or '
+               'locate.source_set through prior.model_odds_equal.'),
+    'locate.mirror_pair': ModelSpec(
+        'locate.mirror_pair', 1,
+        'a dipole and its mirror image across the midline',
+        'locate.source_set with configurations (x, x mirrored across the midline '
+        'x = midline_x_mm), x on the right at least min_offset_mm (default 0.3 mm) '
+        'from it, mirrors snapped to the grid. Each member has an independent '
+        'free-orientation moment. position_map gives each member half the mass of '
+        'its configuration (a map summing to 2 counts both members).',
+        priors=('prior.position_uniform', 'prior.moment_empirical_bayes',
+                'prior.head_ensemble_pa_phase2'),
+        validity='As locate.single_source. The single-source calibration carries over '
+                 'to pair maps on MEA30 (90% region: 92-93% coverage for auditory-cortex '
+                 'pairs, 81-83% for random pairs; bayes-sl reports/TB_mirror_pair.md).',
+        implementation=f'{_EP}:MirrorPairPosterior',
+        tests='tests/test_ensemble_posterior.py',
+        reference='bayes-sl reports/TB_mirror_pair.md',
+        caveat='Pairs very close to the midline look like one central source; at '
+               'high SNR a single deep source can pass for a near-midline pair '
+               '(bayes-sl tb16 control).'),
+    'locate.source_set': ModelSpec(
+        'locate.source_set', 1,
+        'any fixed set of dipoles, with model evidence',
+        'A configuration q places d/3 free-orientation dipoles with stacked whitened '
+        'leadfield G_q. Per column: y_j | q, k ~ N(0, I + tau^2 G_qk G_qk^T), each '
+        'moment ~ N(0, tau^2 I3) independently, averaged over head models. '
+        'log_evidence averages the likelihood over the set\'s configurations, so '
+        'different sets can be compared.',
+        priors=('prior.position_uniform', 'prior.moment_empirical_bayes',
+                'prior.head_ensemble_pa_phase2'),
+        validity='As locate.single_source; calibration checked for one source and '
+                 'for mirror pairs only.',
+        implementation=f'{_EP}:SourceSetPosterior',
+        tests='tests/test_ensemble_posterior.py',
+        reference=f'module docstring of {_EP}'),
+}
+
+LOCATION_PRIORS: Dict[str, ModelSpec] = {
+    'prior.position_uniform': ModelSpec(
+        'prior.position_uniform', 1,
+        'uniform over candidate positions or configurations',
+        'p(x) constant over the grid points inside the brain (or over a source '
+        'set\'s configurations).',
+        priors=('uniform; the grid spacing sets its resolution (0.5 mm by default)',),
+        implementation=f'{_EP}:SourceSetPosterior',
+        caveat='Because gain falls with depth, deep sources get broad posteriors '
+               'under it; that is a statement about the data, not the prior.'),
+    'prior.moment_empirical_bayes': ModelSpec(
+        'prior.moment_empirical_bayes', 1,
+        'dipole moments Gaussian, scale estimated per pattern',
+        'Each dipole moment ~ N(0, tau^2 I3). tau^2 is an empirical-Bayes estimate '
+        'per data pattern: max(||y||^2 / c - s m, 1e-3 m) / median_x '
+        '||G_x,nominal||_F^2 (c columns, m channels, noise variance s = 1 after '
+        'whitening). With several dipoles it is a per-source variance.',
+        priors=('tau^2 from the data, not a fixed prior; floor 1e-3 m',),
+        implementation=f'{_EP}:SourceSetPosterior.moment_variance',
+        reference='probability-atlas pa.posterior (the reference implementation)'),
+    'prior.moment_given_sd': ModelSpec(
+        'prior.moment_given_sd', 1,
+        'dipole moment Gaussian with a given SD, or profiled out',
+        'With moment_std given: the moment ~ N(0, moment_std^2 I3) and is '
+        'marginalized. Without it: no prior; the moment is profiled out (its '
+        'maximum-likelihood value is used).',
+        priors=('moment_std set by the caller; None profiles the moment out',),
+        implementation='source_localization.validation.posterior:DipolePosterior.posterior',
+        tests='tests/test_posterior.py'),
+    'prior.head_ensemble_pa_phase2': ModelSpec(
+        'prior.head_ensemble_pa_phase2', 1,
+        'head-model uncertainty: the 33-model ensemble',
+        'The nominal head model plus 32 draws from HeadModelPrior: electrode-'
+        'registration shift ~ N(0, 0.3 mm) per axis, skull-conductivity factor '
+        'log-uniform on [0.5, 2.0]. Draws from numpy default_rng([20261005, 1, 0]); '
+        'leadfields on the 0.5 mm volumetric grid, unreferenced as MNE returns them.',
+        priors=('shift SD 0.3 mm (x, y, z)', 'skull factor log-uniform 0.5-2.0',
+                'K = 1 nominal + 32 draws', 'seed [20261005, 1, 0]'),
+        validity='MEA30 on the ellipsoid BEM. Every calibration in this catalogue '
+                 'was measured with this ensemble.',
+        implementation='external:probability-atlas pa/ensemble.py draw_ensemble, '
+                       'ensemble_leadfields; scripts/phase2_simulate.py VARIANTS["primary"] '
+                       '(moves here in phase F1)',
+        reference='source_localization.validation.head_models:HeadModelPrior has the '
+                  'same parameters'),
+    'prior.model_odds_equal': ModelSpec(
+        'prior.model_odds_equal', 1,
+        'equal prior odds between source sets',
+        'P(set | y) from the sets\' log evidences (locate.source_set.log_evidence) '
+        'with equal prior probability for each set compared (for example one '
+        'source vs a mirror pair).',
+        priors=('equal prior probability per set',),
+        validity='P(pair) roughly calibrated, slightly overconfident, on MEA30 '
+                 '(patterns with P(pair) 0.95-1.0 were pairs 94.5% of the time; '
+                 'bayes-sl reports/TB_mirror_pair.md).',
+        implementation=f'{_EP}:model_probabilities'),
+}
+
+MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
+    'calibration.none': ModelSpec(
+        'calibration.none', 1,
+        'the raw averaged posterior',
+        'Temperature 1, no blur.',
+        priors=('temperature 1.0', 'blur 0 mm'),
+        implementation=f'{_EP}:UNCALIBRATED',
+        caveat='Overconfident under head-model error: the 90% region held the truth '
+               'about 55-65% of the time on MEA30 (bayes-sl reports/TB_map_focality.md).'),
+    'calibration.volumetric': ModelSpec(
+        'calibration.volumetric', 1,
+        'tempered and blurred, for volumetric maps',
+        'Normalized log posterior divided by T = 1.5, then an isotropic Gaussian '
+        'blur of 0.25 mm over the candidate positions (mass-conserving).',
+        priors=('temperature 1.5', 'blur 0.25 mm'),
+        validity='MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, '
+                 'single-source truths, whitened real noise. 90% region held the truth '
+                 '88-89% of the time at half, primary and double SNR (80%: 79-81%; '
+                 '95%: 92-94%). Chosen on one simulated set, checked on another.',
+        implementation=f'{_EP}:VOLUMETRIC',
+        tests='tests/test_ensemble_posterior.py',
+        reference='bayes-sl reports/TB_map_calibration.md'),
+    'calibration.surface': ModelSpec(
+        'calibration.surface', 1,
+        'tempered, for the cortical surface readout',
+        'Normalized log posterior divided by T = 2.5; no blur (blurring made it worse).',
+        priors=('temperature 2.5', 'blur 0 mm'),
+        validity='MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory '
+                 'surface positions. Approximately calibrated: 90% region 88-91% at half '
+                 'and primary SNR, 83-85% at double SNR.',
+        implementation=f'{_EP}:SURFACE',
+        tests='tests/test_ensemble_posterior.py',
+        reference='bayes-sl reports/TB_map_calibration.md'),
+}
+
+#: The catalogue's sections, in the order the generated page lists them.
+CATALOGUE: Dict[str, Dict[str, ModelSpec]] = {
+    'Location posteriors': LOCATION_POSTERIORS,
+    'Priors of the location posteriors': LOCATION_PRIORS,
+    'Map calibrations': MAP_CALIBRATIONS,
+}
+
+
+def catalogue_entries() -> Dict[str, ModelSpec]:
+    """Every catalogued model by id, across sections."""
+    return {k: v for section in CATALOGUE.values() for k, v in section.items()}
+
+
+def catalogue_markdown() -> str:
+    """The catalogue as the Markdown page docs/methods/CATALOGUE.md."""
+    out = ['# Model catalogue', '',
+           'Every probability model this package uses to say where a signal comes from: the '
+           'location posteriors, the priors they rest on, and the calibrations applied to their '
+           'maps. Each has a stable **id** and a **version**; results name the ids and versions '
+           'that produced them.', '',
+           '*Generated from `source_localization/methods.py` (`python -m '
+           'source_localization.methods > docs/methods/CATALOGUE.md`); do not edit by hand. '
+           '`tests/test_catalogue.py` checks it is current.*', '']
+    for title, section in CATALOGUE.items():
+        out += [f'## {title}', '', '| id | version | what it is |', '|---|---|---|']
+        out += [f'| `{m.id}` | {m.version} | {m.summary} |' for m in section.values()]
+        out.append('')
+        for m in section.values():
+            out += [f'### `{m.id}` (version {m.version})', '', f'{m.summary[0].upper()}{m.summary[1:]}.', '',
+                    f'- **Model:** {m.model}']
+            if m.priors:
+                label = 'Rests on' if all(p in catalogue_entries() for p in m.priors) else 'Values'
+                items = ', '.join(f'`{p}`' if p in catalogue_entries() else p for p in m.priors)
+                out.append(f'- **{label}:** {items}')
+            for field, name in (('validity', 'Validity'), ('caveat', 'Caveat'),
+                                ('implementation', 'Implementation'), ('tests', 'Tests'),
+                                ('reference', 'Reference')):
+                text = getattr(m, field)
+                if text:
+                    out.append(f'- **{name}:** ' + (f'`{text}`' if field in ('implementation', 'tests')
+                                                    else text))
+            out.append('')
+    return '\n'.join(out).rstrip('\n') + '\n'
+
+
+if __name__ == '__main__':
+    print(catalogue_markdown(), end='')

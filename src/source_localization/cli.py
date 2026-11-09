@@ -591,6 +591,8 @@ Examples:
                         help='Only the BEM / source space / sampling / inverse choices')
     parser.add_argument('--atlases', action='store_true',
                         help='Only the atlas parcellations')
+    parser.add_argument('--catalogue', action='store_true',
+                        help='The model catalogue: location posteriors, their priors and calibrations')
     return parser
 
 
@@ -665,9 +667,9 @@ def _print_atlases():
 
 def _run_list_command(args):
     """Print the method vocabulary."""
-    want = {k for k in ('presets', 'methods', 'atlases') if getattr(args, k, False)}
+    want = {k for k in ('presets', 'methods', 'atlases', 'catalogue') if getattr(args, k, False)}
     if not want:
-        want = {'presets', 'methods', 'atlases'}
+        want = {'presets', 'methods', 'atlases', 'catalogue'}
 
     if 'presets' in want:
         _print_presets()
@@ -678,7 +680,24 @@ def _run_list_command(args):
         _print_method_group('Inverse methods (--method)', INVERSE_METHODS)
     if 'atlases' in want:
         _print_atlases()
+    if 'catalogue' in want:
+        _print_catalogue()
     return 0
+
+
+def _print_catalogue(width=78):
+    """The model catalogue (methods.CATALOGUE): id, version and summary, then validity."""
+    import textwrap
+    from .methods import CATALOGUE
+    print("Model catalogue (docs/methods/CATALOGUE.md has every prior and value):\n")
+    for title, section in CATALOGUE.items():
+        print(f"{title}:")
+        for m in section.values():
+            print(f"  {m.id:<34s} v{m.version}  {m.summary}")
+            if m.validity:
+                print(textwrap.fill(m.validity, width=width, initial_indent=' ' * 6,
+                                    subsequent_indent=' ' * 6))
+        print()
 
 
 def main():

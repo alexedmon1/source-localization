@@ -30,6 +30,7 @@ If this file and the code disagree, the code is right and the test is broken.
 - [Usage](#usage)
 - [What the outputs are](#what-the-outputs-are)
 - [Visualizations](#visualizations)
+- [Model catalogue](#model-catalogue)
 - [Validation](#validation)
 - [Pipeline Architecture](#pipeline-architecture)
 - [Troubleshooting](#troubleshooting)
@@ -734,6 +735,15 @@ files are in which convention.
 
 ---
 
+## Model catalogue
+
+Every probability model the package uses to say where a signal comes from (the location posteriors, the priors they
+rest on, and the calibrations applied to their maps) is declared once in `source_localization/methods.py`, with a
+stable id, a version, its priors and values, and the domain where its calibration holds. The list is in
+**[docs/methods/CATALOGUE.md](docs/methods/CATALOGUE.md)**, generated from that declaration; `source-localization list
+--catalogue` prints the same. Results name the ids and versions that produced them. `tests/test_catalogue.py` fails
+if the page is stale, an id repeats, a prior is not catalogued or an implementation does not import.
+
 ## Validation
 
 > **Full guide: [docs/validation/README.md](docs/validation/README.md).** It covers which tool answers which
@@ -1038,6 +1048,15 @@ separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
+
+Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-11-09_field_method_library_plan.md`):
+
+- **Head-model-ensemble location posteriors** (merged from `feat/bayes-group`): `EnsemblePosterior`,
+  `SourceSetPosterior`, `MirrorPairPosterior` and the map calibrations `VOLUMETRIC` and `SURFACE`, in
+  `validation/ensemble_posterior.py`
+- **Model catalogue.** Every location posterior, prior and calibration is declared in `methods.py` with an id, a
+  version, its priors and values and its validity domain; [docs/methods/CATALOGUE.md](docs/methods/CATALOGUE.md) is
+  generated from it, and `source-localization list --catalogue` prints it
 
 Notable changes in 0.7.0:
 
