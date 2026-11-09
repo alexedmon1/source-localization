@@ -12,6 +12,7 @@ Every probability model this package uses to say where a signal comes from: the 
 | `locate.single_source` | 1 | one dipole, averaged over a head-model ensemble |
 | `locate.mirror_pair` | 1 | a dipole and its mirror image across the midline |
 | `locate.field_choice` | 1 | where a field is: the pair if P(pair) reaches the rule, else the single peak |
+| `locate.field_model_map` | 1 | located mass of a sample's field over resamples of its subjects |
 | `locate.source_set` | 1 | any fixed set of dipoles, with model evidence |
 
 ### `locate.single_source_exact` (version 1)
@@ -60,6 +61,17 @@ Where a field is: the pair if P(pair) reaches the rule, else the single peak.
 - **Implementation:** `source_localization.locate.field_model:FieldLocator.locate`
 - **Tests:** `tests/test_field_locate.py`
 - **Reference:** docs/methods/FIELD_LOCATION.md
+
+### `locate.field_model_map` (version 1)
+
+Located mass of a sample's field over resamples of its subjects.
+
+- **Model:** Per draw (subjects resampled with replacement; record weights w_unit / records of unit): the field is re-derived from the weighted records (evoked: first time course of the mean unit-normalised response; steady: field.phase_free; ongoing: field.csd_leading), the weighted grand-mean column and noise are formed along it, and the column is located by locate.field_choice; each draw puts mass 1/len(points) on its points. The whitener is fitted once per sample on one noise block per unit, through the whole sample's field.
+- **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`, `prior.model_odds_equal`
+- **Validity:** Scored as the benchmark's arm FM (bayes-sl reports/2026-11-01_bm5_first_scores.md) and in the location scorecard (reports/2026-11-05_l6_final_scorecard.md).
+- **Implementation:** `source_localization.locate.field_model:FieldModel.map`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** surface-evoked method_crossover.FieldModel (H039 arm C); docs/methods/FIELD_LOCATION.md
 
 ### `locate.source_set` (version 1)
 
@@ -278,8 +290,20 @@ Leading eigenvector of the mean trace-normalised cross-spectral density.
 
 | id | version | what it is |
 |---|---|---|
+| `field.model_filter_pair` | 1 | the electrode field of a located mirror pair, as a spatial filter |
 | `field.project_inner` | 1 | each field separately: the inner product with the recording |
 | `field.project_joint` | 1 | all selected fields at once, by least squares |
+
+### `field.model_filter_pair` (version 1)
+
+The electrode field of a located mirror pair, as a spatial filter.
+
+- **Model:** Members at the grid positions nearest the located right member and its mirror image. Under each head model (average-referenced leadfields) one mirrored moment (left = right mirrored in x) is fitted to the target field by least squares; each model's pattern is normalised and signed to agree with the target; the filter is their mean, normalised. Projected like a template field.
+- **Values:** `prior.head_ensemble_pa_phase2`, target field (e.g. chirp_D), located right member (mm)
+- **Validity:** Built for Sentinel's chirp pair (surface-evoked H038): cos 0.990 with chirp_D, 0.912 with assr40_D.
+- **Implementation:** `source_localization.locate.field_model:model_filter_pair`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** surface-evoked readout_filters.py (templates/h038_model_filter.json); docs/methods/FIELD_LOCATION.md
 
 ### `field.project_inner` (version 1)
 

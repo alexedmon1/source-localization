@@ -104,3 +104,58 @@ class TestLocator:
 
     def test_hpd_size(self):
         assert hpd_size(np.array([0.5, 0.3, 0.15, 0.05]), 0.8).tolist() == [2]
+
+
+class TestFieldModel:
+    def _recs(self, rng, sp, kind, src, n=12):
+        G0 = sp.G_ens[0]
+        u = G0[src] @ np.array([1.0, 0.5, -0.5])
+        recs = []
+        for _ in range(n):
+            a = rng.uniform(1, 2)
+            if kind == 'ongoing':
+                C = 10 * a * np.outer(u, u) + np.eye(30)
+                recs.append({'csd': C, 'csd_q': np.stack([C + 0.1 * np.diag(rng.uniform(size=30)) for _ in range(4)])})
+            elif kind == 'steady':
+                z = a * np.exp(1j * rng.uniform(0, 6.3)) * u + 0.05 * (rng.normal(size=30) + 1j * rng.normal(size=30))
+                recs.append({'z': z, 'z_flip': 0.05 * (rng.normal(size=(4, 30)) + 1j * rng.normal(size=(4, 30)))})
+            else:
+                t = np.sin(np.linspace(0, 6, 50))
+                recs.append({'xbar': a * np.outer(u, t) + 0.05 * rng.normal(size=(30, 50)),
+                             'x_flip': 0.05 * rng.normal(size=(4, 30, 50))})
+        return recs
+
+    @pytest.mark.parametrize('kind', ['ongoing', 'steady', 'evoked'])
+    def test_map_concentrates_on_the_planted_source(self, kind):
+        from source_localization.locate.field_model import FieldModel, Units, inner_draws
+        rng = np.random.default_rng(10)
+        sp = _space(rng)
+        recs = self._recs(rng, sp, kind, src=4)
+        units = Units(np.arange(len(recs)))
+        fm = FieldModel(sp, kind)
+        mass, share = fm.map(recs, units, inner_draws(np.ones(units.U), 20, rng), fm.setup(recs, units))
+        assert mass.sum() == pytest.approx(1.0) and int(mass.argmax()) == 4 and 0 <= share <= 1
+
+    def test_units_weight_records_within_a_unit(self):
+        from source_localization.locate.field_model import Units
+        u = Units(['a', 'b', 'b'])
+        np.testing.assert_allclose(u.rec_weights(np.array([2.0, 1.0])), [2.0, 0.5, 0.5])
+
+    def test_field_model_refuses_outside_the_domain(self):
+        from source_localization.locate.field_model import FieldModel
+        with pytest.raises(CalibrationDomainError):
+            FieldModel(_space(np.random.default_rng(11), spacing=1.0), 'ongoing')
+
+    def test_model_filter_reproduces_a_mirrored_pair_field(self):
+        from source_localization.locate.field_model import MIRROR, model_filter_pair
+        rng = np.random.default_rng(12)
+        sp = _space(rng)
+        G = sp.G_ens - sp.G_ens.mean(2, keepdims=True)
+        ir = [i for i, p in enumerate(sp.positions_mm) if p[0] == 1.0 and p[1] == 0.0][0]
+        il = [i for i, p in enumerate(sp.positions_mm) if p[0] == -1.0 and p[1] == 0.0][0]
+        m = np.array([1.0, -0.5, 0.8])
+        target = G[0, ir] @ m + G[0, il] @ (MIRROR @ m)
+        target /= np.linalg.norm(target)
+        out = model_filter_pair(sp, [1.0, 0.0, 0.0], target)
+        assert (out['right_index'], out['left_index']) == (ir, il)
+        assert out['filter'] @ target > 0.99 and abs(np.linalg.norm(out['filter']) - 1) < 1e-12

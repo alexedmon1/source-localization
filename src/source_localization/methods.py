@@ -277,6 +277,21 @@ LOCATION_POSTERIORS: Dict[str, ModelSpec] = {
         implementation='source_localization.locate.field_model:FieldLocator.locate',
         tests='tests/test_field_locate.py',
         reference='docs/methods/FIELD_LOCATION.md'),
+    'locate.field_model_map': ModelSpec(
+        'locate.field_model_map', 1,
+        'located mass of a sample\'s field over resamples of its subjects',
+        'Per draw (subjects resampled with replacement; record weights w_unit / records of unit): the field is '
+        're-derived from the weighted records (evoked: first time course of the mean unit-normalised response; '
+        'steady: field.phase_free; ongoing: field.csd_leading), the weighted grand-mean column and noise are formed '
+        'along it, and the column is located by locate.field_choice; each draw puts mass 1/len(points) on its points. '
+        'The whitener is fitted once per sample on one noise block per unit, through the whole sample\'s field.',
+        priors=('prior.position_uniform', 'prior.moment_empirical_bayes', 'prior.head_ensemble_pa_phase2',
+                'prior.model_odds_equal'),
+        validity='Scored as the benchmark\'s arm FM (bayes-sl reports/2026-11-01_bm5_first_scores.md) and in the '
+                 'location scorecard (reports/2026-11-05_l6_final_scorecard.md).',
+        implementation='source_localization.locate.field_model:FieldModel.map',
+        tests='tests/test_field_locate.py',
+        reference='surface-evoked method_crossover.FieldModel (H039 arm C); docs/methods/FIELD_LOCATION.md'),
     'locate.source_set': ModelSpec(
         'locate.source_set', 1,
         'any fixed set of dipoles, with model evidence',
@@ -475,6 +490,16 @@ FIELD_DEFINITIONS: Dict[str, ModelSpec] = {
 _FP = 'source_localization.field.project'
 
 FIELD_PROJECTIONS: Dict[str, ModelSpec] = {
+    'field.model_filter_pair': ModelSpec(
+        'field.model_filter_pair', 1, 'the electrode field of a located mirror pair, as a spatial filter',
+        'Members at the grid positions nearest the located right member and its mirror image. Under each head model '
+        '(average-referenced leadfields) one mirrored moment (left = right mirrored in x) is fitted to the target '
+        'field by least squares; each model\'s pattern is normalised and signed to agree with the target; the filter '
+        'is their mean, normalised. Projected like a template field.',
+        priors=('prior.head_ensemble_pa_phase2', 'target field (e.g. chirp_D)', 'located right member (mm)'),
+        validity='Built for Sentinel\'s chirp pair (surface-evoked H038): cos 0.990 with chirp_D, 0.912 with assr40_D.',
+        implementation='source_localization.locate.field_model:model_filter_pair', tests='tests/test_field_locate.py',
+        reference='surface-evoked readout_filters.py (templates/h038_model_filter.json); docs/methods/FIELD_LOCATION.md'),
     'field.project_inner': ModelSpec(
         'field.project_inner', 1, 'each field separately: the inner product with the recording',
         'Epochs average-referenced over the template\'s channels, picked by name in the template\'s order; virtual '

@@ -1081,7 +1081,10 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
   refuses a space outside it. The locator fits the whitener and the single-source and mirror-pair posteriors, reads
   calibrated maps, evidence and P(pair), and chooses the location (`locate.field_choice`); `summarize` and
   `report_response_svd_field` report it. Reproduces surface-evoked's location report of the frozen chirp fields
-  exactly. See [docs/methods/FIELD_LOCATION.md](docs/methods/FIELD_LOCATION.md)
+  exactly. `FieldModel` (`locate.field_model_map`) gives the located mass over resamples of the subjects for evoked,
+  steady-state and ongoing data, and `model_filter_pair` (`field.model_filter_pair`) the filter of a located pair;
+  both reproduce their study counterparts with no difference. See
+  [docs/methods/FIELD_LOCATION.md](docs/methods/FIELD_LOCATION.md)
 
 Notable changes in 0.7.0:
 

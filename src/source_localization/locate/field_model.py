@@ -28,7 +28,8 @@ from .ensemble_posterior import (VOLUMETRIC, EnsemblePosterior, MirrorPairPoster
                                  model_probabilities)
 from .whitening import NoiseWhitener
 
-__all__ = ["FieldLocator", "summarize", "hpd_size", "parcel_mass", "report_response_svd_field"]
+__all__ = ["FieldLocator", "summarize", "hpd_size", "parcel_mass", "report_response_svd_field", "KINDS", "Units",
+           "inner_draws", "lead", "FieldModel", "model_filter_pair"]
 
 
 def hpd_size(p: np.ndarray, level: float = 0.9) -> np.ndarray:
@@ -264,3 +265,153 @@ def report_response_svd_field(loc_factory: Callable[[Sequence[np.ndarray]], Fiel
                      "peak_abs_x_mm": _q(np.abs(pos[pr, 0]))}}
     gm.pop("_maps")
     return {"grand_mean": gm, "units": md, "bootstrap": boot, "provenance": loc.provenance()}
+
+
+# ====================================================================== the field model over a sample of subjects
+
+#: The data kinds the field model reads, and each record's keys (one record per recording):
+#:   evoked   xbar (channels, times) trial average; x_flip (k, channels, times) sign-flip averages
+#:   steady   z (channels,) complex coefficient at the driving rate; z_flip (k, channels) sign-flip coefficients
+#:   ongoing  csd (channels, channels) band cross-spectral matrix (real part); csd_q (k, channels, channels) on k
+#:            disjoint parts of the epochs
+KINDS = ("evoked", "steady", "ongoing")
+
+
+class Units:
+    """Which unit (subject) each record belongs to; unit weights become record weights w_unit / n_records_of_unit."""
+
+    def __init__(self, record_unit: Sequence):
+        self.ids, self.idx = np.unique(np.asarray(record_unit), return_inverse=True)
+        self.U = len(self.ids)
+        self.nrec = np.bincount(self.idx, minlength=self.U)
+
+    def rec_weights(self, wm: np.ndarray) -> np.ndarray:
+        return np.asarray(wm, float)[self.idx] / self.nrec[self.idx]
+
+
+def inner_draws(wm: np.ndarray, b_in: int, rng: np.random.Generator) -> list:
+    """``b_in`` count vectors, each drawing sum(wm) units with replacement from the multiset ``wm``."""
+    pool = np.repeat(np.arange(len(wm)), np.asarray(wm).astype(int))
+    return [np.bincount(rng.choice(pool, len(pool)), minlength=len(wm)).astype(float) for _ in range(b_in)]
+
+
+def lead(C: np.ndarray, u: np.ndarray) -> np.ndarray:
+    """Leading eigenvector of C scaled by sqrt(its share of the trace), signed to agree with u."""
+    w, V = np.linalg.eigh(C)
+    v = V[:, -1] * np.sqrt(w[-1] / np.trace(C))
+    return v if v @ u >= 0 else -v
+
+
+class FieldModel:
+    """``locate.field_model_map``: locate a sample's field, and its spread over resamples of the sample's subjects.
+
+    For record weights (a resample of subjects), the field is re-derived from the weighted records (``decompose``:
+    evoked, the first time course of the mean unit-normalised response; steady, ``field.phase_free``; ongoing,
+    ``field.csd_leading``), the weighted grand-mean column and its noise are formed along it (``columns``), and the
+    column is located (``locate.field_choice``). ``map`` accumulates the located positions over draws (each draw puts
+    mass 1/len(points) on its points) and the share of draws called a pair. The whitener is fitted once per sample on
+    one noise block per unit, all through the whole sample's decomposition (``setup``).
+
+    Ported from surface-evoked ``method_crossover.FieldModel`` (H039 arm C; bayes-sl L2/L3, benchmark arm FM).
+    """
+
+    def __init__(self, space, kind: str, calibration=VOLUMETRIC, whitener: str = "oas", pair_rule: float = 0.5,
+                 allow_uncalibrated: bool = False):
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {KINDS}")
+        self.space, self.kind = space, kind
+        self._loc_args = dict(calibration=calibration, whitener=whitener, pair_rule=pair_rule,
+                              allow_uncalibrated=allow_uncalibrated)
+        space.check_calibration(calibration, allow_uncalibrated=allow_uncalibrated)
+
+    def decompose(self, recs: Sequence[dict], rw: np.ndarray) -> np.ndarray:
+        idx = np.flatnonzero(rw > 0)
+        w = rw[idx] / rw[idx].sum()
+        R = [recs[i] for i in idx]
+        if self.kind == "evoked":
+            M = np.tensordot(w, np.stack([r["xbar"] / np.linalg.norm(r["xbar"]) for r in R]), axes=1)
+            return np.linalg.svd(M, full_matrices=False)[2][0]
+        if self.kind == "steady":
+            Z = np.stack([r["z"] / np.linalg.norm(r["z"]) for r in R])
+            return np.linalg.eigh((Z.real * w[:, None]).T @ Z.real + (Z.imag * w[:, None]).T @ Z.imag)[1][:, -1]
+        return np.linalg.eigh(np.tensordot(w, np.stack([r["csd"] / np.trace(r["csd"]) for r in R]), axes=1))[1][:, -1]
+
+    def columns(self, recs: Sequence[dict], rw: np.ndarray, ref: Optional[np.ndarray] = None):
+        """Weighted grand-mean column (channels,) and its noise (channels, k) along ``ref`` (default: this
+        weighting's own decomposition)."""
+        ref = self.decompose(recs, rw) if ref is None else ref
+        idx = np.flatnonzero(rw > 0)
+        w = rw[idx] / rw[idx].sum()
+        R = [recs[i] for i in idx]
+        if self.kind == "evoked":
+            nr = np.array([np.linalg.norm(r["xbar"]) for r in R])
+            M = np.tensordot(w / nr, np.stack([r["xbar"] for r in R]), axes=1)
+            N = np.tensordot(w / nr, np.stack([r["x_flip"] for r in R]), axes=1)
+            return M @ ref, (N @ ref).T
+        if self.kind == "steady":
+            Z = np.stack([r["z"] / np.linalg.norm(r["z"]) for r in R])
+            Nz = np.stack([r["z_flip"] / np.linalg.norm(r["z"]) for r in R])
+            ph = np.exp(-1j * np.angle(Z @ ref))
+            return w @ (Z * ph[:, None]).real, np.tensordot(w, (Nz * ph[:, None, None]).real, axes=1).T
+        vs, ns = [], []
+        for r in R:
+            v = lead(r["csd"], ref)
+            vs.append(v)
+            ns.append(np.stack([(lead(q, ref) - v) / 2 for q in r["csd_q"]]))
+        return w @ np.array(vs), np.tensordot(w, np.array(ns), axes=1).T
+
+    def setup(self, recs: Sequence[dict], units: Units) -> FieldLocator:
+        """The sample's locator: whitener fitted on one noise block per unit through the whole sample's field."""
+        ref = self.decompose(recs, units.rec_weights(np.ones(units.U)))
+        noise = [self.columns(recs, units.rec_weights(np.eye(units.U)[u]), ref)[1] for u in range(units.U)]
+        return FieldLocator(self.space, **self._loc_args).fit(noise)
+
+    def locate(self, loc: FieldLocator, y: np.ndarray, noise: np.ndarray):
+        return loc.locate(loc.whiten(y, noise))
+
+    def map(self, recs: Sequence[dict], units: Units, draws: Sequence[np.ndarray], loc: FieldLocator):
+        """Mean located mass over the draws (count vectors over units), and the share of draws called a pair."""
+        m = np.zeros(len(self.space.positions_mm))
+        pp = []
+        for wm in draws:
+            y, n = self.columns(recs, units.rec_weights(wm))
+            pts, p = self.locate(loc, y, n)
+            np.add.at(m, pts, 1.0 / len(pts))
+            pp.append(p)
+        return m / m.sum(), float(np.mean(np.array(pp) >= loc.pair_rule))
+
+
+# ====================================================================== the model filter of a located pair
+
+MIRROR = np.diag([-1.0, 1.0, 1.0])
+
+
+def model_filter_pair(space, right_mm: Sequence[float], target: np.ndarray, midline_x_mm: float = 0.0) -> dict:
+    """``field.model_filter_pair``: the electrode field of a mirrored source pair, as a spatial filter.
+
+    The right member is the grid position nearest ``right_mm``, the left member the position nearest its mirror image.
+    Under each head model (average-referenced leadfields), one mirrored moment (the left member's moment is the right
+    one's mirror image) is fitted to ``target`` by least squares; each model's pattern is normalised and signed to
+    agree with ``target``, and the filter is their mean, normalised. Reads no recording.
+    Returns the filter, both members' positions, and how well each model's pattern fits the target.
+    """
+    G = space.G_ens - space.G_ens.mean(2, keepdims=True)
+    pos = space.positions_mm
+    right = np.asarray(right_mm, float)
+    left = right * [-1, 1, 1] + [2 * midline_x_mm, 0, 0]
+    ir = int(np.argmin(np.linalg.norm(pos - right, axis=1)))
+    il = int(np.argmin(np.linalg.norm(pos - left, axis=1)))
+    D = np.asarray(target, float)
+    pats, fits = [], []
+    for h in range(len(G)):
+        A = G[h, ir] + G[h, il] @ MIRROR
+        p = A @ np.linalg.lstsq(A, D, rcond=None)[0]
+        p /= np.linalg.norm(p)
+        pats.append(p if p @ D > 0 else -p)
+        fits.append(float((p @ D) ** 2))
+    w = np.mean(pats, 0)
+    w /= np.linalg.norm(w)
+    pats = np.array(pats)
+    return {"filter": w, "right_mm": pos[ir], "left_mm": pos[il], "right_index": ir, "left_index": il,
+            "per_model_cos2_with_target": np.array(fits), "per_model_cos_with_filter": pats @ w,
+            "head_models": len(G)}

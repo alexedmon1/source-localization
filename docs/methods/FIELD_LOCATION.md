@@ -66,3 +66,39 @@ mean, each unit, and a bootstrap over subjects that re-derives the field per rep
 surface-evoked's `localize_fields_bayes.json` with no difference at its stored precision: the grand mean, all 40
 mouse-days, and the 200-replicate bootstrap including its random draws (bayes-sl
 `scripts/f4_check_localize_fields.py`).
+
+## The field model over a sample of subjects
+
+`FieldModel` (`locate.field_model_map`) answers "where, and how stable is that over resamples of the subjects?". Records
+are one per recording, of one of three kinds:
+
+| kind | record | the sample's field |
+|---|---|---|
+| `evoked` | `xbar` (channels × times), `x_flip` (k × channels × times) | first time course of the mean unit-normalised response |
+| `steady` | `z` (channels, complex), `z_flip` (k × channels) | `field.phase_free` |
+| `ongoing` | `csd` (channels × channels), `csd_q` (k × channels × channels) | `field.csd_leading` |
+
+```python
+from source_localization.locate.field_model import FieldModel, Units, inner_draws
+
+fm = FieldModel(sp, "ongoing")                       # checks the calibration domain
+units = Units(record_subject)                        # record -> subject; weights per subject
+loc = fm.setup(recs, units)                          # whitener on one noise block per subject, through the sample's field
+mass, share_pair = fm.map(recs, units, inner_draws(np.ones(units.U), 100, rng), loc)
+```
+
+Each draw resamples the subjects, re-derives the field, forms the weighted grand-mean column and noise, and locates it
+(`locate.field_choice`); the map is the located mass per grid point, and `share_pair` the share of draws called a pair.
+
+## The model filter of a located pair
+
+`model_filter_pair(space, right_mm, target)` (`field.model_filter_pair`) turns a located mirror pair into a spatial
+filter: under each head model one mirrored moment is fitted to the target field, the patterns are averaged and
+normalised. It can be projected like a template field.
+
+**Checks (2026-11-09; bayes-sl `scripts/f4b_check_field_model.py`).**
+- The model filter rebuilds surface-evoked's `templates/h038_model_filter.json` exactly (members at
+  [±0.56, −2.73, 0.80] mm, cos 0.990 with `chirp_D`, per-model fits 0.955-0.986).
+- On three benchmark cohorts (Thalamus 1.0 SD, cortex 0.5 SD, noise only) at every group size (8-30 per group), the
+  field model's maps equal bayes-sl L3's stored maps with no difference (located mass, share called pair, the pooled
+  field), with L2's seeds.
