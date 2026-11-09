@@ -77,7 +77,7 @@ mirror_pairs
 model_probabilities
     Posterior probabilities of source sets from their log evidences.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, Optional, Sequence
 
@@ -86,7 +86,8 @@ from scipy import sparse
 from scipy.spatial import cKDTree
 from scipy.special import logsumexp
 
-__all__ = ['SourceSetPosterior', 'EnsemblePosterior', 'MirrorPairPosterior', 'MapCalibration', 'UNCALIBRATED',
+__all__ = ['SourceSetPosterior', 'EnsemblePosterior', 'MirrorPairPosterior', 'MapCalibration', 'CalibrationDomain',
+           'UNCALIBRATED',
            'VOLUMETRIC', 'SURFACE', 'blur_kernel', 'mass_above', 'coverage', 'mirror_pairs', 'model_probabilities']
 
 
@@ -294,10 +295,31 @@ def model_probabilities(log_evidences: Dict[str, np.ndarray], prior: Optional[Di
 
 
 @dataclass(frozen=True)
+class CalibrationDomain:
+    """Where a calibration was measured, and so the only place it holds.
+
+    ``array``: the name of an array file in ``data/calibration/`` (channel names, order and electrode positions);
+    ``ensemble``: the catalogued head-model ensemble id; ``spacing_mm``: the grid spacing; ``positions``:
+    ``volumetric`` (the dense grid) or ``surface`` (the anatomical surface source space). The field method's entry
+    points (``locate.field_model``) refuse a space outside the domain (the Conductor, 2026-11-09).
+    """
+    array: str
+    ensemble: str
+    spacing_mm: float
+    positions: str
+
+
+@dataclass(frozen=True)
 class MapCalibration:
-    """Temper the normalized log posterior by ``temperature``, then blur by a Gaussian of ``blur_mm``."""
+    """Temper the normalized log posterior by ``temperature``, then blur by a Gaussian of ``blur_mm``.
+
+    ``domain`` says where the setting was measured (:class:`CalibrationDomain`); None for :data:`UNCALIBRATED` and for
+    ad-hoc settings, which the field method refuses unless asked explicitly for an uncalibrated map.
+    """
     temperature: float = 1.0
     blur_mm: float = 0.0
+    domain: Optional[CalibrationDomain] = field(default=None, compare=False)
+    id: Optional[str] = field(default=None, compare=False)
 
     def apply(self, log_posterior: np.ndarray, positions_mm: np.ndarray) -> np.ndarray:
         lp = np.atleast_2d(np.asarray(log_posterior, float)) / self.temperature
@@ -308,9 +330,12 @@ class MapCalibration:
         return p[0] if np.ndim(log_posterior) == 1 else p
 
 
-UNCALIBRATED = MapCalibration()
-VOLUMETRIC = MapCalibration(temperature=1.5, blur_mm=0.25)
-SURFACE = MapCalibration(temperature=2.5, blur_mm=0.0)
+UNCALIBRATED = MapCalibration(id='calibration.none')
+VOLUMETRIC = MapCalibration(temperature=1.5, blur_mm=0.25, id='calibration.volumetric',
+                            domain=CalibrationDomain('mea30_sentinel', 'prior.head_ensemble_pa_phase2', 0.5,
+                                                     'volumetric'))
+SURFACE = MapCalibration(temperature=2.5, blur_mm=0.0, id='calibration.surface',
+                         domain=CalibrationDomain('mea30_sentinel', 'prior.head_ensemble_pa_phase2', 0.5, 'surface'))
 
 
 def blur_kernel(positions_mm: np.ndarray, sigma_mm: float) -> sparse.csr_matrix:

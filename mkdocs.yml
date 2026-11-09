@@ -37,6 +37,7 @@ nav:
   - Methods:
       - Model catalogue: methods/CATALOGUE.md
       - Field templates: methods/FIELD_TEMPLATES.md
+      - Locating a field: methods/FIELD_LOCATION.md
   - Validation:
       - Validation guide: validation/README.md
       - "Design: honest-by-default validation": validation/DESIGN_validation_upgrade.md

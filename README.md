@@ -1076,6 +1076,12 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
   virtual channel per field in the layout source-analytics reads, the residual's trial average, and `field_run.json`
   (template sha256, projection id and version). `field show` validates a template. Source mode is unchanged. For all
   192 held-out Sentinel recordings the series equal surface-evoked's to a relative 6e-16
+- **Locating a field** (phase F4): calibrations carry the domain they were measured in (array, ensemble, grid,
+  positions; the MEA30 array as `data/calibration/mea30_sentinel.json`), and `locate.field_model.FieldLocator`
+  refuses a space outside it. The locator fits the whitener and the single-source and mirror-pair posteriors, reads
+  calibrated maps, evidence and P(pair), and chooses the location (`locate.field_choice`); `summarize` and
+  `report_response_svd_field` report it. Reproduces surface-evoked's location report of the frozen chirp fields
+  exactly. See [docs/methods/FIELD_LOCATION.md](docs/methods/FIELD_LOCATION.md)
 
 Notable changes in 0.7.0:
 

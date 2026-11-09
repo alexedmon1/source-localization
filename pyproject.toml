@@ -80,6 +80,7 @@ source_localization = [
     "config/presets/*.yaml",
     "data/atlas/*",
     "data/electrodes/*",
+    "data/calibration/*",
     "validation/config/default_tests/**/*.yaml",
 ]
 

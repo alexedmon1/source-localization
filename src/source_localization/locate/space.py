@@ -18,7 +18,20 @@ from .head_ensemble import ENSEMBLES, EnsembleSpec, ensemble_leadfields
 from .regions import labelling
 from .whitening import average_reference_basis
 
-__all__ = ["LocationSpace"]
+__all__ = ["LocationSpace", "CalibrationDomainError", "array_reference"]
+
+
+class CalibrationDomainError(ValueError):
+    """A location space outside the domain a map calibration was measured in."""
+
+
+def array_reference(name: str) -> dict:
+    """An array file from ``data/calibration/`` (channels, electrode positions, tolerance)."""
+    import json
+    path = Path(__file__).resolve().parents[1] / "data" / "calibration" / f"{name}.json"
+    if not path.exists():
+        raise CalibrationDomainError(f"no array reference {name!r} in data/calibration/")
+    return json.loads(path.read_text())
 
 
 class LocationSpace:
@@ -74,6 +87,43 @@ class LocationSpace:
     def referenced_leadfields(self) -> np.ndarray:
         """``G_ens`` average-referenced over channels (the reference the data are in before whitening)."""
         return self.G_ens - self.G_ens.mean(axis=2, keepdims=True)
+
+    def calibration_mismatches(self, calibration) -> list:
+        """Why ``calibration`` does not hold in this space (empty if it does). A calibration without a domain
+        (``calibration.none`` or an ad-hoc setting) always mismatches."""
+        dom = getattr(calibration, "domain", None)
+        if dom is None:
+            return [f"calibration {getattr(calibration, 'id', None) or calibration} has no measured domain"]
+        out = []
+        ref = array_reference(dom.array)
+        if self.channel_names != list(ref["channels"]):
+            out.append(f"channels differ from array {dom.array}")
+        else:
+            d = float(np.abs(np.asarray(self.electrode_pos_mm) - np.asarray(ref["electrodes_mm"])).max())
+            if d > ref["tolerance_mm"]:
+                out.append(f"electrodes differ from array {dom.array} by up to {d:.3f} mm "
+                           f"(tolerance {ref['tolerance_mm']} mm)")
+        if self.ensemble.id != dom.ensemble:
+            out.append(f"ensemble {self.ensemble.id}, calibrated with {dom.ensemble}")
+        if abs(self.spacing_mm - dom.spacing_mm) > 1e-9:
+            out.append(f"grid spacing {self.spacing_mm} mm, calibrated at {dom.spacing_mm} mm")
+        if self.labels["kind"] != dom.positions:
+            out.append(f"{self.labels['kind']} positions, calibrated on {dom.positions}")
+        return out
+
+    def check_calibration(self, calibration, allow_uncalibrated: bool = False) -> None:
+        """Raise :class:`CalibrationDomainError` unless ``calibration`` was measured in this space's domain.
+
+        ``allow_uncalibrated=True`` permits only ``calibration.none`` (raw, overconfident maps), for diagnostics.
+        Another array, ensemble, spacing or position set needs its own calibration first (the Conductor,
+        2026-11-09: uncalibrated arrays are refused).
+        """
+        if allow_uncalibrated and getattr(calibration, "id", None) == "calibration.none":
+            return
+        bad = self.calibration_mismatches(calibration)
+        if bad:
+            raise CalibrationDomainError("calibration does not hold in this location space: " + "; ".join(bad)
+                                         + ". Calibrate for this space first (source_localization.locate.calibrate).")
 
     def provenance(self) -> dict:
         """What a location result records about the space it was computed in."""

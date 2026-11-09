@@ -11,6 +11,7 @@ Every probability model this package uses to say where a signal comes from: the 
 | `locate.single_source_exact` | 1 | one dipole, exact head model |
 | `locate.single_source` | 1 | one dipole, averaged over a head-model ensemble |
 | `locate.mirror_pair` | 1 | a dipole and its mirror image across the midline |
+| `locate.field_choice` | 1 | where a field is: the pair if P(pair) reaches the rule, else the single peak |
 | `locate.source_set` | 1 | any fixed set of dipoles, with model evidence |
 
 ### `locate.single_source_exact` (version 1)
@@ -48,6 +49,17 @@ A dipole and its mirror image across the midline.
 - **Implementation:** `source_localization.locate.ensemble_posterior:MirrorPairPosterior`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_mirror_pair.md
+
+### `locate.field_choice` (version 1)
+
+Where a field is: the pair if P(pair) reaches the rule, else the single peak.
+
+- **Model:** For a whitened field column: P(pair) from locate.single_source and locate.mirror_pair (equal prior odds). If P(pair) >= pair_rule (default 0.5), the location is the mirror pair at the pair map's peak (both members); otherwise the single-source map's peak. Both maps are calibrated, and the space must lie in the calibration's domain.
+- **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`, `prior.model_odds_equal`
+- **Validity:** The rule of surface-evoked method_crossover.FieldModel.locate (H039 arm C) and bayes-sl L2/L3; with locate.mirror_pair's caveat that a single deep source at high SNR can pass for a near-midline pair.
+- **Implementation:** `source_localization.locate.field_model:FieldLocator.locate`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** docs/methods/FIELD_LOCATION.md
 
 ### `locate.source_set` (version 1)
 
@@ -141,6 +153,7 @@ Tempered and blurred, for volumetric maps.
 - **Model:** Normalized log posterior divided by T = 1.5, then an isotropic Gaussian blur of 0.25 mm over the candidate positions (mass-conserving).
 - **Values:** temperature 1.5, blur 0.25 mm
 - **Validity:** MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, single-source truths, whitened real noise. 90% region held the truth 88-89% of the time at half, primary and double SNR (80%: 79-81%; 95%: 92-94%). Chosen on one simulated set, checked on another.
+- **Caveat:** Enforced: the field locator refuses a space outside this domain (array mea30_sentinel = data/calibration/mea30_sentinel.json, electrodes within 0.1 mm; ensemble; 0.5 mm; volumetric).
 - **Implementation:** `source_localization.locate.ensemble_posterior:VOLUMETRIC`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_map_calibration.md
@@ -152,6 +165,7 @@ Tempered, for the cortical surface readout.
 - **Model:** Normalized log posterior divided by T = 2.5; no blur (blurring made it worse).
 - **Values:** temperature 2.5, blur 0 mm
 - **Validity:** MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory surface positions. Approximately calibrated: 90% region 88-91% at half and primary SNR, 83-85% at double SNR.
+- **Caveat:** Enforced: the field locator refuses a space outside this domain (array mea30_sentinel, electrodes within 0.1 mm; ensemble; 0.5 mm; surface positions).
 - **Implementation:** `source_localization.locate.ensemble_posterior:SURFACE`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_map_calibration.md

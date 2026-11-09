@@ -262,6 +262,21 @@ LOCATION_POSTERIORS: Dict[str, ModelSpec] = {
         caveat='Pairs very close to the midline look like one central source; at '
                'high SNR a single deep source can pass for a near-midline pair '
                '(bayes-sl tb16 control).'),
+    'locate.field_choice': ModelSpec(
+        'locate.field_choice', 1,
+        'where a field is: the pair if P(pair) reaches the rule, else the single peak',
+        'For a whitened field column: P(pair) from locate.single_source and locate.mirror_pair (equal prior odds). '
+        'If P(pair) >= pair_rule (default 0.5), the location is the mirror pair at the pair map\'s peak (both '
+        'members); otherwise the single-source map\'s peak. Both maps are calibrated, and the space must lie in '
+        'the calibration\'s domain.',
+        priors=('prior.position_uniform', 'prior.moment_empirical_bayes', 'prior.head_ensemble_pa_phase2',
+                'prior.model_odds_equal'),
+        validity='The rule of surface-evoked method_crossover.FieldModel.locate (H039 arm C) and bayes-sl L2/L3; '
+                 'with locate.mirror_pair\'s caveat that a single deep source at high SNR can pass for a '
+                 'near-midline pair.',
+        implementation='source_localization.locate.field_model:FieldLocator.locate',
+        tests='tests/test_field_locate.py',
+        reference='docs/methods/FIELD_LOCATION.md'),
     'locate.source_set': ModelSpec(
         'locate.source_set', 1,
         'any fixed set of dipoles, with model evidence',
@@ -357,6 +372,8 @@ MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
                  '88-89% of the time at half, primary and double SNR (80%: 79-81%; '
                  '95%: 92-94%). Chosen on one simulated set, checked on another.',
         implementation=f'{_EP}:VOLUMETRIC',
+        caveat='Enforced: the field locator refuses a space outside this domain (array mea30_sentinel = '
+               'data/calibration/mea30_sentinel.json, electrodes within 0.1 mm; ensemble; 0.5 mm; volumetric).',
         tests='tests/test_ensemble_posterior.py',
         reference='bayes-sl reports/TB_map_calibration.md'),
     'calibration.surface': ModelSpec(
@@ -368,6 +385,8 @@ MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
                  'surface positions. Approximately calibrated: 90% region 88-91% at half '
                  'and primary SNR, 83-85% at double SNR.',
         implementation=f'{_EP}:SURFACE',
+        caveat='Enforced: the field locator refuses a space outside this domain (array mea30_sentinel, electrodes '
+               'within 0.1 mm; ensemble; 0.5 mm; surface positions).',
         tests='tests/test_ensemble_posterior.py',
         reference='bayes-sl reports/TB_map_calibration.md'),
 }
