@@ -1,8 +1,8 @@
 # Mouse EEG Source Localization Package
 
 **Created:** 2025-11-26
-**Last Updated:** 2026-09-03
-**Version:** 0.7.0
+**Last Updated:** 2026-11-09
+**Version:** 0.8.0
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -1046,13 +1046,14 @@ source_localization/
 
 ## History
 
-The package version is `0.7.0`. Earlier revisions of this README carried a
+The package version is `0.8.0`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
 
-Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-11-09_field_method_library_plan.md`):
+Notable changes in 0.8.0 (2026-11-09; the field method, bayes-sl `reports/2026-11-09_field_method_library_plan.md`).
+No existing output changes: source mode is untouched, and every new step reproduces the study code it replaces:
 
 - **Head-model-ensemble location posteriors** (merged from `feat/bayes-group`): `EnsemblePosterior`,
   `SourceSetPosterior`, `MirrorPairPosterior` and the map calibrations `VOLUMETRIC` and `SURFACE`, in
