@@ -376,6 +376,20 @@ MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
         implementation=f'{_EP}:UNCALIBRATED',
         caveat='Overconfident under head-model error: the 90% region held the truth '
                'about 55-65% of the time on MEA30 (bayes-sl reports/TB_map_focality.md).'),
+    'calibration.procedure': ModelSpec(
+        'calibration.procedure', 1,
+        'how a map calibration is measured and chosen for a location space',
+        'Simulate single-source truths in the space (positions uniform over the candidates, random orientations, '
+        'fresh head models from the ensemble\'s prior that are not in the ensemble, several SNRs, real held-out '
+        'whitened noise), in two independent sets. Score each raw map on a grid of (temperature, blur) by the mass '
+        'above the truth. Choose, on the calibration set, the setting with the smallest worst |coverage - level| over '
+        'levels 0.5, 0.8, 0.9, 0.95 and over strata (SNR x depth class); check it on the validation set. The result '
+        'carries its domain (this array, ensemble, spacing, positions).',
+        priors=('levels 0.5, 0.8, 0.9, 0.95', 'strata: SNR x depth class', 'grid of temperature x blur'),
+        validity='Applied to bayes-sl tb11\'s stored scores it chooses calibration.volumetric (1.5, 0.25) and '
+                 'calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py).',
+        implementation='source_localization.locate.calibrate:calibrate', tests='tests/test_field_locate.py',
+        reference='bayes-sl scripts/tb11_calibrate_maps.py, tb12_select_calibration.py; reports/TB_map_calibration.md'),
     'calibration.volumetric': ModelSpec(
         'calibration.volumetric', 1,
         'tempered and blurred, for volumetric maps',

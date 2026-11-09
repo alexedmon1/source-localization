@@ -28,9 +28,10 @@ class CalibrationDomainError(ValueError):
 def array_reference(name: str) -> dict:
     """An array file from ``data/calibration/`` (channels, electrode positions, tolerance)."""
     import json
-    path = Path(__file__).resolve().parents[1] / "data" / "calibration" / f"{name}.json"
+    path = Path(name) if str(name).endswith(".json") else \
+        Path(__file__).resolve().parents[1] / "data" / "calibration" / f"{name}.json"
     if not path.exists():
-        raise CalibrationDomainError(f"no array reference {name!r} in data/calibration/")
+        raise CalibrationDomainError(f"no array reference {name!r} (a name in data/calibration/ or a .json path)")
     return json.loads(path.read_text())
 
 

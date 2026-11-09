@@ -146,6 +146,7 @@ Equal prior odds between source sets.
 | id | version | what it is |
 |---|---|---|
 | `calibration.none` | 1 | the raw averaged posterior |
+| `calibration.procedure` | 1 | how a map calibration is measured and chosen for a location space |
 | `calibration.volumetric` | 1 | tempered and blurred, for volumetric maps |
 | `calibration.surface` | 1 | tempered, for the cortical surface readout |
 
@@ -157,6 +158,17 @@ The raw averaged posterior.
 - **Values:** temperature 1.0, blur 0 mm
 - **Caveat:** Overconfident under head-model error: the 90% region held the truth about 55-65% of the time on MEA30 (bayes-sl reports/TB_map_focality.md).
 - **Implementation:** `source_localization.locate.ensemble_posterior:UNCALIBRATED`
+
+### `calibration.procedure` (version 1)
+
+How a map calibration is measured and chosen for a location space.
+
+- **Model:** Simulate single-source truths in the space (positions uniform over the candidates, random orientations, fresh head models from the ensemble's prior that are not in the ensemble, several SNRs, real held-out whitened noise), in two independent sets. Score each raw map on a grid of (temperature, blur) by the mass above the truth. Choose, on the calibration set, the setting with the smallest worst |coverage - level| over levels 0.5, 0.8, 0.9, 0.95 and over strata (SNR x depth class); check it on the validation set. The result carries its domain (this array, ensemble, spacing, positions).
+- **Values:** levels 0.5, 0.8, 0.9, 0.95, strata: SNR x depth class, grid of temperature x blur
+- **Validity:** Applied to bayes-sl tb11's stored scores it chooses calibration.volumetric (1.5, 0.25) and calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py).
+- **Implementation:** `source_localization.locate.calibrate:calibrate`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** bayes-sl scripts/tb11_calibrate_maps.py, tb12_select_calibration.py; reports/TB_map_calibration.md
 
 ### `calibration.volumetric` (version 1)
 

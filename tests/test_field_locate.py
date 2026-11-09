@@ -159,3 +159,48 @@ class TestFieldModel:
         out = model_filter_pair(sp, [1.0, 0.0, 0.0], target)
         assert (out['right_index'], out['left_index']) == (ir, il)
         assert out['filter'] @ target > 0.99 and abs(np.linalg.norm(out['filter']) - 1) < 1e-12
+
+
+class TestCalibrate:
+    def _custom_space(self, rng):
+        """A space on another array, with a geometry whose head models perturb the leadfields."""
+        sp = _space(rng, channels=[f'C{i}' for i in range(30)], electrodes=rng.normal(size=(30, 3)))
+        base = sp.G_ens[0]
+
+        class Geo:
+            def leadfield(self, model, pos):
+                r = np.random.default_rng(abs(hash((model.shift_mm, model.skull_factor))) % 2 ** 32)
+                return base + 0.3 * r.normal(size=base.shape)
+        sp.geometry = Geo()
+        K = sp.G_ens.shape[0]
+        sp.G_ens = np.stack([base + 0.3 * np.random.default_rng(100 + k).normal(size=base.shape) for k in range(K)])
+        return sp
+
+    def test_selection_rule_and_coverage(self):
+        from source_localization.locate.calibrate import coverage, select_setting, worst_error
+        m = np.linspace(0, 1, 101)[:-1]                          # uniform mass-above: exactly calibrated
+        assert coverage(m)[0.9] == pytest.approx(0.9, abs=0.011)
+        scores = {(1.0, 0.0): m ** 3, (1.5, 0.25): m, (3.0, 0.5): np.sqrt(m)}
+        best, losses = select_setting(scores, np.array(['a'] * 100))
+        assert best == (1.5, 0.25) and losses[best] == pytest.approx(worst_error(m, np.array(['a'] * 100)))
+
+    def test_calibrate_end_to_end_gives_a_domain_the_locator_accepts(self, tmp_path):
+        from source_localization.locate.calibrate import calibrate
+        from source_localization.locate import HeadModel, NoiseWhitener
+        rng = np.random.default_rng(20)
+        sp = self._custom_space(rng)
+        with pytest.raises(CalibrationDomainError):
+            FieldLocator(sp)                                     # another array: refused until calibrated
+        wh = NoiseWhitener.fit([rng.normal(size=(30, 4)) for _ in range(30)], estimator='oas')
+        noise = lambda n: rng.normal(size=(n, wh.n_whitened))   # noqa: E731
+        fresh = [HeadModel((0.1 * i, 0, 0), 1.0) for i in range(1, 7)]
+        cal, rep = calibrate(sp, wh, noise(200), noise(200), fresh[:3], fresh[3:], snrs=[2.0, 8.0], n_per_snr=60,
+                             out_dir=tmp_path, temperatures=(1.0, 2.0, 4.0, 8.0), blurs_mm=(0.0, 0.5), seed=1,
+                             name='calibration.toy')
+        assert cal.id == 'calibration.toy' and cal.domain.ensemble == sp.ensemble.id
+        assert (tmp_path / 'calibration.toy.json').exists() and (tmp_path / 'calibration.toy_array.json').exists()
+        assert rep['chosen']['worst_abs_error_calib'] <= min(v for v in rep['losses'].values()) + 1e-12
+        FieldLocator(sp, calibration=cal)                        # now accepted
+        other = _space(np.random.default_rng(21))                # the MEA30 space is not in this calibration's domain
+        with pytest.raises(CalibrationDomainError):
+            FieldLocator(other, calibration=cal)

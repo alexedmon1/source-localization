@@ -1083,7 +1083,8 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
   `report_response_svd_field` report it. Reproduces surface-evoked's location report of the frozen chirp fields
   exactly. `FieldModel` (`locate.field_model_map`) gives the located mass over resamples of the subjects for evoked,
   steady-state and ongoing data, and `model_filter_pair` (`field.model_filter_pair`) the filter of a located pair;
-  both reproduce their study counterparts with no difference. See
+  both reproduce their study counterparts with no difference. `locate.calibrate` measures a calibration for a new
+  space (`calibration.procedure`; it re-chooses the catalogued settings from their original scores). See
   [docs/methods/FIELD_LOCATION.md](docs/methods/FIELD_LOCATION.md)
 
 Notable changes in 0.7.0:

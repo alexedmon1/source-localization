@@ -102,3 +102,34 @@ normalised. It can be projected like a template field.
 - On three benchmark cohorts (Thalamus 1.0 SD, cortex 0.5 SD, noise only) at every group size (8-30 per group), the
   field model's maps equal bayes-sl L3's stored maps with no difference (located mass, share called pair, the pooled
   field), with L2's seeds.
+
+## Calibrating a new space
+
+A space outside every catalogued calibration's domain (another array, ensemble, grid spacing or position set) is
+refused until it has its own calibration. `locate.calibrate.calibrate` measures one (`calibration.procedure`):
+
+```python
+from source_localization.locate.calibrate import calibrate
+
+cal, report = calibrate(sp, whitener, noise_calib, noise_valid,      # whitened held-out noise columns, two halves
+                        fresh_models_calib, fresh_models_valid,      # from the ensemble's prior, not in the ensemble
+                        snrs=[s / 2, s, 2 * s], n_per_snr=400, out_dir="calibrations/mystudy",
+                        depth_of=lambda i: "deep" if is_deep[i] else "cortex", name="calibration.mystudy")
+loc = FieldLocator(sp, calibration=cal)      # accepted: its domain is this space
+```
+
+1. Simulate single-source truths in the space through fresh head models, at several SNRs, with real held-out noise;
+   two independent sets (calibration, validation).
+2. Score each raw map on a grid of temperature × blur by the posterior mass above the truth.
+3. Choose, on the calibration set, the setting with the smallest worst |coverage − level| over the levels 0.5, 0.8, 0.9,
+   0.95 and over SNR × depth class.
+4. Report its coverage on the validation set; write the array reference and `<name>.json` (setting, domain, coverage,
+   losses).
+
+The result is a `MapCalibration` whose domain is this space; the locator accepts it there and nowhere else.
+Calibration covers single-source truths; mirror-pair coverage should be checked separately (as bayes-sl
+`TB_mirror_pair.md` did for MEA30).
+
+**Check (2026-11-09).** Applied to bayes-sl tb11's stored scores (7,200 maps per setting), the selection chooses the
+catalogued settings again: volumetric T 1.5, blur 0.25 mm (90% coverage 88-89% on validation), surface T 2.5, no blur
+(84-91%) (bayes-sl `scripts/f4c_check_calibration.py`).
