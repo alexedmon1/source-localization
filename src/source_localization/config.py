@@ -197,7 +197,17 @@ class Config:
         return dict(entry.get('meta', {}))
 
     def _validate(self):
-        """Validate configuration."""
+        """Validate configuration. The field mode (pipeline.mode: field) needs a field section, not a head model."""
+        from .methods import PIPELINE_MODES
+        mode = (self._config.get('pipeline') or {}).get('mode', 'source') or 'source'
+        if mode not in PIPELINE_MODES:
+            raise ValueError(f"Unknown pipeline.mode: {mode}. Valid: {', '.join(PIPELINE_MODES)}")
+        if mode == 'field':
+            if not isinstance(self._config.get('field'), dict) or not self._config['field'].get('template'):
+                raise ValueError("pipeline.mode 'field' needs field.template (a frozen field template)")
+            self._config.setdefault('inputs', {})
+            self._config.setdefault('outputs', {})
+            return
         required = ['pipeline', 'bem', 'source_space', 'inverse']
         for key in required:
             if key not in self._config:

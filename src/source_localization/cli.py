@@ -10,6 +10,7 @@ from .config import Config, ATLAS_DEFINITIONS
 from .methods import (
     BEM_TYPES,
     INVERSE_METHODS,
+    PIPELINE_MODES,
     SAMPLING_MODES,
     SOURCE_SPACES,
     choices,
@@ -591,6 +592,8 @@ Examples:
                         help='Only the BEM / source space / sampling / inverse choices')
     parser.add_argument('--atlases', action='store_true',
                         help='Only the atlas parcellations')
+    parser.add_argument('--catalogue', action='store_true',
+                        help='The model catalogue: location posteriors, their priors and calibrations')
     return parser
 
 
@@ -665,9 +668,9 @@ def _print_atlases():
 
 def _run_list_command(args):
     """Print the method vocabulary."""
-    want = {k for k in ('presets', 'methods', 'atlases') if getattr(args, k, False)}
+    want = {k for k in ('presets', 'methods', 'atlases', 'catalogue') if getattr(args, k, False)}
     if not want:
-        want = {'presets', 'methods', 'atlases'}
+        want = {'presets', 'methods', 'atlases', 'catalogue'}
 
     if 'presets' in want:
         _print_presets()
@@ -676,9 +679,27 @@ def _run_list_command(args):
         _print_method_group('Source spaces (pipeline.source_type)', SOURCE_SPACES)
         _print_method_group('Source sampling (--source-sampling)', SAMPLING_MODES)
         _print_method_group('Inverse methods (--method)', INVERSE_METHODS)
+        _print_method_group('Pipeline modes (pipeline.mode)', PIPELINE_MODES)
     if 'atlases' in want:
         _print_atlases()
+    if 'catalogue' in want:
+        _print_catalogue()
     return 0
+
+
+def _print_catalogue(width=78):
+    """The model catalogue (methods.CATALOGUE): id, version and summary, then validity."""
+    import textwrap
+    from .methods import CATALOGUE
+    print("Model catalogue (docs/methods/CATALOGUE.md has every prior and value):\n")
+    for title, section in CATALOGUE.items():
+        print(f"{title}:")
+        for m in section.values():
+            print(f"  {m.id:<34s} v{m.version}  {m.summary}")
+            if m.validity:
+                print(textwrap.fill(m.validity, width=width, initial_indent=' ' * 6,
+                                    subsequent_indent=' ' * 6))
+        print()
 
 
 def main():
@@ -725,6 +746,8 @@ For backwards compatibility, you can also run:
     _create_list_parser(subparsers)
     _create_validate_parser(subparsers)
     _create_study_parser(subparsers)
+    from .field.cli import create_parser as _create_field_parser
+    _create_field_parser(subparsers)
 
     # Parse and execute
     args = parser.parse_args()
@@ -745,6 +768,10 @@ For backwards compatibility, you can also run:
 
     elif args.command == 'study':
         return _run_study_command(args)
+
+    elif args.command == 'field':
+        from .field.cli import run as _run_field_command
+        return _run_field_command(args)
 
     return 0
 

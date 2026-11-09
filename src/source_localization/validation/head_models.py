@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import copy
 from collections import OrderedDict
-from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
@@ -27,57 +26,9 @@ import numpy as np
 __all__ = ["HeadModel", "HeadModelPrior", "TruthForward"]
 
 
-@dataclass(frozen=True)
-class HeadModel:
-    """One head model, as a perturbation of the nominal one.
-
-    Parameters
-    ----------
-    shift_mm : (3,) tuple
-        Rigid shift of every electrode, in mm, in the head frame.
-    skull_factor : float
-        Skull conductivity as a multiple of the nominal model's.
-    """
-
-    shift_mm: Tuple[float, float, float] = (0.0, 0.0, 0.0)
-    skull_factor: float = 1.0
-
-    def __post_init__(self):
-        shift = tuple(float(v) for v in np.asarray(self.shift_mm, float).ravel())
-        if len(shift) != 3:
-            raise ValueError("shift_mm must have three components")
-        if not self.skull_factor > 0:
-            raise ValueError("skull_factor must be positive")
-        object.__setattr__(self, "shift_mm", shift)
-        object.__setattr__(self, "skull_factor", float(self.skull_factor))
-
-    @property
-    def is_nominal(self) -> bool:
-        return self.shift_mm == (0.0, 0.0, 0.0) and self.skull_factor == 1.0
-
-
-@dataclass(frozen=True)
-class HeadModelPrior:
-    """Prior over head models (module docstring).
-
-    ``shift_sd_mm`` is one SD for all three axes, or a per-axis (x, y, z) tuple: ``(0.5, 0.5, 0.0)`` is "x and y
-    only, 0.5 mm". ``skull_factor_range`` bounds the log-uniform skull-conductivity factor.
-    """
-
-    shift_sd_mm: object = 0.3
-    skull_factor_range: Tuple[float, float] = (0.5, 2.0)
-
-    def draw(self, rng: np.random.Generator) -> HeadModel:
-        """One head model. Consumes 3 normals, then 1 uniform, from ``rng``."""
-        sd = np.broadcast_to(np.asarray(self.shift_sd_mm, float), (3,))
-        shift = rng.normal(0.0, 1.0, 3) * sd
-        lo, hi = self.skull_factor_range
-        factor = float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
-        return HeadModel(tuple(shift), factor)
-
-    def draw_many(self, n: int, seed: int) -> list:
-        rng = np.random.default_rng(seed)
-        return [self.draw(rng) for _ in range(n)]
+# HeadModel and HeadModelPrior live in locate.head_ensemble (field-method plan, phase F1): one definition for the
+# location posteriors and the validation regime.
+from ..locate.head_ensemble import HeadModel, HeadModelPrior  # noqa: E402
 
 
 class TruthForward:
