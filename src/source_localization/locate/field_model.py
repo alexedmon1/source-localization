@@ -20,6 +20,8 @@ report helpers (:func:`summarize`, :func:`report_response_svd_field`) reproduce 
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Callable, Dict, Optional, Sequence
 
 import numpy as np
@@ -29,7 +31,8 @@ from .ensemble_posterior import (VOLUMETRIC, EnsemblePosterior, MirrorPairPoster
 from .whitening import NoiseWhitener
 
 __all__ = ["FieldLocator", "summarize", "hpd_size", "parcel_mass", "report_response_svd_field", "KINDS", "Units",
-           "inner_draws", "lead", "FieldModel", "model_filter_pair"]
+           "inner_draws", "lead", "FieldModel", "model_filter_pair", "mean_referenced_leadfield", "region_fields",
+           "region_power_db", "region_value_table", "write_region_values"]
 
 
 def hpd_size(p: np.ndarray, level: float = 0.9) -> np.ndarray:
@@ -415,3 +418,70 @@ def model_filter_pair(space, right_mm: Sequence[float], target: np.ndarray, midl
     return {"filter": w, "right_mm": pos[ir], "left_mm": pos[il], "right_index": ir, "left_index": il,
             "per_model_cos2_with_target": np.array(fits), "per_model_cos_with_filter": pats @ w,
             "head_models": len(G)}
+
+
+# ====================================================================== each located region's own field (bayes-sl L3)
+
+def mean_referenced_leadfield(space) -> np.ndarray:
+    """The ensemble's leadfields average-referenced over channels and averaged over head models, (P, channels, 3)."""
+    n = space.G_ens.shape[2]
+    H = np.eye(n) - 1.0 / n
+    return np.einsum("ij,kpjo->pio", H, space.G_ens) / space.G_ens.shape[0]
+
+
+def region_fields(space, u: np.ndarray, located_index: Sequence[int], mass: Sequence[float],
+                  region_of_position: Sequence[str], Gm: Optional[np.ndarray] = None) -> Dict[str, tuple]:
+    """``field.region_field``: each located region's own electrode field.
+
+    For each located position p (``located_index``, with its located ``mass``): the field u projected on the span of
+    p's free-orientation leadfield (mean over head models, average-referenced), normalised and signed to agree with
+    u. A region's field is the mass-weighted sum of its positions' fields, normalised. Returns region -> (field,
+    located mass). As bayes-sl ``scripts/l3_fields.py`` (``_fields``).
+    """
+    Gm = mean_referenced_leadfield(space) if Gm is None else Gm
+    u = np.asarray(u, float)
+    acc: Dict[str, list] = {}
+    for p, w in zip(located_index, mass):
+        A = Gm[int(p)]
+        v = A @ np.linalg.lstsq(A, u, rcond=None)[0]
+        v = v / np.linalg.norm(v)
+        v = v if v @ u >= 0 else -v
+        a = acc.setdefault(region_of_position[int(p)], [np.zeros(len(u)), 0.0])
+        a[0] += w * v
+        a[1] += w
+    return {r: (a / np.linalg.norm(a), w) for r, (a, w) in acc.items()}
+
+
+def region_power_db(field: np.ndarray, csd: np.ndarray) -> float:
+    """``field.region_power_db``: 10 log10(g' C g), a subject's band power along a field g (C average-referenced)."""
+    return float(10 * np.log10(field @ csd @ field))
+
+
+def region_value_table(fields: Dict[str, tuple], csd_by_subject: Dict[str, np.ndarray]) -> list:
+    """One row per region and subject: region, p_source (the region's located mass), subject, y_db."""
+    return [{"region": r, "p_source": w, "subject": s, "y_db": region_power_db(g, C)}
+            for r, (g, w) in fields.items() for s, C in csd_by_subject.items()]
+
+
+def write_region_values(path, rows: list, provenance: dict) -> Path:
+    """Write the region-value table (CSV; columns region, p_source, subject, y_db and any extra keys) and its record
+    ``<path>.json``: the catalogue ids and versions used and the space's provenance. source-analytics reads the CSV
+    as a per-subject table with one outcome per region (no ROI in the engine's sense)."""
+    import csv
+    from pathlib import Path as _P
+
+    from ..methods import catalogue_entries
+    path = _P(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    keys = list(rows[0]) if rows else ["region", "p_source", "subject", "y_db"]
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(rows)
+    E = catalogue_entries()
+    rec = {"readout_mode": "field", "step": "region_values", "outcome": "y_db (dB, band power along each region's field)",
+           "models": {i: E[i].version for i in ("field.region_field", "field.region_power_db",
+                                                "locate.field_model_map") if i in E},
+           **provenance}
+    _P(str(path) + ".json").write_text(json.dumps(rec, indent=1, default=str))
+    return path

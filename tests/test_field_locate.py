@@ -204,3 +204,36 @@ class TestCalibrate:
         other = _space(np.random.default_rng(21))                # the MEA30 space is not in this calibration's domain
         with pytest.raises(CalibrationDomainError):
             FieldLocator(other, calibration=cal)
+
+
+class TestRegionValues:
+    def test_region_field_of_a_single_position_is_the_projected_field(self):
+        from source_localization.locate.field_model import mean_referenced_leadfield, region_fields
+        rng = np.random.default_rng(30)
+        sp = _space(rng)
+        Gm = mean_referenced_leadfield(sp)
+        u = Gm[5] @ np.array([1.0, 2.0, -1.0])
+        u /= np.linalg.norm(u)
+        f = region_fields(sp, u, [5], [1.0], ['R'] * len(sp.positions_mm))
+        g, w = f['R']
+        assert w == 1.0 and g @ u == pytest.approx(1.0)               # u lies in p's leadfield span
+
+    def test_region_field_is_mass_weighted_and_values_are_db(self, tmp_path):
+        import json
+        from source_localization.locate.field_model import (region_fields, region_power_db, region_value_table,
+                                                            write_region_values)
+        rng = np.random.default_rng(31)
+        sp = _space(rng)
+        u = _space(rng).G_ens[0][3] @ np.array([1.0, 0, 0])
+        regions = ['A' if i < 10 else 'B' for i in range(len(sp.positions_mm))]
+        f = region_fields(sp, u, [1, 2, 12], [0.25, 0.25, 0.5], regions)
+        assert set(f) == {'A', 'B'} and f['A'][1] == 0.5 and f['B'][1] == 0.5
+        assert all(abs(np.linalg.norm(g) - 1) < 1e-12 for g, _ in f.values())
+        C = np.eye(30) * 4.0
+        assert region_power_db(f['A'][0], C) == pytest.approx(10 * np.log10(4.0))
+        rows = region_value_table(f, {'s1': C, 's2': 2 * C})
+        assert len(rows) == 4 and {r['subject'] for r in rows} == {'s1', 's2'}
+        out = write_region_values(tmp_path / 'v.csv', rows, {'space': 'synthetic'})
+        rec = json.loads((tmp_path / 'v.csv.json').read_text())
+        assert out.exists() and rec['readout_mode'] == 'field'
+        assert rec['models']['field.region_field'] == M.FIELD_PROJECTIONS['field.region_field'].version

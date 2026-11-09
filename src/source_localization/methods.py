@@ -504,6 +504,24 @@ FIELD_DEFINITIONS: Dict[str, ModelSpec] = {
 _FP = 'source_localization.field.project'
 
 FIELD_PROJECTIONS: Dict[str, ModelSpec] = {
+    'field.region_field': ModelSpec(
+        'field.region_field', 1, 'a located region\'s own electrode field',
+        'For each located position p with located mass w_p: the field u projected on the span of p\'s free-'
+        'orientation leadfield (mean over the ensemble\'s head models, average-referenced), normalised and signed to '
+        'agree with u. A region\'s field is the w-weighted sum of its positions\' fields, normalised.',
+        priors=('prior.head_ensemble_pa_phase2', 'located mass from locate.field_model_map',
+                'region labels of the location space'),
+        validity='bayes-sl L3 (reports/2026-11-05_l3.md) and the FORGE field column of the real-data 2 x 2.',
+        implementation='source_localization.locate.field_model:region_fields', tests='tests/test_field_locate.py',
+        reference='bayes-sl scripts/l3_fields.py; docs/methods/FIELD_LOCATION.md'),
+    'field.region_power_db': ModelSpec(
+        'field.region_power_db', 1, 'a subject\'s band power along a region\'s field',
+        'y = 10 log10(g\' C g) for a region field g and the subject\'s band cross-spectral matrix C (average-'
+        'referenced, not trace-normalised), in dB.',
+        priors=('band of the cross-spectral matrix (bayes-sl L3: 30-55 Hz)',),
+        validity='Reproduces bayes-sl L3\'s per-subject tables to 3e-14 dB (field-method plan, F5).',
+        implementation='source_localization.locate.field_model:region_power_db', tests='tests/test_field_locate.py',
+        reference='bayes-sl scripts/l3_fields.py; docs/methods/FIELD_LOCATION.md'),
     'field.model_filter_pair': ModelSpec(
         'field.model_filter_pair', 1, 'the electrode field of a located mirror pair, as a spatial filter',
         'Members at the grid positions nearest the located right member and its mirror image. Under each head model '

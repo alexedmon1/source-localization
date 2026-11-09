@@ -302,9 +302,33 @@ Leading eigenvector of the mean trace-normalised cross-spectral density.
 
 | id | version | what it is |
 |---|---|---|
+| `field.region_field` | 1 | a located region's own electrode field |
+| `field.region_power_db` | 1 | a subject's band power along a region's field |
 | `field.model_filter_pair` | 1 | the electrode field of a located mirror pair, as a spatial filter |
 | `field.project_inner` | 1 | each field separately: the inner product with the recording |
 | `field.project_joint` | 1 | all selected fields at once, by least squares |
+
+### `field.region_field` (version 1)
+
+A located region's own electrode field.
+
+- **Model:** For each located position p with located mass w_p: the field u projected on the span of p's free-orientation leadfield (mean over the ensemble's head models, average-referenced), normalised and signed to agree with u. A region's field is the w-weighted sum of its positions' fields, normalised.
+- **Values:** `prior.head_ensemble_pa_phase2`, located mass from locate.field_model_map, region labels of the location space
+- **Validity:** bayes-sl L3 (reports/2026-11-05_l3.md) and the FORGE field column of the real-data 2 x 2.
+- **Implementation:** `source_localization.locate.field_model:region_fields`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** bayes-sl scripts/l3_fields.py; docs/methods/FIELD_LOCATION.md
+
+### `field.region_power_db` (version 1)
+
+A subject's band power along a region's field.
+
+- **Model:** y = 10 log10(g' C g) for a region field g and the subject's band cross-spectral matrix C (average-referenced, not trace-normalised), in dB.
+- **Values:** band of the cross-spectral matrix (bayes-sl L3: 30-55 Hz)
+- **Validity:** Reproduces bayes-sl L3's per-subject tables to 3e-14 dB (field-method plan, F5).
+- **Implementation:** `source_localization.locate.field_model:region_power_db`
+- **Tests:** `tests/test_field_locate.py`
+- **Reference:** bayes-sl scripts/l3_fields.py; docs/methods/FIELD_LOCATION.md
 
 ### `field.model_filter_pair` (version 1)
 

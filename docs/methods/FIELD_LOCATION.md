@@ -133,3 +133,29 @@ Calibration covers single-source truths; mirror-pair coverage should be checked 
 **Check (2026-11-09).** Applied to bayes-sl tb11's stored scores (7,200 maps per setting), the selection chooses the
 catalogued settings again: volumetric T 1.5, blur 0.25 mm (90% coverage 88-89% on validation), surface T 2.5, no blur
 (84-91%) (bayes-sl `scripts/f4c_check_calibration.py`).
+
+## Each located region's field, and each subject's value along it
+
+After the field model has located a sample's field (the located mass per position and the pooled field u), each
+region with located mass gets its own electrode field (`field.region_field`): u projected on the span of each located
+position's leadfield (mean over head models, average-referenced), weighted by located mass within the region and
+normalised. Each subject's band power along it is `field.region_power_db`, 10 log10(g′ C g) in dB, with C the
+subject's average-referenced cross-spectral matrix. The table (one row per region and subject, with the region's
+located mass as `p_source`) is what source-analytics' Bayesian engine reads with no ROI, one outcome per region.
+
+```python
+from source_localization.locate.field_model import region_fields, region_value_table, write_region_values
+fields = region_fields(sp, u, located_idx, located_mass, region_of_position)
+write_region_values("values.csv", region_value_table(fields, csd_by_subject), {"space": sp.provenance()})
+```
+
+```bash
+source-localization field region-values --run-dir RUN --map map.npz --csd csd.npz --out values.csv
+#   map.npz: idx, mass, u     csd.npz: subject, csd (subjects x channels x channels)
+```
+
+`values.csv.json` records the catalogue ids and versions and the location space.
+
+**Check (2026-11-09; bayes-sl `scripts/f5_check_region_values.py`).** From L3's stored maps, the library reproduces
+bayes-sl L3's per-subject tables: the FORGE real recordings in full (`y_forge_real.csv`, 700 rows; also through the
+command line) and three benchmark cohorts at every group size (`y_v1.csv`, 3,664 rows), to 3e-14 dB.
