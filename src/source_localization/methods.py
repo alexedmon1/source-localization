@@ -30,6 +30,22 @@ class Method(NamedTuple):
     caveat: str = ""
 
 
+# --- What a run produces --------------------------------------------------
+
+PIPELINE_MODES: Dict[str, Method] = {
+    'source': Method(
+        'source', 'source localization: head model, inverse, ROI series',
+        'The pipeline\'s steps 1-7 (electrode registration, EEG, BEM, source space, forward, inverse, ROI '
+        'extraction).', default=True),
+    'field': Method(
+        'field', 'projection onto a frozen field template: one virtual channel per field',
+        'Step project only (pipeline.mode: field; field.template). No head model is involved in the measurement; '
+        'where a field comes from is answered by locating it (source_localization.locate). Output in the layout '
+        'source-analytics reads, with field_run.json marking it as a field run. See docs/methods/FIELD_TEMPLATES.md.',
+        caveat='Not comparable with source runs: a field series is a different readout of the same recording.'),
+}
+
+
 # --- Head models -----------------------------------------------------------
 
 BEM_TYPES: Dict[str, Method] = {
@@ -437,6 +453,31 @@ FIELD_DEFINITIONS: Dict[str, ModelSpec] = {
         reference='surface-evoked method_crossover.FieldModel.decompose (rest); bayes-sl reports/2026-11-04_l3_plan.md'),
 }
 
+_FP = 'source_localization.field.project'
+
+FIELD_PROJECTIONS: Dict[str, ModelSpec] = {
+    'field.project_inner': ModelSpec(
+        'field.project_inner', 1, 'each field separately: the inner product with the recording',
+        'Epochs average-referenced over the template\'s channels, picked by name in the template\'s order; virtual '
+        'channel s_k(t) = u_k . x(t) for each field u_k. Residual: x - P x with P the orthogonal projector onto the '
+        'span of the selected fields, stored as its trial average.',
+        priors=('fields: all in the template by default', 'residual of: the projected fields by default'),
+        validity='Reproduces surface-evoked\'s per-recording field series (rerun070_fields.py) for the Sentinel '
+                 'held-out roster (field-method plan, F3).',
+        implementation=f'{_FP}:project', tests='tests/test_field.py',
+        reference='docs/methods/FIELD_TEMPLATES.md; surface-evoked troubleshooting log 70',
+        caveat='Overlapping fields share signal: each series also carries what it shares with the others '
+               '(Sentinel chirp_D and assr40_D are not orthogonal).'),
+    'field.project_joint': ModelSpec(
+        'field.project_joint', 1, 'all selected fields at once, by least squares',
+        'As field.project_inner, but the series are the least-squares coefficients of the selected fields jointly: '
+        's(t) = (M M^T)^-1 M x(t). Equal to the inner projection when the fields are orthogonal. Same residual.',
+        priors=('fields: all in the template by default',),
+        validity='Not yet used in a study.',
+        implementation=f'{_FP}:project', tests='tests/test_field.py',
+        reference='docs/methods/FIELD_TEMPLATES.md'),
+}
+
 #: The catalogue's sections, in the order the generated page lists them.
 CATALOGUE: Dict[str, Dict[str, ModelSpec]] = {
     'Location posteriors': LOCATION_POSTERIORS,
@@ -444,6 +485,7 @@ CATALOGUE: Dict[str, Dict[str, ModelSpec]] = {
     'Map calibrations': MAP_CALIBRATIONS,
     'Noise whitening': WHITENERS,
     'Field definitions': FIELD_DEFINITIONS,
+    'Field projections': FIELD_PROJECTIONS,
 }
 
 

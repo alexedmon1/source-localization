@@ -259,3 +259,33 @@ Leading eigenvector of the mean trace-normalised cross-spectral density.
 - **Implementation:** `source_localization.field.define:csd_leading_pattern`
 - **Tests:** `tests/test_field.py`
 - **Reference:** surface-evoked method_crossover.FieldModel.decompose (rest); bayes-sl reports/2026-11-04_l3_plan.md
+
+## Field projections
+
+| id | version | what it is |
+|---|---|---|
+| `field.project_inner` | 1 | each field separately: the inner product with the recording |
+| `field.project_joint` | 1 | all selected fields at once, by least squares |
+
+### `field.project_inner` (version 1)
+
+Each field separately: the inner product with the recording.
+
+- **Model:** Epochs average-referenced over the template's channels, picked by name in the template's order; virtual channel s_k(t) = u_k . x(t) for each field u_k. Residual: x - P x with P the orthogonal projector onto the span of the selected fields, stored as its trial average.
+- **Values:** fields: all in the template by default, residual of: the projected fields by default
+- **Validity:** Reproduces surface-evoked's per-recording field series (rerun070_fields.py) for the Sentinel held-out roster (field-method plan, F3).
+- **Caveat:** Overlapping fields share signal: each series also carries what it shares with the others (Sentinel chirp_D and assr40_D are not orthogonal).
+- **Implementation:** `source_localization.field.project:project`
+- **Tests:** `tests/test_field.py`
+- **Reference:** docs/methods/FIELD_TEMPLATES.md; surface-evoked troubleshooting log 70
+
+### `field.project_joint` (version 1)
+
+All selected fields at once, by least squares.
+
+- **Model:** As field.project_inner, but the series are the least-squares coefficients of the selected fields jointly: s(t) = (M M^T)^-1 M x(t). Equal to the inner projection when the fields are orthogonal. Same residual.
+- **Values:** fields: all in the template by default
+- **Validity:** Not yet used in a study.
+- **Implementation:** `source_localization.field.project:project`
+- **Tests:** `tests/test_field.py`
+- **Reference:** docs/methods/FIELD_TEMPLATES.md

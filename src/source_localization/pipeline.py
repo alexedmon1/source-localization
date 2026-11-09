@@ -220,6 +220,9 @@ class Pipeline:
 
         self._write_resolved_config(output_path)
 
+        if (self.config['pipeline'].get('mode', 'source') or 'source') == 'field':
+            return self._run_field(output_path)
+
         print("="*80)
         print(f"SOURCE LOCALIZATION PIPELINE: {self.config['pipeline']['name']}")
         print("="*80)
@@ -308,6 +311,18 @@ class Pipeline:
         # Generate HTML report (always)
         self._generate_html_report(output_path)
 
+        return self.step_outputs
+
+    def _run_field(self, output_path: Path) -> Dict[str, Any]:
+        """Field mode: the project step only (steps/field_project.py); no head model, no report."""
+        from .steps import field_project
+        print("="*80)
+        print(f"FIELD PROJECTION: {self.config['pipeline'].get('name', 'field')}")
+        print("="*80)
+        print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Output: {output_path}")
+        self.step_outputs['field_project'] = field_project.run(self.config, {})
+        print("FIELD PROJECTION COMPLETE")
         return self.step_outputs
 
     def run_spectral_analysis(self) -> Dict[str, Any]:

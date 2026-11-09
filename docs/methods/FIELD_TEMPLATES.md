@@ -79,6 +79,56 @@ and **refuses to overwrite** an existing file. `load` reads and validates a temp
 sign rules are read from the `sign_conventions` text ("… (E3 + E28) positive"); `definitions` is empty; their
 provenance reports `schema: null`. Nothing is written back to them.
 
+## Projecting recordings (the field mode)
+
+Each recording is reduced to one **virtual channel** per field. The epochs are average-referenced over the
+template's channels and picked by name in the template's order (the file's channel order does not matter; a missing
+channel raises). Two catalogued projections:
+
+| id | what it computes |
+|---|---|
+| `field.project_inner` (default) | each field separately: s_k(t) = u_k · x(t). The field method's readout since surface-evoked log 70 |
+| `field.project_joint` | all selected fields at once by least squares: s(t) = (M Mᵀ)⁻¹ M x(t). Equals the inner projection for orthogonal fields |
+
+Overlapping fields share signal: with the inner projection each series also carries what its field shares with the
+others (Sentinel's `chirp_D` and `assr40_D` are not orthogonal).
+
+The **residual** is what the selected fields do not capture, x − P x with P the orthogonal projector onto their span.
+It is stored as its **trial average** (decided 2026-11-09), so what the fields miss can still be located or tested.
+
+**Command line:**
+
+```bash
+source-localization field show templates/sentinel_fields_v1.json
+source-localization field project --template templates/sentinel_fields_v1.json \
+    --roster recordings.csv --out localization/sentinel_fields_v1      # roster columns: id, path
+source-localization field project --template T.json --eeg a.set b.set --out OUT --maps chirp_D chirp_U2
+```
+
+**In a pipeline config** (`pipeline.mode: field`; no head model sections needed):
+
+```yaml
+pipeline: {name: sentinel_fields, mode: field}
+field:
+  template: templates/sentinel_fields_v1.json
+  template_sha256: b141891da92765a4dbe351e886302188308b8a6560d67b1fa6b2db3a6c0d98a9   # optional guard
+  maps: [chirp_D, chirp_U2]          # optional; default every map
+  method: inner                      # or joint
+```
+
+**Output** (per recording, the layout source-analytics reads for ROI series):
+
+| file | content |
+|---|---|
+| `data/step6_roi_timeseries_signed.pkl` | {field: 1-D series, epochs concatenated} |
+| `data/roi_timeseries_signed.set` | MAT file with `srate` |
+| `data/field_residual_average.npz` | residual trial average (channels × times), channel names, times, which fields it excludes |
+| `data/field_run.json` | `readout_mode: field`; the template's name, version, sha256 and definition ids; the projection's id and version; maps; reference; source file and its sha256; epochs, samples, rate, tmin; package version |
+
+**Check (2026-11-09).** For all 192 recordings of surface-evoked's held-out roster (Sentinel D1pre, groups 1-6;
+chirp, 40 Hz and 80 Hz ASSR), the library's series equal the study's (`rerun070_fields.py`) to a relative 6e-16
+(bayes-sl `scripts/f3_check_projection.py`).
+
 ## What a template does not carry over
 
 - **Another array or channel order** needs its own template: the maps follow the channel order of the defining data.

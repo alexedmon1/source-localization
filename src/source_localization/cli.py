@@ -10,6 +10,7 @@ from .config import Config, ATLAS_DEFINITIONS
 from .methods import (
     BEM_TYPES,
     INVERSE_METHODS,
+    PIPELINE_MODES,
     SAMPLING_MODES,
     SOURCE_SPACES,
     choices,
@@ -678,6 +679,7 @@ def _run_list_command(args):
         _print_method_group('Source spaces (pipeline.source_type)', SOURCE_SPACES)
         _print_method_group('Source sampling (--source-sampling)', SAMPLING_MODES)
         _print_method_group('Inverse methods (--method)', INVERSE_METHODS)
+        _print_method_group('Pipeline modes (pipeline.mode)', PIPELINE_MODES)
     if 'atlases' in want:
         _print_atlases()
     if 'catalogue' in want:
@@ -744,6 +746,8 @@ For backwards compatibility, you can also run:
     _create_list_parser(subparsers)
     _create_validate_parser(subparsers)
     _create_study_parser(subparsers)
+    from .field.cli import create_parser as _create_field_parser
+    _create_field_parser(subparsers)
 
     # Parse and execute
     args = parser.parse_args()
@@ -764,6 +768,10 @@ For backwards compatibility, you can also run:
 
     elif args.command == 'study':
         return _run_study_command(args)
+
+    elif args.command == 'field':
+        from .field.cli import run as _run_field_command
+        return _run_field_command(args)
 
     return 0
 

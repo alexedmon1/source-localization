@@ -1071,6 +1071,11 @@ Unreleased (branch `feat/field-mode`; the field method, bayes-sl `reports/2026-1
   schema load unchanged) and field definitions from group data (`field.response_svd`, `.phase_aligned`, `.phase_free`,
   `.csd_leading`). Re-defining surface-evoked's frozen Sentinel fields from their defining data reproduces all four
   exactly. See [docs/methods/FIELD_TEMPLATES.md](docs/methods/FIELD_TEMPLATES.md)
+- **Field mode** (phase F3): `pipeline.mode: field` and `source-localization field project` project epoched
+  recordings onto a frozen template (`field.project_inner`, the default, or `field.project_joint`), writing one
+  virtual channel per field in the layout source-analytics reads, the residual's trial average, and `field_run.json`
+  (template sha256, projection id and version). `field show` validates a template. Source mode is unchanged. For all
+  192 held-out Sentinel recordings the series equal surface-evoked's to a relative 6e-16
 
 Notable changes in 0.7.0:
 
