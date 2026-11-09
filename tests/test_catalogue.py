@@ -70,8 +70,10 @@ def test_named_test_files_exist(m):
 
 
 def test_calibrations_state_their_domain():
+    """Every measured calibration setting names its domain (calibration.none has none; calibration.procedure is how
+    settings are measured, not a setting)."""
     for m in M.MAP_CALIBRATIONS.values():
-        if m.id != 'calibration.none':
+        if m.id not in ('calibration.none', 'calibration.procedure'):
             assert 'MEA30' in m.validity, m.id
 
 
