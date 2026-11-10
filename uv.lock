@@ -3155,7 +3155,7 @@ wheels = [
 
 [[package]]
 name = "source-localization"
-version = "0.7.0"
+version = "0.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "eeglabio" },

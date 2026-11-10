@@ -1062,6 +1062,14 @@ Notable changes in 0.8.1 (2026-11-10):
   rostrally. Names and descriptions are swapped in the mappings; IDs and voxels are unchanged.
   **Outputs written before 0.8.1 name the opposite half.** `tests/test_atlas_registry.py` pins the
   direction (`ATLAS_PERENS_ANTWERP_REVIEW.md` §1a).
+- **Bundled atlases now ship in the wheel.** `data/atlas/*` did not recurse, so a non-editable install
+  had no Allen files at all. `tests/test_package_data.py` checks every file under `data/atlas`.
+- **Head-model ensemble and noise whitening** (`validation/head_ensemble.py`, `validation/whitening.py`),
+  ported from probability-atlas.
+- **Pool workers cap their BLAS/OpenMP threads** (`utils/parallel.py`; `threadpoolctl` is now a declared
+  dependency). n workers on n cores used to run about n² threads. The last bits of a float result can change.
+- **Canonical electrode regions** for the 30-site array in `data/electrodes/mouse_array_regions.yaml`
+  (Left/Right Frontal, Medial, Posterior), checked against the coordinates.
 
 Notable changes in 0.8.0 (2026-11-09; the field method, bayes-sl `reports/2026-11-09_field_method_library_plan.md`).
 No existing output changes: source mode is untouched, and every new step reproduces the study code it replaces:
