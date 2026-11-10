@@ -186,7 +186,7 @@ def test_roi_test_points_are_inside_their_own_roi(placement, n_per):
     """Every generated test point must lie inside the ROI it is scored against.
 
     The geometric centroid of a non-convex parcel can fall outside it. In
-    Allen-32 that affects 5 of 32 ROIs (Hippocampus_Post_L/R land in thalamus;
+    Allen-32 that affects 5 of 32 ROIs (Hippocampus_Ant_L/R land in thalamus;
     Lateral_Cortex_L/R and Cerebellum_L land in unlabeled tissue), which scored
     Lateral_Cortex at 0.00 recall AND 0.00 precision -- a test-design artifact.
     load_atlas_roi_test_points() asserts the guarantee internally; this pins it.
@@ -231,7 +231,7 @@ def test_centroid_outside_roi_is_detected_and_reported():
         f"re-verify which parcels are affected before updating this number."
     )
     assert meta["centroid_outside_roi_atlas"] == [8, 14, 15, 24, 30], (
-        "affected parcels are Hippocampus_Post_L/R, Lateral_Cortex_L/R and "
+        "affected parcels are Hippocampus_Ant_L/R, Lateral_Cortex_L/R and "
         f"Cerebellum_L; got {meta['centroid_outside_roi_atlas']}"
     )
     assert meta["n_rois_in_atlas"] == 32

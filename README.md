@@ -2,7 +2,7 @@
 
 **Created:** 2025-11-26
 **Last Updated:** 2026-11-09
-**Version:** 0.8.0
+**Version:** 0.8.1
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -1046,11 +1046,19 @@ source_localization/
 
 ## History
 
-The package version is `0.8.0`. Earlier revisions of this README carried a
+The package version is `0.8.1`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
+
+Notable changes in 0.8.1 (2026-11-10):
+
+- **Hippocampus_Ant / Hippocampus_Post names corrected** in allen32 (IDs 7/23 vs 8/24) and allen26
+  (4/14 vs 5/15). The split put "Ant" at Y < split as if y grew caudally; in this volume it grows
+  rostrally. Names and descriptions are swapped in the mappings; IDs and voxels are unchanged.
+  **Outputs written before 0.8.1 name the opposite half.** `tests/test_atlas_registry.py` pins the
+  direction (`ATLAS_PERENS_ANTWERP_REVIEW.md` §1a).
 
 Notable changes in 0.8.0 (2026-11-09; the field method, bayes-sl `reports/2026-11-09_field_method_library_plan.md`).
 No existing output changes: source mode is untouched, and every new step reproduces the study code it replaces:

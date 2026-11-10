@@ -141,8 +141,9 @@ def test_merge_bilateral_is_off_by_default():
 def _pool_with_one_rare_parcel(n_pool=400, n_chan=30, n_parcels=6, n_rare=3):
     """A pool where one parcel holds so few sources that most draws miss it.
 
-    This is the shape of the deployed surface pool, where Hippocampus_Ant_R held
-    a handful of the 7,076 sources and entered 1 of 100 draws.
+    This is the shape of the deployed surface pool, where Hippocampus_Post_R
+    (Hippocampus_Ant_R before 0.8.1) held a handful of the 7,076 sources and
+    entered 1 of 100 draws.
 
     The rare sources sit at the *centre* of the cloud, not at its edge. Draws
     come from farthest-point sampling, which favours extremes, so a rare parcel

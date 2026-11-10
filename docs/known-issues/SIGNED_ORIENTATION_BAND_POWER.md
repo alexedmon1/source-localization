@@ -12,10 +12,10 @@ cost.
 
 Filed: 2026-10-21, from bayes-sl's end-to-end leakage check (EE2, `reports/2026-10-19_end_to_end_plan.md`).
 
-**ROI names:** in the bundled allen26 atlas that FORGE's run uses, Hippocampus_Ant and Hippocampus_Post are spatially
-swapped (`ATLAS_PERENS_ANTWERP_REVIEW.md` §1a). The names in this note are the atlas's: "Hippocampus_Ant_R" is the
-caudal right hippocampus and "Hippocampus_Post_R" the rostral one. Numbers are unaffected; the labels are not yet
-fixed.
+**ROI names:** this note was written against the allen26 names before 0.8.1, in which Hippocampus_Ant and
+Hippocampus_Post were spatially swapped (`ATLAS_PERENS_ANTWERP_REVIEW.md` §1a). The names below are the old ones:
+"Hippocampus_Ant_R" here is the caudal right hippocampus (named Hippocampus_Post_R from 0.8.1) and "Hippocampus_Post_R"
+the rostral one (Hippocampus_Ant_R from 0.8.1). Numbers are unaffected. The label IDs did not change.
 
 **Summary.**
 - In simulation, a planted band-limited source is suppressed 15-25 dB until it wins its source's broadband variance.

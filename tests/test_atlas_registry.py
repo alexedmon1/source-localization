@@ -250,3 +250,54 @@ def test_sources_spread_across_rois_under_every_atlas():
         assert populated > EXPECTED_PARCELS[name] // 2, (
             f"{name}: only {populated}/{EXPECTED_PARCELS[name]} ROIs received "
             f"any of 200 spread-out sources")
+
+
+def _mean_y_by_name(name):
+    """Mean voxel y of every parcel in an atlas, keyed by its mapped name."""
+    import json
+    nib = pytest.importorskip('nibabel')
+    base = _package_dir()
+    entry = ATLAS_DEFINITIONS[name]['inputs']
+    labels = np.asarray(nib.load(str(base / entry['brain_labels'])).dataobj).astype(int)
+    rois = json.loads((base / entry['roi_mapping']).read_text())['rois']
+    out = {}
+    for key, roi in rois.items():
+        if int(key) == 0:
+            continue
+        ys = np.nonzero(labels == int(key))[1]
+        out[roi['name']] = ys.mean()
+    return out
+
+
+@pytest.mark.parametrize('name,suffixes', [('allen32', ('_L', '_R')),
+                                           ('allen26', ('_L', '_R'))])
+def test_hippocampus_ant_is_rostral_of_post(name, suffixes):
+    """Hippocampus_Ant must lie rostral of Hippocampus_Post.
+
+    Up to 0.8.0 the two names were swapped: the split put "Ant" at Y < split,
+    as if y increased caudally, but y increases rostrally in this volume.
+    The axis is checked here too (olfactory bulb rostral of cerebellum), so a
+    flip of the volume cannot make the main check pass by accident.
+    """
+    y = _mean_y_by_name(name)
+    ob = [v for k, v in y.items() if k.startswith('Olfactory_Bulb')]
+    cb = [v for k, v in y.items() if k.startswith('Cerebellum')]
+    assert min(ob) > max(cb), "y no longer increases rostrally"
+    for s in suffixes:
+        assert y[f'Hippocampus_Ant{s}'] > y[f'Hippocampus_Post{s}']
+
+
+def test_allen26_label_table_matches_its_mapping():
+    """allen26_labels.txt (ITK-SNAP table) must name each ID as the mapping does."""
+    import json
+    import re
+    base = _package_dir() / 'data' / 'atlas' / 'allen'
+    rois = json.loads((base / 'roi_mapping_allen26.json').read_text())['rois']
+    table = {}
+    for line in (base / 'allen26_labels.txt').read_text().splitlines():
+        m = re.match(r'\s*(\d+)\s.*"([^"]+)"\s*$', line)
+        if m:
+            table[m.group(1)] = m.group(2)
+    for key, roi in rois.items():
+        if key in table:
+            assert table[key] == roi['name'], key

@@ -410,8 +410,8 @@ def load_atlas_roi_test_points(
     Measured on Allen-32 (voxel size 0.203 x 0.080 x 0.200 mm), 5 of 32 centroids
     land outside their own ROI:
 
-        Hippocampus_Post_L -> Thalamus_L       (0.23 mm from nearest in-ROI voxel)
-        Hippocampus_Post_R -> Thalamus_R       (0.21 mm)
+        Hippocampus_Ant_L -> Thalamus_L       (0.23 mm from nearest in-ROI voxel)
+        Hippocampus_Ant_R -> Thalamus_R       (0.21 mm)
         Lateral_Cortex_L   -> unlabeled        (0.16 mm)
         Lateral_Cortex_R   -> unlabeled        (0.29 mm)
         Cerebellum_L       -> unlabeled        (0.09 mm)
@@ -426,7 +426,7 @@ def load_atlas_roi_test_points(
     DIFFERENT structure while the trial is still scored against the original
     label. Consequences observed with centroid placement:
       * Lateral_Cortex_L/R scored recall 0.00 AND precision 0.00;
-      * Hippocampus_Post_R trials were "misattributed" to Thalamus_R 16/25 times
+      * Hippocampus_Ant_R trials were "misattributed" to Thalamus_R 16/25 times
         -- the inverse solution was right, the label was wrong.
 
     Parameters
@@ -468,12 +468,12 @@ def load_atlas_roi_test_points(
         label volumes) is equalised to 0.0% by setting each pair to
         max(n_L, n_R), and right positions are exact mirrors of left ones.
         The validation, however, drew its test points straight from
-        allen_labels.nii.gz, which is 8.5% L/R mismatched (Hippocampus_Post
+        allen_labels.nii.gz, which is 8.5% L/R mismatched (Hippocampus_Ant
         +18.8%, Frontal_Anterior +11.3%), while scoring them against the
         pipeline's symmetric `roi_assignments`. Asymmetric probes were therefore
         being tested against a symmetric source space, and the discrepancy was
         largest exactly where the labels disagree most -- which is why
-        Lateral_Cortex_L scored 0.00 and Hippocampus_Post_L stalled at 0.08 even
+        Lateral_Cortex_L scored 0.00 and Hippocampus_Ant_L stalled at 0.08 even
         after the placement fix.
 
         Note the mirrored right points are NOT guaranteed to fall inside the
@@ -495,7 +495,7 @@ def load_atlas_roi_test_points(
         - ``centroid_outside_roi_atlas`` / ``n_centroid_outside_atlas`` — every
           parcel in the label map whose centroid falls outside itself. **This is
           the atlas property**; for Allen-32 it is 5 (IDs 8, 14, 15, 24, 30 =
-          Hippocampus_Post_L/R, Lateral_Cortex_L/R, Cerebellum_L). Cite this one.
+          Hippocampus_Ant_L/R, Lateral_Cortex_L/R, Cerebellum_L). Cite this one.
         - ``centroid_outside_roi`` / ``n_centroid_outside`` — the same check
           restricted to the parcels this call actually places points in. With
           ``enforce_lr_symmetry=True`` the mirrored right-hemisphere ROIs are

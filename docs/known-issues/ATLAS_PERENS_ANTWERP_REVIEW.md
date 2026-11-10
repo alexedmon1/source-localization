@@ -1,7 +1,7 @@
 # Atlas review: Allen labels in Antwerp space, and a possible Perens-based head model
 
 **Date**: 2026-10-20
-**Status**: Two defects identified (not fixed here); a new atlas is available as an option to evaluate.
+**Status**: Two defects identified. 1a (hippocampus names) is fixed in 0.8.1; 1b and 1c are open. A new atlas is available as an option to evaluate.
 **Source**: built and measured in neurofaune (`feat/mouse-support`, commits d3ea8a3, ddb9927).
 The package and full numbers are in `/mnt/arborea/atlases/Antwerp/README.md` and
 `/mnt/arborea/atlases/Antwerp/comparison/`.
@@ -18,6 +18,11 @@ caudal half.
 `allen26_labels.nii.gz` inherits the swap (IDs 4/14 vs 5/15). Any result naming these parcels
 refers to the opposite half. Fix by swapping the names in the ROI mappings, not the voxels, so
 existing label IDs stay valid. Check `source-analytics` outputs that report them.
+
+**Fixed in 0.8.1** as described: names and descriptions swapped in `roi_mapping.json`,
+`roi_mapping_allen26.json` and `allen26_labels.txt`; IDs and voxels unchanged.
+`tests/test_atlas_registry.py::test_hippocampus_ant_is_rostral_of_post` pins it. Outputs written
+before 0.8.1 carry the old, swapped names.
 
 ### 1b. 19 non-existent CCFv3 structure IDs in `allen_annotation_in_antwerp.nii.gz`
 

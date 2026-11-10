@@ -678,7 +678,7 @@ class ValidationRunner:
             #   'centroid' legacy; the geometric centroid, which for non-convex
             #             parcels can lie OUTSIDE the ROI and then scores the
             #             trial against the wrong label (5/32 ROIs in Allen-32:
-            #             Hippocampus_Post_L/R -> Thalamus, Lateral_Cortex_L/R
+            #             Hippocampus_Ant_L/R -> Thalamus, Lateral_Cortex_L/R
             #             and Cerebellum_L -> unlabeled). See
             #             load_atlas_roi_test_points().
             roi_placement = val_config.get('roi_placement', 'medoid')

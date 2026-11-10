@@ -287,8 +287,9 @@ def test_no_source_carries_a_parcel_outside_the_build_categories():
 
     Decimation moves a vertex by a fraction of a voxel and it can land on a
     structure the surface was never built from. Carrying that id gives it a
-    first-class ROI time series downstream — a 1-vertex ``Hippocampus_Ant_R``
-    sat beside real parcels in every Monte Carlo surface table. Such vertices
+    first-class ROI time series downstream — a 1-vertex ``Hippocampus_Post_R``
+    (``Hippocampus_Ant_R`` before 0.8.1) sat beside real parcels in every
+    Monte Carlo surface table. Such vertices
     are set unlabelled, and the drift is still *reported* so X17 stays visible.
     """
     from source_localization.source_space import surface_anatomical

@@ -604,7 +604,7 @@
     },
     "7": {
       "id": 7,
-      "name": "Hippocampus_Ant_L",
+      "name": "Hippocampus_Post_L",
       "abbreviation": "A07",
       "color_hex": "00CED1",
       "color_rgb": [
@@ -654,12 +654,12 @@
         "Area prostriata",
         "Hippocampo-amygdalar transition area"
       ],
-      "description": "Hippocampal formation \u2014 dorsal/anterior pole (septal, Y < median): CA1, CA2, CA3, dentate gyrus, subiculum, prosubiculum \u2014 spatial/memory function",
+      "description": "Hippocampal formation \u2014 caudal/ventral pole (temporal; Y < split, and Y increases rostrally in this volume): CA1, CA2, CA3, dentate gyrus, subiculum, entorhinal-adjacent \u2014 stress/emotion function",
       "hpf_y_split_mm": 8.328125
     },
     "8": {
       "id": 8,
-      "name": "Hippocampus_Post_L",
+      "name": "Hippocampus_Ant_L",
       "abbreviation": "A08",
       "color_hex": "008B8B",
       "color_rgb": [
@@ -709,7 +709,7 @@
         "Area prostriata",
         "Hippocampo-amygdalar transition area"
       ],
-      "description": "Hippocampal formation \u2014 ventral/posterior pole (temporal, Y >= median): CA1, CA2, CA3, dentate gyrus, subiculum, entorhinal-adjacent \u2014 stress/emotion function",
+      "description": "Hippocampal formation \u2014 rostral/dorsal pole (septal; Y >= split, and Y increases rostrally in this volume): CA1, CA2, CA3, dentate gyrus, subiculum, prosubiculum \u2014 spatial/memory function",
       "hpf_y_split_mm": 8.328125
     },
     "9": {
@@ -2101,7 +2101,7 @@
     },
     "23": {
       "id": 23,
-      "name": "Hippocampus_Ant_R",
+      "name": "Hippocampus_Post_R",
       "abbreviation": "A23",
       "color_hex": "00CED1",
       "color_rgb": [
@@ -2151,12 +2151,12 @@
         "Area prostriata",
         "Hippocampo-amygdalar transition area"
       ],
-      "description": "Hippocampal formation \u2014 dorsal/anterior pole (septal, Y < median): CA1, CA2, CA3, dentate gyrus, subiculum, prosubiculum \u2014 spatial/memory function",
+      "description": "Hippocampal formation \u2014 caudal/ventral pole (temporal; Y < split, and Y increases rostrally in this volume): CA1, CA2, CA3, dentate gyrus, subiculum, entorhinal-adjacent \u2014 stress/emotion function",
       "hpf_y_split_mm": 8.328125
     },
     "24": {
       "id": 24,
-      "name": "Hippocampus_Post_R",
+      "name": "Hippocampus_Ant_R",
       "abbreviation": "A24",
       "color_hex": "008B8B",
       "color_rgb": [
@@ -2206,7 +2206,7 @@
         "Area prostriata",
         "Hippocampo-amygdalar transition area"
       ],
-      "description": "Hippocampal formation \u2014 ventral/posterior pole (temporal, Y >= median): CA1, CA2, CA3, dentate gyrus, subiculum, entorhinal-adjacent \u2014 stress/emotion function",
+      "description": "Hippocampal formation \u2014 rostral/dorsal pole (septal; Y >= split, and Y increases rostrally in this volume): CA1, CA2, CA3, dentate gyrus, subiculum, prosubiculum \u2014 spatial/memory function",
       "hpf_y_split_mm": 8.328125
     },
     "25": {

@@ -194,6 +194,13 @@ subcortical, hypothalamic, olfactory, cerebellum, brainstem). The tiers encode
 how well EEG can reach each parcel and are the natural stratifier for
 depth-dependent results.
 
+**Hippocampus_Ant / Hippocampus_Post were swapped before 0.8.1** (allen32 IDs
+7/23 vs 8/24, allen26 4/14 vs 5/15). The parcels were split on Y as if y grew
+caudally; it grows rostrally (olfactory bulb y≈200, cerebellum y≈66). 0.8.1
+swapped the names in the mappings and kept the IDs and voxels, so any output
+written earlier names the opposite half. `test_hippocampus_ant_is_rostral_of_post`
+pins it.
+
 ## Critical Implementation Details
 
 ### Atlas Voxel Size Scaling (CRITICAL)

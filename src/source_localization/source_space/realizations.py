@@ -233,9 +233,10 @@ def build_roi_operator(G_pool, positions_mm, labels, *, n_sources=DEFAULT_N_SOUR
     # largest row.
     #
     # Measured on the deployed allen32 chirp surface run (n=160, k=100):
-    # Hippocampus_Ant_R appeared in 1 of 100 draws against 83-100 for every
-    # other parcel, and its row norm was 2.6x the next largest -- enough to win
-    # the argmax for nearly every simulated source.
+    # Hippocampus_Post_R (id 23; Hippocampus_Ant_R before 0.8.1) appeared in
+    # 1 of 100 draws against 83-100 for every other parcel, and its row norm
+    # was 2.6x the next largest -- enough to win the argmax for nearly every
+    # simulated source.
     #
     # Dividing by k is the estimator the docstring describes: a mean over
     # placements, in which a placement that never sampled the parcel contributes

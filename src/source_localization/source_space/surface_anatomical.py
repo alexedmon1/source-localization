@@ -460,9 +460,9 @@ def build_hemispheres(spacing_mm=DEFAULT_SPACING_MM, iso_mm=DEFAULT_ISO_MM,
 
     # Decimation moves a vertex off the ribbon by a fraction of a voxel, and it
     # can land on a structure this surface was never built from — one vertex on
-    # Hippocampus_Ant_R at the 0.20 mm pool. Carrying that label promotes a
-    # whole phantom parcel: downstream ROI extraction sees the id and emits a
-    # first-class time series for it, so a 1-vertex hippocampus appeared beside
+    # Hippocampus_Post_R (Hippocampus_Ant_R before 0.8.1) at the 0.20 mm pool.
+    # Carrying that label promotes a whole phantom parcel: downstream ROI
+    # extraction sees the id and emits a first-class time series for it, so a 1-vertex hippocampus appeared beside
     # real parcels in every Monte Carlo surface table and on the scoring ballot.
     # Out-of-category vertices are set unlabelled rather than snapped to a
     # neighbour: declining to assign is not the proximity assignment retired in
@@ -547,7 +547,7 @@ def _cache_path(cache_dir, spacing_mm, iso_mm, close_holes=0,
 
     The cached arrays include `lh_parcel`/`rh_parcel`, which are *atlas label
     ids*. The same id means different structures in different atlases -- 14 is
-    Lateral_Cortex_L in Allen32 and Hippocampus_Ant_R in Allen26, and Allen32's
+    Lateral_Cortex_L in Allen32 and Hippocampus_Post_R in Allen26, and Allen32's
     30 and 31 do not exist in Allen26 at all. Keying the cache on geometry alone
     therefore silently mislabels every source when the atlas changes, and drops
     the sources whose ids the new atlas does not define (X41). Nothing raised;
