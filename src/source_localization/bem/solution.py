@@ -32,6 +32,30 @@ def mne_order(surfs):
     return [surfs[ids.index(int(i))] for i in MNE_ORDER]
 
 
+def check_nesting(ordered):
+    """Raise unless each surface lies wholly inside the one before it (MNE's own topology check).
+
+    ``mne_order`` trusts the ids. A model whose ids disagree with its geometry (caches written before 7c4ba64, which
+    carry ids [4, 3, 1] on inner-first surfaces, or a sphere built from descending radii) would sort into the wrong
+    order without this. ``mne.bem._check_surfaces`` is what ``mne.bem._surfaces_to_bem`` runs; that constructor is
+    not used here because its size guard rejects mouse-sized heads.
+    """
+    if len(ordered) != 3:
+        return
+    try:
+        with mne.utils.use_log_level("WARNING"):
+            mne.bem._check_surfaces(copy.deepcopy(ordered))
+    except RuntimeError as e:
+        ids = [int(s["id"]) for s in ordered]
+        raise ValueError(f"BEM surfaces are not nested in the order their ids give ({ids}, outermost first): {e}. "
+                         "A stale cache or mislabelled surfaces; rebuild the BEM.") from e
+
+
 def make_bem_solution(surfs, verbose=False):
-    """``mne.make_bem_solution`` on the surfaces in MNE's order. The caller's list and dicts are not modified."""
-    return mne.make_bem_solution(copy.deepcopy(mne_order(surfs)), verbose=verbose)
+    """``mne.make_bem_solution`` on the surfaces in MNE's order, after checking they nest in that order.
+
+    The caller's list and dicts are not modified.
+    """
+    ordered = copy.deepcopy(mne_order(surfs))
+    check_nesting(ordered)
+    return mne.make_bem_solution(ordered, verbose=verbose)

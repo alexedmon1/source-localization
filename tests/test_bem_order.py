@@ -5,7 +5,8 @@ MNE's solver assumes the outermost surface first; this package builds surfaces i
 - a three-shell numerical sphere of mouse size (brain 5.75 mm, skull +0.5 mm, scalp +0.3 mm, the preset's
   conductivities) solved through ``make_bem_solution`` matches the analytic sphere at ico-3: topography error
   (RDM, average reference) median under 0.03 and amplitude within 10%;
-- the same surfaces passed to MNE inner first do not (the fault this module fixes), so the test can fail.
+- the same surfaces passed to MNE inner first do not (the fault this module fixes), so the test can fail;
+- surfaces whose ids disagree with their nesting (stale [4, 3, 1] caches, descending sphere radii) are refused.
 """
 import numpy as np
 import pytest
@@ -63,3 +64,19 @@ def test_surface_bem_matches_analytic_sphere():
     assert [s["id"] for s in surfs][0] == MNE_ORDER[-1]               # the builder's own order is untouched
     rdm_bad, mag_bad = _rdm_mag(_gain(info, src, mne.make_bem_solution(surfs, verbose=False)), ref)
     assert rdm_bad > 0.5 or not 0.5 < mag_bad < 2, (rdm_bad, mag_bad)
+
+
+def test_ids_that_disagree_with_nesting_are_refused():
+    surfs, *_ = _setup()
+    stale = [dict(s) for s in surfs]
+    for s, i in zip(stale, MNE_ORDER):                                  # [4, 3, 1] on inner-first geometry
+        s["id"] = i
+    with pytest.raises(ValueError, match="not nested"):
+        make_bem_solution(stale)
+
+
+def test_descending_sphere_radii_are_refused():
+    from source_localization.bem.sphere import create_numerical_sphere_surfaces
+    surfs = create_numerical_sphere_surfaces(np.zeros(3), [6.55, 6.25, 5.75], SIG[::-1], n_vertices=642)
+    with pytest.raises(ValueError, match="not nested"):
+        make_bem_solution(surfs)
