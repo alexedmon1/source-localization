@@ -54,7 +54,8 @@ class Pool:
         from ...steps.monte_carlo_roi import _labels_for_pool
         D = Path(run_dir) / "data"
         cfg = yaml.safe_load((D / "config_resolved.yaml").read_text())["config"]
-        fwd = pickle.load(open(D / "step4_forward.pkl", "rb"))
+        from ...bem.solution import load_forward
+        fwd = load_forward(D / "step4_forward.pkl")
         src = pickle.load(open(D / "step3_source_space.pkl", "rb"))
         xyz = np.load(D / "step3_source_coords_mm.npy")
         if cfg["pipeline"]["source_type"] == "hybrid":

@@ -122,7 +122,7 @@ class DipolePosterior:
             cache_path = (Path(cache_dir)
                           / f'operator_{spacing_mm:g}mm.npz')
             if cache_path.exists():
-                obj = cls.load(cache_path)
+                obj = cls.load(cache_path, check=False)
                 if obj.provenance.get('signature') == signature:
                     if verbose:
                         print(f"  operator loaded from cache "
@@ -200,11 +200,20 @@ class DipolePosterior:
         return path
 
     @classmethod
-    def load(cls, path) -> 'DipolePosterior':
-        """Reload an operator written by :meth:`save`."""
+    def load(cls, path, check: bool = True) -> 'DipolePosterior':
+        """Reload an operator written by :meth:`save`.
+
+        An operator built from a pipeline run records its signature; one whose signature has no current BEM solver
+        was computed through the misordered BEM and is refused unless ``check=False``. Operators built some other way
+        (no signature) cannot be told apart and are returned as they are.
+        """
         z = np.load(Path(path), allow_pickle=False)
         obj = cls(z['leadfield'], z['positions_mm'], float(z['spacing_mm']))
         obj.provenance = json.loads(str(z['provenance']))
+        sig = obj.provenance.get('signature') if isinstance(obj.provenance, dict) else None
+        if check and isinstance(sig, dict) and sig.get('bem_solver') != SOLVER_TAG:
+            from ..bem.solution import FIX_NOTE, StaleForwardError
+            raise StaleForwardError(f"{path} was computed with BEM solver {sig.get('bem_solver')!r}. {FIX_NOTE}")
         if 'electrode_pos_mm' in z:
             obj.electrode_pos_mm = z['electrode_pos_mm']
             obj.channel_names = [str(c) for c in z['channel_names']]

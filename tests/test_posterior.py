@@ -104,7 +104,8 @@ def test_coverage_is_near_nominal(toy):
 # ---------------------------------------------------------------------------
 
 def test_save_load_round_trip_is_lossless(toy, tmp_path):
-    toy.provenance = {'signature': {'spacing_mm': 1.0}}
+    from source_localization.bem.solution import SOLVER_TAG
+    toy.provenance = {'signature': {'spacing_mm': 1.0, 'bem_solver': SOLVER_TAG}}
     toy.electrode_pos_mm = np.array([[0.0, 0.0, 9.0], [1.0, 0.0, 9.0]])
     toy.channel_names = ['E1', 'E2']
     toy.bem_surfaces_mm = [np.ones((4, 3)), 2 * np.ones((4, 3))]

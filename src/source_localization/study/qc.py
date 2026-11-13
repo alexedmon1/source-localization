@@ -138,8 +138,12 @@ def extract_subject_metrics(
 
     # --- Step 4: Forward solution ---
     try:
-        with open(data_dir / "step4_forward.pkl", "rb") as f:
-            fwd = pickle.load(f)
+        from ..bem.solution import StaleForwardError, load_forward
+        try:
+            fwd = load_forward(data_dir / "step4_forward.pkl")
+        except StaleForwardError as e:
+            logger.warning("%s: forward metrics not computed: %s", subject_id, e)
+            raise
         leadfield = fwd["sol"]["data"]
         metrics.forward_condition_number = float(np.linalg.cond(leadfield))
         col_norms = np.linalg.norm(leadfield, axis=0)

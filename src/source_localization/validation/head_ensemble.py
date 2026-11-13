@@ -32,7 +32,7 @@ from ..bem.solution import make_bem_solution as _solve_bem
 __all__ = ["EnsembleGeometry", "EnsembleSpec", "MEA30_ENSEMBLE", "ensemble_leadfields", "ccf_ids",
            "export_head_ensemble", "load_head_ensemble", "EXPORT_VERSION"]
 
-EXPORT_VERSION = 1
+EXPORT_VERSION = 2   # 2: leadfields solved outermost first (bem.solution); 1 and earlier are refused
 
 
 @dataclass(frozen=True)
@@ -224,12 +224,17 @@ def export_head_ensemble(run_dir, out_path, atlas: str = "allen26", spec: Ensemb
 
 
 def load_head_ensemble(path) -> dict:
-    """Read a head-model file back; ``meta`` is the parsed ``meta_json``. Refuses a newer export version."""
+    """Read a head-model file back; ``meta`` is the parsed ``meta_json``. Refuses a newer export version, and
+    versions before 2 (leadfields from the misordered BEM)."""
     with np.load(path) as z:
         out = {k: z[k] for k in z.files if k != "meta_json"}
         out["meta"] = json.loads(str(z["meta_json"]))
     if out["meta"]["export_version"] > EXPORT_VERSION:
         raise ValueError(f"{path} has export version {out['meta']['export_version']}; this code reads {EXPORT_VERSION}")
+    if out["meta"]["export_version"] < 2:
+        from ..bem.solution import FIX_NOTE, StaleForwardError
+        raise StaleForwardError(f"{path} has export version {out['meta']['export_version']}: its leadfields predate "
+                                f"the BEM-order fix. {FIX_NOTE} Re-export it.")
     return out
 
 

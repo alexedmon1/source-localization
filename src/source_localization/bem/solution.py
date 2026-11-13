@@ -59,3 +59,80 @@ def make_bem_solution(surfs, verbose=False):
     ordered = copy.deepcopy(mne_order(surfs))
     check_nesting(ordered)
     return mne.make_bem_solution(ordered, verbose=verbose)
+
+
+# ------------------------------------------------------------------ saved forward models
+#
+# A forward model saved before the order fix looks exactly like one saved after it, and several readers (and batch
+# runs that skip finished subjects) reuse saved ones. So every forward the pipeline makes carries the solver that
+# made it, in the object and in a sidecar next to step4_forward.pkl, and readers refuse a forward without one. Analytic
+# spheres were never affected by the order, but their old forwards carry no tag either and are refused the same way:
+# recomputing one takes seconds, and a reader cannot tell them apart.
+
+ANALYTIC_TAG = "analytic sphere (mne.make_sphere_model)"
+CURRENT_TAGS = (SOLVER_TAG, ANALYTIC_TAG)
+TAG_KEY = "source_localization_bem_solver"
+TAG_FILE = "step4_forward_solver.json"
+FIX_NOTE = ("Forward models made before source-localization b5de19f (2026-11-13) solved the surface BEM with its "
+            "surfaces inner first and are wrong by orders of magnitude; rerun the pipeline, into a new output "
+            "directory if the old results are to be kept.")
+
+
+class StaleForwardError(ValueError):
+    """A saved forward model (or something computed from one) with no record of a current BEM solver."""
+
+
+def tag_forward(fwd, tag):
+    """Record on ``fwd`` which solver made it; returns ``fwd``."""
+    if tag not in CURRENT_TAGS:
+        raise ValueError(f"unknown solver tag {tag!r}")
+    fwd[TAG_KEY] = tag
+    return fwd
+
+
+def check_forward(fwd, where="forward model"):
+    """Raise :class:`StaleForwardError` unless ``fwd`` carries a current solver tag; returns ``fwd``."""
+    tag = fwd.get(TAG_KEY) if hasattr(fwd, "get") else None
+    if tag not in CURRENT_TAGS:
+        raise StaleForwardError(f"{where} has no current BEM-solver tag ({tag!r}). {FIX_NOTE}")
+    return fwd
+
+
+def load_forward(path):
+    """Read a pickled forward model (``step4_forward.pkl``) and refuse it unless it carries a current solver tag."""
+    import pickle
+    from pathlib import Path
+    with open(Path(path), "rb") as f:
+        fwd = pickle.load(f)
+    return check_forward(fwd, where=str(path))
+
+
+def write_forward_tag(data_dir, tag, bem_type):
+    """Write the sidecar that says which solver made this run's forward (written even without intermediates)."""
+    import json
+    from pathlib import Path
+    from .. import __version__
+    d = Path(data_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / TAG_FILE).write_text(json.dumps({"bem_solver": tag, "bem_type": bem_type,
+                                          "source_localization_version": __version__}, indent=1))
+    return d / TAG_FILE
+
+
+def run_forward_is_current(data_dir):
+    """True if a run's data directory records a current solver (sidecar, else the pickled forward's own tag)."""
+    import json
+    from pathlib import Path
+    d = Path(data_dir)
+    if (d / TAG_FILE).exists():
+        try:
+            return json.loads((d / TAG_FILE).read_text()).get("bem_solver") in CURRENT_TAGS
+        except (OSError, ValueError):
+            return False
+    if (d / "step4_forward.pkl").exists():
+        try:
+            load_forward(d / "step4_forward.pkl")
+            return True
+        except StaleForwardError:
+            return False
+    return False

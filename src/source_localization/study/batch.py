@@ -126,6 +126,17 @@ def process_subject(
 
     # Check if already processed
     if skip_existing and (output_dir / "roi_timeseries" / "roi_timeseries_signed.set").exists():
+        from ..bem.solution import FIX_NOTE, run_forward_is_current
+        if not run_forward_is_current(output_dir / "pipeline" / "data"):
+            # Neither skip it as done nor overwrite it unasked: the old outputs may be wanted for comparison.
+            logger.error(f"Subject {subject_id}: existing outputs have no current BEM-solver tag")
+            return SubjectResult(
+                subject_id=subject_id,
+                success=False,
+                output_dir=output_dir,
+                error_message=(f"{output_dir} holds outputs with no current BEM-solver tag. {FIX_NOTE} "
+                               "Use a new output directory, or --force to overwrite these."),
+            )
         logger.info(f"Subject {subject_id}: already processed, skipping")
         return SubjectResult(
             subject_id=subject_id,

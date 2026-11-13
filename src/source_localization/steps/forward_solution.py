@@ -6,6 +6,7 @@ Compute forward solution (leadfield matrix) mapping sources to sensors.
 import mne
 import numpy as np
 from ..bem.solution import make_bem_solution as _solve_bem
+from ..bem.solution import ANALYTIC_TAG, SOLVER_TAG, tag_forward, write_forward_tag
 
 
 def run(config, previous_outputs):
@@ -102,6 +103,12 @@ def run(config, previous_outputs):
 
     else:
         raise ValueError(f"Unknown BEM type: {bem_type}")
+
+    # Which solver made this forward, so a saved one can be told from one made before the order fix.
+    solver_tag = ANALYTIC_TAG if (bem_type == 'sphere' and not is_numerical_sphere) else SOLVER_TAG
+    tag_forward(fwd, solver_tag)
+    from ..utils.io_utils import get_data_dir
+    write_forward_tag(get_data_dir(config), solver_tag, bem_type)
 
     # The data are average-referenced (eeg_data step), so the leadfield must be
     # too. MNE's EEG forward is not average-referenced: its channel mean is a

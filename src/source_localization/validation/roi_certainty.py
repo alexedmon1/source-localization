@@ -397,7 +397,8 @@ def sloreta_attributor(
     from ..steps.inverse_solution import apply_inverse_custom_sLORETA
 
     p = Path(pipeline_dir)
-    fwd = pickle.load(open(p / 'data' / 'step4_forward.pkl', 'rb'))
+    from ..bem.solution import load_forward
+    fwd = load_forward(p / 'data' / 'step4_forward.pkl')
     shell_coords = np.load(p / 'data' / 'step3_source_coords_mm.npy')
 
     # Assign each shell source to a parcel, aligned with the confusion matrix's
