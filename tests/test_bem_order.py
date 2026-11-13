@@ -5,7 +5,7 @@ MNE's solver assumes the outermost surface first; this package builds surfaces i
 - a three-shell numerical sphere of mouse size (brain 5.75 mm, skull +0.5 mm, scalp +0.3 mm, the preset's
   conductivities) solved through ``make_bem_solution`` matches the exact multi-shell series at ico-3: topography
   error (RDM, average reference) median under 0.03 and amplitude within 10%. The reference is the series, not
-  ``mne.make_sphere_model``: MNE's Berg-Scherg fit fails on this geometry for most last-bit changes in the radii
+  ``mne.make_sphere_model``: MNE's Berg-Scherg fit fails on this geometry for some last-bit changes in the radii (5-7%)
   (``bem.sphere.check_sphere_fit``), which is how one CI job got NaN leadfields;
 - the same surfaces passed to MNE inner first do not (the fault this module fixes), so the test can fail;
 - surfaces whose ids disagree with their nesting (stale [4, 3, 1] caches, descending sphere radii) are refused;

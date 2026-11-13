@@ -16,18 +16,19 @@ from mne.io.constants import FIFF
 def check_sphere_fit(model):
     """Refuse an analytic sphere whose Berg-Scherg fit failed.
 
-    ``mne.make_sphere_model`` fits three equivalent dipoles (``mu``, ``lambda``) to the multi-shell series. For thin
-    layers the fit can fail with no warning, leaving ``mu`` at its starting guess with zeros (``[0.5, 0, 0]``) and
-    ``lambda`` near +-1e16; the forward then divides by zero and every leadfield is NaN. It depends on the last bits
-    of the radii: on a 5.75 / 6.25 / 6.55 mm sphere at the preset conductivities about 60% of perturbations of 1e-6
-    fail (MNE 1.11 and 1.13). The package's own presets (ratios 0.87 / 0.92 / 1.0) did not fail in 300 draws.
+    ``mne.make_sphere_model`` fits three equivalent dipoles (``mu`` in [-1, 1], ``lambda``) to the multi-shell
+    series. The fit can fail with no warning: ``mu`` left at a step from its zero start (``[0.5, 0, 0]``), the linear
+    step degenerate (``lambda`` near +-1e16), and the forward divides by zero, so every leadfield is NaN. Which radii
+    fail depends on their last bits and on the numerical libraries. A fit is refused if any ``mu`` is zero or outside
+    [-1, 1], two coincide, or any ``lambda`` is non-finite or above 1e3 in size (good fits are of order 1).
     """
     mu = np.asarray(model.get('mu', []), float)
     lam = np.asarray(model.get('lambda', []), float)
     if not len(mu):
         return model
-    if not (np.all(np.isfinite(mu)) and np.all(np.isfinite(lam)) and np.all((mu > 0) & (mu <= 1))
-            and np.abs(lam).max() < 1e3):
+    gaps = np.abs(np.subtract.outer(mu, mu))[np.triu_indices(len(mu), 1)]
+    if not (np.all(np.isfinite(mu)) and np.all(np.isfinite(lam)) and np.all(np.abs(mu) <= 1)
+            and np.all(mu != 0) and (not len(gaps) or gaps.min() > 1e-9) and np.abs(lam).max() < 1e3):
         raise ValueError(
             f"MNE's Berg-Scherg fit for this sphere failed (mu={mu.tolist()}, lambda={lam.tolist()}); its leadfields "
             "would be NaN or meaningless. Use the numerical sphere (numerical: true) or change the radii slightly.")
