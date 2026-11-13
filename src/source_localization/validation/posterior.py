@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
+from ..bem.solution import SOLVER_TAG, make_bem_solution as _solve_bem
 
 __all__ = ['DipolePosterior']
 
@@ -142,7 +143,7 @@ class DipolePosterior:
                   f"{spacing_mm} mm spacing")
 
         dense_src = cls._as_source_space(src, positions_m)
-        solution = mne.make_bem_solution(bem['surfs'], verbose=False)
+        solution = _solve_bem(bem['surfs'], verbose=False)
         fwd = mne.make_forward_solution(info, trans=None, src=dense_src,
                                         bem=solution, eeg=True, meg=False,
                                         verbose=False)
@@ -231,6 +232,7 @@ class DipolePosterior:
             'inside_frac': float(inside_frac),
             'bem_bytes': (st.st_size if st else None),
             'bem_mtime': (int(st.st_mtime) if st else None),
+            'bem_solver': SOLVER_TAG,
         }
 
     def _check_geometry(self, verbose: bool = True) -> None:

@@ -26,6 +26,7 @@ import numpy as np
 from ..validation.posterior import DipolePosterior
 
 from .head_ensemble import HeadModel
+from ..bem.solution import make_bem_solution as _solve_bem
 
 __all__ = ["Geometry"]
 
@@ -73,7 +74,7 @@ class Geometry:
             return self._solutions[key]
         surfs = copy.deepcopy(self.bem["surfs"])
         surfs[self.skull]["sigma"] = self.skull_sigma * skull_factor
-        sol = mne.make_bem_solution(surfs, verbose=False)
+        sol = _solve_bem(surfs, verbose=False)
         self._solutions[key] = sol
         while len(self._solutions) > self._n_cached:
             self._solutions.popitem(last=False)

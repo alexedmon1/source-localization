@@ -244,8 +244,9 @@ def run(config, previous_outputs):
             # Caches written before the layer ids were corrected hold them in
             # the old [4, 3, 1] order, which sends `_bem_find_surface` to the
             # wrong surface. The metadata does not record ids, so the check has
-            # to read the model itself. Rebuilding is safe: the leadfield is
-            # bitwise identical either way, only the id lookup changes.
+            # to read the model itself. Rebuild: bem/solution.py orders the
+            # surfaces by id for MNE's solver, so stale ids would solve the
+            # wrong model (its nesting check refuses them).
             print("  ⚠️  Cached BEM has outdated layer ids, rebuilding")
         else:
             cached = candidate

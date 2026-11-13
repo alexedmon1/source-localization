@@ -5,6 +5,7 @@ Compute forward solution (leadfield matrix) mapping sources to sensors.
 
 import mne
 import numpy as np
+from ..bem.solution import make_bem_solution as _solve_bem
 
 
 def run(config, previous_outputs):
@@ -51,7 +52,7 @@ def run(config, previous_outputs):
             print(f"    Using NUMERICAL sphere BEM solution (boundary integral)")
 
             # Create BEM solution from sphere surfaces
-            bem_solution = mne.make_bem_solution(bem['surfs'], verbose=False)
+            bem_solution = _solve_bem(bem['surfs'], verbose=False)
 
             fwd = mne.make_forward_solution(
                 info,
@@ -85,7 +86,7 @@ def run(config, previous_outputs):
         print(f"    Computing numerical ellipsoid BEM solution")
 
         # Create BEM solution from ellipsoid surfaces
-        bem_solution = mne.make_bem_solution(bem['surfs'], verbose=False)
+        bem_solution = _solve_bem(bem['surfs'], verbose=False)
 
         fwd = mne.make_forward_solution(
             info,
