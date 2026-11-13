@@ -107,6 +107,17 @@ def phase9_spec() -> NetworkSpec:
         workers=1)
 
 
+# The Phase 9 and 10 references were built with the surfaces passed to MNE's solver inner first (before
+# bem/solution.py, 2026-11-13), a physically inconsistent model. Under the corrected solve no truth source's
+# nominal leadfield reproduces the stored pool (1000 of 1000 below r = 0.9999; median r 0.78; the corrected
+# leadfields 6-91x larger), so these fail until probability-atlas rebuilds the runs. Strict: they fail loudly
+# once the references are rebuilt and the marker should go.
+STALE_REFERENCES = pytest.mark.xfail(
+    raises=RuntimeError, strict=True,
+    reason="Phase 9/10 references built with the inner-first BEM solve (before 2026-11-13); rebuild them")
+
+
+@STALE_REFERENCES
 @pytest.mark.skipif(not all(p.exists() for p in NEEDED), reason="probability-atlas Phase 9 / FORGE files absent")
 def test_reproduces_probability_atlas_phase9_cells():
     nv = NetworkValidation(phase9_spec(), verbose=False)
@@ -139,6 +150,7 @@ def _phase10_axes(truth_nodes):
             "CD": {"Deep": ["Deep"], "cortex": surface}}
 
 
+@STALE_REFERENCES
 @pytest.mark.skipif(not (all(p.exists() for p in NEEDED) and (PA / "scratch/phase10/cells.csv").exists()),
                     reason="probability-atlas Phase 10 / FORGE files absent")
 def test_reproduces_probability_atlas_phase10_cells():
