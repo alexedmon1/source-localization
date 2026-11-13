@@ -13,6 +13,27 @@ from mne.surface import complete_surface_info, _get_ico_surface
 from mne.io.constants import FIFF
 
 
+def check_sphere_fit(model):
+    """Refuse an analytic sphere whose Berg-Scherg fit failed.
+
+    ``mne.make_sphere_model`` fits three equivalent dipoles (``mu``, ``lambda``) to the multi-shell series. For thin
+    layers the fit can fail with no warning, leaving ``mu`` at its starting guess with zeros (``[0.5, 0, 0]``) and
+    ``lambda`` near +-1e16; the forward then divides by zero and every leadfield is NaN. It depends on the last bits
+    of the radii: on a 5.75 / 6.25 / 6.55 mm sphere at the preset conductivities about 60% of perturbations of 1e-6
+    fail (MNE 1.11 and 1.13). The package's own presets (ratios 0.87 / 0.92 / 1.0) did not fail in 300 draws.
+    """
+    mu = np.asarray(model.get('mu', []), float)
+    lam = np.asarray(model.get('lambda', []), float)
+    if not len(mu):
+        return model
+    if not (np.all(np.isfinite(mu)) and np.all(np.isfinite(lam)) and np.all((mu > 0) & (mu <= 1))
+            and np.abs(lam).max() < 1e3):
+        raise ValueError(
+            f"MNE's Berg-Scherg fit for this sphere failed (mu={mu.tolist()}, lambda={lam.tolist()}); its leadfields "
+            "would be NaN or meaningless. Use the numerical sphere (numerical: true) or change the radii slightly.")
+    return model
+
+
 def create_numerical_sphere_surfaces(center_mm, radii_mm, conductivities, n_vertices=642):
     """
     Create triangulated sphere surfaces for numerical BEM.
@@ -319,6 +340,7 @@ def create_bem(config, previous_outputs):
             relative_radii=tuple(relative_radii_mne),  # Ratios for ALL layers (last should be 1.0)
             verbose=False
         )
+        check_sphere_fit(bem_model)
 
         print(f"  ✓ Created ANALYTICAL {n_layers}-layer spherical BEM model")
         print(f"    (Uses Berg-Scherg equivalent dipole approximation)")
