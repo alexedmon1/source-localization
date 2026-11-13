@@ -29,6 +29,7 @@ __all__ = ["HeadModel", "HeadModelPrior", "TruthForward", "draw_ensemble"]
 # HeadModel and HeadModelPrior live in locate.head_ensemble (field-method plan, phase F1): one definition for the
 # location posteriors and the validation regime.
 from ..locate.head_ensemble import HeadModel, HeadModelPrior  # noqa: E402
+from ..bem.solution import make_bem_solution as _solve_bem
 
 
 def draw_ensemble(prior: HeadModelPrior, n_draws: int, rng: np.random.Generator, include_nominal: bool = True) -> list:
@@ -78,7 +79,7 @@ class TruthForward:
             surfs = copy.deepcopy(self.bem["surfs"])
             skull = int(np.argmin([s["sigma"] for s in surfs]))
             surfs[skull]["sigma"] = float(surfs[skull]["sigma"]) * skull_factor
-            sol = mne.make_bem_solution(surfs, verbose=False)
+            sol = _solve_bem(surfs, verbose=False)
         else:
             layers = self.bem["layers"]
             sig = [float(l["sigma"]) for l in layers]

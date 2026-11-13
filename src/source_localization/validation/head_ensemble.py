@@ -27,6 +27,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from .head_models import HeadModel, HeadModelPrior, draw_ensemble
+from ..bem.solution import make_bem_solution as _solve_bem
 
 __all__ = ["EnsembleGeometry", "EnsembleSpec", "MEA30_ENSEMBLE", "ensemble_leadfields", "ccf_ids",
            "export_head_ensemble", "load_head_ensemble", "EXPORT_VERSION"]
@@ -107,7 +108,7 @@ class EnsembleGeometry:
             return self._solutions[key]
         surfs = copy.deepcopy(self.bem["surfs"])
         surfs[self.skull]["sigma"] = self.skull_sigma * skull_factor
-        sol = mne.make_bem_solution(surfs, verbose=False)
+        sol = _solve_bem(surfs, verbose=False)
         self._solutions[key] = sol
         while len(self._solutions) > self._n_cached:
             self._solutions.popitem(last=False)
