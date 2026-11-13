@@ -2,7 +2,7 @@
 
 A small fake study tree: three recordings, one with a session, one that failed,
 two localized by Monte Carlo with a collinear pair of parcels. The conformance
-tests need the optional ``results`` extra (neurobox-dev) and skip without it.
+tests need the optional ``results`` extra (Lumière) and skip without it.
 """
 from __future__ import annotations
 
@@ -70,8 +70,8 @@ def _rows(path: Path) -> list[dict]:
 
 
 def test_the_summary_conforms_and_names_every_recording(study):
-    pytest.importorskip("neurobox")
-    from neurobox import check
+    pytest.importorskip("lumiere")
+    from lumiere import check
 
     qc = study.root_dir / "qc"
     qc.mkdir()
@@ -111,7 +111,7 @@ def test_the_summary_conforms_and_names_every_recording(study):
 
 
 def test_qc_figures_are_listed(study):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
     qc = study.root_dir / "qc"
     (qc / "figures").mkdir(parents=True)
     fig = qc / "figures" / "02_forward_condition.png"
@@ -125,7 +125,7 @@ def test_qc_figures_are_listed(study):
 
 
 def test_without_the_extra_nothing_is_written(study, monkeypatch):
-    monkeypatch.setattr(rs, "neurobox", None)
+    monkeypatch.setattr(rs, "lumiere", None)
     qc = study.root_dir / "qc"
     qc.mkdir()
     assert rs.write(study, qc) is None
@@ -133,7 +133,7 @@ def test_without_the_extra_nothing_is_written(study, monkeypatch):
 
 
 def test_the_summary_never_raises(study, monkeypatch):
-    pytest.importorskip("neurobox")
+    pytest.importorskip("lumiere")
 
     def boom(*a, **k):
         raise RuntimeError("disk full")

@@ -6,7 +6,7 @@ for Monte Carlo source sampling -- which parcels the montage could not resolve.
 Each recording records that in its own folder (``config_resolved.yaml``,
 ``monte_carlo_report.json``, ``pipeline_report.html``); this gathers it into one
 study-level analysis folder, beside the QC report, in the format of
-neurobox-dev's results specification (schema 0.4): an ``analysis.json`` with
+Lumière's results specification (schema 0.4): an ``analysis.json`` with
 ``role: diagnostic`` and ``domain: localization``, two tables with column
 dictionaries, the QC figures, and ``provenance.json``.
 
@@ -14,7 +14,7 @@ dictionaries, the QC figures, and ``provenance.json``.
 its output folder and the paths of its report and figures -- so a reader joins
 on fields, never by parsing folder names such as ``sub-801_ses-01``.
 
-Optional: neurobox-dev is the ``results`` extra. Without it nothing is written;
+Optional: Lumière (``lumiere``) is the ``results`` extra. Without it nothing is written;
 a folder that does not conform is logged and never fails the QC.
 """
 
@@ -33,10 +33,10 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 try:                                               # the optional `results` extra
-    import neurobox
-    from neurobox.spec import default_run_id as _default_run_id
+    import lumiere
+    from lumiere.spec import default_run_id as _default_run_id
 except ImportError:                                # pragma: no cover - depends on install
-    neurobox = None
+    lumiere = None
 
 INSTALL_HINT = "install the optional extra: pip install 'source-localization[results]'"
 
@@ -101,7 +101,7 @@ METRIC_DOCS = {
 
 
 def available() -> bool:
-    return neurobox is not None
+    return lumiere is not None
 
 
 def _get(d: Any, path: tuple) -> Any:
@@ -321,7 +321,7 @@ def write(config: Any, qc_dir: Path, metrics_df: Any = None, outlier_flags: Opti
           warnings: Optional[List[str]] = None, plot_paths: Optional[List[Path]] = None,
           started: Optional[str] = None) -> Any:
     """Write the localization summary into ``qc_dir``; the checker's report, or None. Never raises."""
-    if neurobox is None:
+    if lumiere is None:
         logger.info("Localization summary not written: %s", INSTALL_HINT)
         return None
     try:
@@ -340,14 +340,14 @@ def _write(config, qc_dir, metrics_df, outlier_flags, qc_warnings, plot_paths, s
     recordings, parcels, recipes = got["recordings"], got["parcels"], got["recipes"]
     rec_cols = _recording_columns(recordings)
     _write_csv(qc_dir / RECORDINGS, list(rec_cols), recordings)
-    neurobox.write_columns(qc_dir / RECORDINGS, rec_cols)
+    lumiere.write_columns(qc_dir / RECORDINGS, rec_cols)
     tables = [{"path": RECORDINGS, "role": "other", "headline": True, "n_rows": len(recordings),
                "rows": "one recording of the study",
                "description": "every recording in the study config: how its localization went, where its "
                               "report and figures are, and its Monte Carlo health"}]
     if parcels:
         _write_csv(qc_dir / PARCELS, list(_parcel_columns()), parcels)
-        neurobox.write_columns(qc_dir / PARCELS, _parcel_columns())
+        lumiere.write_columns(qc_dir / PARCELS, _parcel_columns())
         tables.append({"path": PARCELS, "role": "descriptives", "n_rows": len(parcels),
                        "rows": "one atlas parcel, summarized over the recordings",
                        "description": "Monte Carlo coverage, gain and collinearity per parcel: which "
@@ -416,13 +416,13 @@ def _write(config, qc_dir, metrics_df, outlier_flags, qc_warnings, plot_paths, s
                              "atlas": getattr(config, "pipeline_atlas", None),
                              "overrides": getattr(config, "pipeline_overrides", None)},
                 "collinearity_threshold": COLLINEARITY_THRESHOLD, "coverage_threshold": COVERAGE_THRESHOLD}
-    prov = neurobox.provenance(
+    prov = lumiere.provenance(
         [{"Name": "source-localization", "Version": str(__version__)}], status="completed",
         start=started, end=datetime.now(timezone.utc).isoformat(timespec="seconds"), run_id=run_id,
         inputs=[{"path": str(Path(config.derivatives_dir)), "role": "the study's per-recording outputs"}],
         subjects={"n": len(localized), "groups": dict(sorted(groups.items()))},
         settings=json.loads(json.dumps(settings, default=str)))
-    report = neurobox.write_analysis(qc_dir, analysis, prov, strict=False)
+    report = lumiere.write_analysis(qc_dir, analysis, prov, strict=False)
     if report.ok:
         logger.info("Localization summary: %s conforms (%d warning(s))", qc_dir, len(report.warnings))
     else:

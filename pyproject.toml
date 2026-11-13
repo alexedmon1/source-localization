@@ -57,15 +57,16 @@ dev = [
     "black>=22.0",
     "ruff>=0.0.200",
 ]
-# The shared results specification (neurobox-dev): `study qc` also writes the
+# The shared results specification (Lumière, github.com/alexedmon1/lumiere; neurobox-dev
+# until 2026-11-10): `study qc` also writes the
 # study's localization summary (analysis.json, recordings.csv, parcel_coverage.csv).
-# neurobox-dev needs Python 3.10+; on 3.9 the extra installs nothing.
+# Lumière needs Python 3.10+; on 3.9 the extra installs nothing.
 results = [
-    "neurobox-dev @ git+https://github.com/alexedmon1/neurobox-dev@4333c6a4dcbf13a82d27c456a52aebdf1c7d559d ; python_version >= '3.10'",
+    "lumiere @ git+https://github.com/alexedmon1/lumiere@e5919ad58173132c505362862a99b6bb071e75f8 ; python_version >= '3.10'",
 ]
 all = [
     "mne-connectivity>=0.6.0",
-    "neurobox-dev @ git+https://github.com/alexedmon1/neurobox-dev@4333c6a4dcbf13a82d27c456a52aebdf1c7d559d ; python_version >= '3.10'",
+    "lumiere @ git+https://github.com/alexedmon1/lumiere@e5919ad58173132c505362862a99b6bb071e75f8 ; python_version >= '3.10'",
 ]
 
 [project.scripts]

@@ -431,7 +431,7 @@ output_dir/
 
 `study qc` (`study/qc.py: run_qc`) also writes the study's localization as a
 `role: diagnostic` analysis in `qc/` when the optional `results` extra
-(neurobox-dev, Python 3.10+) is installed: `analysis.json`, `recordings.csv`,
+(Lumière, Python 3.10+) is installed: `analysis.json`, `recordings.csv`,
 `parcel_coverage.csv` (Monte Carlo only) and `provenance.json`
 (`study/results_spec.py`). It must never fail the QC; a new column needs a
 description there. The collinearity (0.99) and coverage (0.5) thresholds mirror

@@ -266,7 +266,7 @@ source-localization study qc study_config.yaml
 
 ### The study's localization summary
 
-With the optional `results` extra installed (neurobox-dev, the results
+With the optional `results` extra installed (Lumière, the results
 specification shared with source-analytics and neurofaune), `study qc` also
 writes the study's localization as one **diagnostic analysis** in `qc/`, beside
 `qc_report.html`, so a study gallery or any reader can show how the recordings
@@ -281,7 +281,7 @@ were localized without this package:
 
 Paths are relative to `qc/`, and each recording is named by its fields, so a
 reader never parses folder names such as `sub-801_ses-01`. Check it with
-`python -m neurobox check qc/`. Without the extra, `study qc` is unchanged.
+`lumiere check qc/`. Without the extra, `study qc` is unchanged.
 
 ### Python API
 
