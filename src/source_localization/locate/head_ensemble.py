@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from ..bem.solution import SOLVER_TAG
 
 __all__ = ["HeadModel", "HeadModelPrior", "EnsembleSpec", "ENSEMBLE_PA_PHASE2", "ENSEMBLES", "draw_ensemble",
            "ensemble_leadfields"]
@@ -135,8 +138,13 @@ ENSEMBLES = {e.id: e for e in (ENSEMBLE_PA_PHASE2,)}
 
 
 def _signature(geometry, models: Sequence[HeadModel], positions_mm: np.ndarray) -> str:
+    # "bem_solver" is the solver the geometry's own leadfields use. geometry.signature cannot stand in for it: it is the
+    # nominal operator's signature, which probability-atlas's Geometry (pa/geometry.py, inner-first solve) shares with
+    # this package's. Before 2026-11-14 the key was exactly probability-atlas's, so an ensemble pa had solved in the
+    # faulty order was served here under the corrected solver's key (bayes-sl, 2026-11-14).
     payload = {"geometry": geometry.signature, "models": [[m.shift_mm, m.skull_factor] for m in models],
-               "positions": hashlib.sha1(np.ascontiguousarray(positions_mm, float).tobytes()).hexdigest()}
+               "positions": hashlib.sha1(np.ascontiguousarray(positions_mm, float).tobytes()).hexdigest(),
+               "bem_solver": getattr(geometry, "bem_solver", None)}
     return hashlib.sha1(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -146,11 +154,18 @@ def ensemble_leadfields(geometry, models: Sequence[HeadModel], positions_mm: Opt
 
     Unwhitened and unreferenced (as MNE returns them), channels in ``geometry.channel_names`` order. About 4 s per
     model on a 4,357-position grid. Cached in ``cache_dir`` as ``ensemble_<key>.npy``, the key built from the
-    geometry's signature, the models and the positions (the same key as probability-atlas, so its caches are reused),
-    so a changed prior or BEM cannot be served a stale ensemble.
+    geometry's signature, its BEM solver (``geometry.bem_solver``), the models and the positions, so a changed prior,
+    BEM or solver cannot be served a stale ensemble. A geometry that does not declare the current solver
+    (``bem.solution.SOLVER_TAG``; probability-atlas's does not) is computed but never cached: its keys used to equal
+    this package's while its leadfields were solved inner first.
     """
     positions_mm = geometry.positions_mm if positions_mm is None else np.asarray(positions_mm, float)
     path = None
+    if cache_dir is not None and getattr(geometry, "bem_solver", None) != SOLVER_TAG:
+        warnings.warn(f"{type(geometry).__module__}.{type(geometry).__name__} does not declare the current BEM solver "
+                      f"({SOLVER_TAG!r}); its ensemble leadfields are neither read from nor written to {cache_dir}",
+                      stacklevel=2)
+        cache_dir = None
     if cache_dir is not None:
         path = Path(cache_dir) / f"ensemble_{_signature(geometry, models, positions_mm)}.npy"
         if path.exists():

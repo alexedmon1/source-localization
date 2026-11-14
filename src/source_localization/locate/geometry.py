@@ -1,7 +1,8 @@
 """The head geometry a location posterior runs on, and leadfields under a perturbed head model.
 
-Ported unchanged in behaviour from probability-atlas ``pa/geometry.py`` (field-method plan, phase F1); its
-``signature`` is the same, so ensemble caches written there are reused here.
+Ported from probability-atlas ``pa/geometry.py`` (field-method plan, phase F1). Its ``signature`` is the same, but
+since 2026-11-14 ensemble cache keys also carry ``bem_solver``, which pa's Geometry does not declare: pa solves the BEM
+inner first, so its caches must not be reused here (``locate.head_ensemble.ensemble_leadfields``).
 
 Read from a completed source-localization pipeline run (read-only): its cached ellipsoid BEM
 (``bem_cache/ellipsoid_3layer.pkl``), montage and registration (``data/step1_info.pkl``) and volume source-space
@@ -26,7 +27,7 @@ import numpy as np
 from ..validation.posterior import DipolePosterior
 
 from .head_ensemble import HeadModel
-from ..bem.solution import make_bem_solution as _solve_bem
+from ..bem.solution import SOLVER_TAG, make_bem_solution as _solve_bem
 
 __all__ = ["Geometry"]
 
@@ -43,6 +44,9 @@ class Geometry:
     cache_dir : path-like, optional
         Where source-localization caches the nominal dense operator (``operator_<spacing>mm.npz``).
     """
+
+    #: The solver ``_solution`` uses; part of every ensemble cache key (``locate.head_ensemble._signature``).
+    bem_solver = SOLVER_TAG
 
     def __init__(self, run_dir, spacing_mm: float = 0.5, cache_dir=None, n_cached_solutions: int = 4):
         mne.set_log_level("ERROR")

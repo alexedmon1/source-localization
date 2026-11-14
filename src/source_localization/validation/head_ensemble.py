@@ -16,7 +16,6 @@ package builds the head-model side and source-analytics fits and scores, and the
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import pickle
 from collections import OrderedDict
@@ -27,7 +26,9 @@ from typing import Optional, Sequence
 import numpy as np
 
 from .head_models import HeadModel, HeadModelPrior, draw_ensemble
-from ..bem.solution import make_bem_solution as _solve_bem
+from ..bem.solution import SOLVER_TAG, make_bem_solution as _solve_bem
+# One implementation of the cached ensemble: its key carries the solver (locate.head_ensemble._signature).
+from ..locate.head_ensemble import _signature, ensemble_leadfields  # noqa: F401
 
 __all__ = ["EnsembleGeometry", "EnsembleSpec", "MEA30_ENSEMBLE", "ensemble_leadfields", "ccf_ids",
            "export_head_ensemble", "load_head_ensemble", "EXPORT_VERSION"]
@@ -76,6 +77,9 @@ class EnsembleGeometry:
     cache_dir : path-like, optional
         Where the nominal dense operator is cached.
     """
+
+    #: The solver ``_solution`` uses; part of every ensemble cache key (``locate.head_ensemble._signature``).
+    bem_solver = SOLVER_TAG
 
     def __init__(self, run_dir, spacing_mm: float = 0.5, cache_dir=None, n_cached_solutions: int = 4):
         import mne
@@ -133,38 +137,6 @@ class EnsembleGeometry:
         if f["nsource"] != len(positions_mm):
             raise RuntimeError(f"MNE dropped {len(positions_mm) - f['nsource']} positions")
         return f["sol"]["data"].reshape(self.n_channels, -1, 3).transpose(1, 0, 2)
-
-
-def _signature(geometry, models, positions_mm) -> str:
-    payload = {"geometry": geometry.signature, "models": [[m.shift_mm, m.skull_factor] for m in models],
-               "positions": hashlib.sha1(np.ascontiguousarray(positions_mm, float).tobytes()).hexdigest()}
-    return hashlib.sha1(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:16]
-
-
-def ensemble_leadfields(geometry, models, positions_mm: Optional[np.ndarray] = None, cache_dir=None,
-                        verbose: bool = True) -> np.ndarray:
-    """Leadfields of every model on the same positions, (K, n_positions, n_channels, 3), unreferenced.
-
-    Cached under a key from the geometry's signature, the models and the positions, so a changed prior or BEM cannot be
-    served a stale ensemble.
-    """
-    positions_mm = geometry.positions_mm if positions_mm is None else np.asarray(positions_mm, float)
-    path = None
-    if cache_dir is not None:
-        path = Path(cache_dir) / f"ensemble_{_signature(geometry, models, positions_mm)}.npy"
-        if path.exists():
-            if verbose:
-                print(f"  ensemble leadfields loaded from cache ({path.name})")
-            return np.load(path)
-    G = np.empty((len(models), len(positions_mm), geometry.n_channels, 3))
-    for k, m in enumerate(models):
-        G[k] = geometry.leadfield(m, positions_mm)
-        if verbose and (k + 1) % 8 == 0:
-            print(f"  ensemble: {k + 1}/{len(models)} head models")
-    if path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(path, G)
-    return G
 
 
 def ccf_ids(positions_mm: np.ndarray) -> np.ndarray:
