@@ -2,7 +2,7 @@
 
 **Created:** 2025-11-26
 **Last Updated:** 2026-11-09
-**Version:** 0.8.1
+**Version:** 0.9.0
 **Status:** Alpha
 
 A Python pipeline for mouse EEG source localization: a 30-channel scalp
@@ -164,6 +164,11 @@ Release tags used by published work:
 | `v0.2.3` | **v0.2.1 plus one line of packaging metadata** — declares `scikit-learn`, which `source_space/roi_based.py` imports but v0.2.1 never declared. `git diff v0.2.1 v0.2.3` touches `pyproject.toml` and nothing else, so every analysis path is byte-identical. Install this; cite v0.2.1 |
 | `v0.4.1` | corrected brain mask — sources are placed inside the brain rather than the meningeal rim |
 | `v0.4.2` | v0.4.1 plus the same packaging fix. Install this; cite v0.4.1 |
+
+**Every tag before v0.9.0 solves surface BEMs in the wrong surface order** (see History, 0.9.0):
+forward models from the ellipsoid presets and the numerical sphere are physically inconsistent and
+wrong in amplitude by orders of magnitude. The analytic sphere is unaffected. Reproduce an older
+result with its tag, but rerun anything new on v0.9.0 or later.
 
 Note that versions before 0.5.1 did not reorder EEG channels to match the
 electrode registration. Recordings stored in a channel order other than
@@ -1049,11 +1054,34 @@ source_localization/
 
 ## History
 
-The package version is `0.8.1`. Earlier revisions of this README carried a
+The package version is `0.9.0`. Earlier revisions of this README carried a
 separate 1.x numbering that never corresponded to a package release; it has
 been dropped. Release tags are listed under
 [Reproducing a published analysis](#reproducing-a-published-analysis), and
 `git log` is the changelog.
+
+Notable changes in 0.9.0 (2026-11-14). **Every forward model from a surface BEM changes**, so results
+from earlier versions are not reproduced and should be rerun:
+
+- **Surface BEMs are solved outermost surface first** (`bem/solution.py`). `mne.make_bem_solution` takes
+  surfaces in list order and puts zero conductivity outside the first; the ellipsoid and numerical-sphere
+  builders produce them inner first, and every earlier version passed them on in that order, so each
+  surface BEM was a physically inconsistent model. Against an exact multi-shell series solution the
+  corrected solve is within mesh error (preset sphere ico-4: topography error 0.004, amplitude 0.98) and
+  the old one is not (1.41, 0.007). Affects the ellipsoid presets and the numerical sphere (the default);
+  the analytic sphere (`numerical: false`) is unchanged. Builders keep their inner-first order.
+- **Surface nesting is checked before every solve**: ids that disagree with the geometry (caches from
+  before 2026-08-14) or descending sphere radii raise instead of being solved in the wrong order.
+- **A failed analytic-sphere fit is refused** (`bem.sphere.check_sphere_fit`) instead of returning NaN
+  leadfields. `tests/test_bem_order.py` checks the surface BEM against the exact series.
+- **Every forward model records its solver**, and saved ones without a current tag are refused
+  (`StaleForwardError`): `load_forward`, the validation readers, `study qc` (warns and skips),
+  cached operators (`DipolePosterior.load`) and head-ensemble exports (export version 2).
+  `study batch` neither skips nor overwrites a subject whose outputs predate the tag; use a new
+  output directory or `--force`.
+- The probability-atlas Phase 9/10 reproduction tests are expected to fail until those references are
+  rebuilt with the corrected solve.
+- The `results` extra pins Lumière (formerly neurobox-dev).
 
 Notable changes in 0.8.1 (2026-11-10):
 
