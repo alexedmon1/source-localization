@@ -35,24 +35,28 @@ applied to the normalized log posterior:
 
 The validated settings were chosen on one simulated set and checked on another
 (fresh truths, fresh head models, the other half of the mice for noise). They
-apply only to the MEA30 geometry, the 33-model ensemble and the 0.5 mm grid:
+apply only to the MEA30 geometry, the 33-model ensemble and the 0.5 mm grid.
+Version 2 (2026-11-14) was re-measured under the corrected BEM solve (v0.9.0),
+with tb11's design on this package's geometry (``scripts/recalibrate_maps.py``;
+validation-tests ``map_calibration_bemfix/REPORT.md``). Version 1 was measured in
+the inner-first BEM and is superseded:
 
-``VOLUMETRIC = MapCalibration(1.5, 0.25)``
-    The 90% region holds the truth 88-89% of the time at half, primary and double
-    SNR, for both cortical and deep truths (80%: 79-81%; 95%: 92-94%). The median
-    90% region is 3-8 mm3 at primary SNR.
+``VOLUMETRIC = MapCalibration(1.5, 0.25)`` (version 2; same setting as version 1)
+    The 90% region holds the truth 87-88% of the time at half, primary and double
+    SNR, for both cortical and deep truths (80%: 78-79%; 95%: 91-94%). The median
+    90% region is about 15 mm3 at primary SNR in simulation; on real Sentinel
+    recordings it is about 2 mm3.
 
-``SURFACE = MapCalibration(2.5, 0.0)``
+``SURFACE = MapCalibration(2.0, 0.0)`` (version 2; version 1 was T 2.5)
     For the cortical/cerebellar/olfactory surface readout, the best single setting
-    on the grid. It is approximately calibrated: the 90% region holds the truth
-    88-91% of the time at half and primary SNR, but only 83-85% at double SNR.
-    Blurring made it worse.
+    on the grid. The 90% region holds cortical truths 87-91% of the time and
+    cerebellar truths 85-86%, across half to double SNR. Blurring made it worse.
 
 **What calibration cannot fix.** Coverage is calibrated for single-source truths.
 A response with more than one source is still read as one confident point between
 the sources. For mirrored bilateral auditory cortex, the calibrated 90% region
-holds either source in only 29-57% of maps, and both in at most 5%. Read real
-auditory maps with that in mind.
+holds either source in only 1-12% of maps, and both in none. Read real auditory
+maps with that in mind, or use :class:`MirrorPairPosterior`.
 
 **More than one source.** :class:`SourceSetPosterior` is the same likelihood for a
 configuration of several dipoles (a stacked leadfield block per configuration).
@@ -334,7 +338,7 @@ UNCALIBRATED = MapCalibration(id='calibration.none')
 VOLUMETRIC = MapCalibration(temperature=1.5, blur_mm=0.25, id='calibration.volumetric',
                             domain=CalibrationDomain('mea30_sentinel', 'prior.head_ensemble_pa_phase2', 0.5,
                                                      'volumetric'))
-SURFACE = MapCalibration(temperature=2.5, blur_mm=0.0, id='calibration.surface',
+SURFACE = MapCalibration(temperature=2.0, blur_mm=0.0, id='calibration.surface',
                          domain=CalibrationDomain('mea30_sentinel', 'prior.head_ensemble_pa_phase2', 0.5, 'surface'))
 
 

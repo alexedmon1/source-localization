@@ -136,7 +136,7 @@ def test_head_model_mismatch_under_covers_and_calibration_recovers(geom):
 
 def test_validated_constant_is_recorded():
     assert VOLUMETRIC == MapCalibration(temperature=1.5, blur_mm=0.25)
-    assert SURFACE == MapCalibration(temperature=2.5, blur_mm=0.0)
+    assert SURFACE == MapCalibration(temperature=2.0, blur_mm=0.0)
 
 
 @pytest.fixture

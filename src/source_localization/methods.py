@@ -261,7 +261,8 @@ LOCATION_POSTERIORS: Dict[str, ModelSpec] = {
         reference='bayes-sl reports/TB_mirror_pair.md',
         caveat='Pairs very close to the midline look like one central source; at '
                'high SNR a single deep source can pass for a near-midline pair '
-               '(bayes-sl tb16 control).'),
+               '(bayes-sl tb16 control). The pair coverage was measured with calibration '
+               'version 1 in the inner-first BEM (before v0.9.0) and has not been re-measured.'),
     'locate.field_choice': ModelSpec(
         'locate.field_choice', 1,
         'where a field is: the pair if P(pair) reaches the rule, else the single peak',
@@ -339,7 +340,7 @@ LOCATION_PRIORS: Dict[str, ModelSpec] = {
         implementation='source_localization.validation.posterior:DipolePosterior.posterior',
         tests='tests/test_posterior.py'),
     'prior.head_ensemble_pa_phase2': ModelSpec(
-        'prior.head_ensemble_pa_phase2', 1,
+        'prior.head_ensemble_pa_phase2', 2,
         'head-model uncertainty: the 33-model ensemble',
         'The nominal head model plus 32 draws from HeadModelPrior: electrode-'
         'registration shift ~ N(0, 0.3 mm) per axis, skull-conductivity factor '
@@ -349,6 +350,8 @@ LOCATION_PRIORS: Dict[str, ModelSpec] = {
                 'K = 1 nominal + 32 draws', 'seed [20261005, 1, 0]'),
         validity='MEA30 on the ellipsoid BEM. Every calibration in this catalogue '
                  'was measured with this ensemble.',
+        caveat='Version 2 (v0.9.0, 2026-11-14): same draws, leadfields from the corrected (outer-first) BEM solve. '
+               'Version 1 leadfields were solved inner first.',
         implementation='source_localization.locate.head_ensemble:ENSEMBLE_PA_PHASE2',
         tests='tests/test_locate.py',
         reference='Ported from probability-atlas Phase 2 (pa/ensemble.py, scripts/phase2_simulate.py '
@@ -364,6 +367,7 @@ LOCATION_PRIORS: Dict[str, ModelSpec] = {
         validity='P(pair) roughly calibrated, slightly overconfident, on MEA30 '
                  '(patterns with P(pair) 0.95-1.0 were pairs 94.5% of the time; '
                  'bayes-sl reports/TB_mirror_pair.md).',
+        caveat='Measured in the inner-first BEM (before v0.9.0); not re-measured.',
         implementation=f'{_EP}:model_probabilities'),
 }
 
@@ -386,38 +390,46 @@ MAP_CALIBRATIONS: Dict[str, ModelSpec] = {
         'levels 0.5, 0.8, 0.9, 0.95 and over strata (SNR x depth class); check it on the validation set. The result '
         'carries its domain (this array, ensemble, spacing, positions).',
         priors=('levels 0.5, 0.8, 0.9, 0.95', 'strata: SNR x depth class', 'grid of temperature x blur'),
-        validity='Applied to bayes-sl tb11\'s stored scores it chooses calibration.volumetric (1.5, 0.25) and '
-                 'calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py).',
+        validity='Applied to bayes-sl tb11\'s stored scores it chooses version 1 of calibration.volumetric (1.5, '
+                 '0.25) and calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py). Version 2 was '
+                 'measured with tb11\'s design on this package (scripts/recalibrate_maps.py); run in the old BEM '
+                 'order, that script reproduces tb11\'s stored scores.',
         implementation='source_localization.locate.calibrate:calibrate', tests='tests/test_field_locate.py',
         reference='bayes-sl scripts/tb11_calibrate_maps.py, tb12_select_calibration.py; reports/TB_map_calibration.md'),
     'calibration.volumetric': ModelSpec(
-        'calibration.volumetric', 1,
+        'calibration.volumetric', 2,
         'tempered and blurred, for volumetric maps',
         'Normalized log posterior divided by T = 1.5, then an isotropic Gaussian '
         'blur of 0.25 mm over the candidate positions (mass-conserving).',
         priors=('temperature 1.5', 'blur 0.25 mm'),
         validity='MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, '
                  'single-source truths, whitened real noise. 90% region held the truth '
-                 '88-89% of the time at half, primary and double SNR (80%: 79-81%; '
-                 '95%: 92-94%). Chosen on one simulated set, checked on another.',
+                 '87-88% of the time at half, primary and double SNR, cortical and deep (80%: 78-79%; '
+                 '95%: 91-94%). Chosen on one simulated set, checked on another. Version 2 (2026-11-14): '
+                 're-measured under the corrected BEM solve; same setting as version 1, which was measured '
+                 'in the inner-first BEM.',
         implementation=f'{_EP}:VOLUMETRIC',
         caveat='Enforced: the field locator refuses a space outside this domain (array mea30_sentinel = '
                'data/calibration/mea30_sentinel.json, electrodes within 0.1 mm; ensemble; 0.5 mm; volumetric).',
         tests='tests/test_ensemble_posterior.py',
-        reference='bayes-sl reports/TB_map_calibration.md'),
+        reference='validation-tests map_calibration_bemfix/REPORT.md (version 2); bayes-sl '
+                  'reports/TB_map_calibration.md (version 1)'),
     'calibration.surface': ModelSpec(
-        'calibration.surface', 1,
+        'calibration.surface', 2,
         'tempered, for the cortical surface readout',
-        'Normalized log posterior divided by T = 2.5; no blur (blurring made it worse).',
-        priors=('temperature 2.5', 'blur 0 mm'),
+        'Normalized log posterior divided by T = 2.0; no blur (blurring made it worse).',
+        priors=('temperature 2.0', 'blur 0 mm'),
         validity='MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory '
-                 'surface positions. Approximately calibrated: 90% region 88-91% at half '
-                 'and primary SNR, 83-85% at double SNR.',
+                 'surface positions. 90% region held cortical truths 87-91% of the time and '
+                 'cerebellar truths 85-86%, at half to double SNR. Version 2 (2026-11-14): '
+                 're-measured under the corrected BEM solve; version 1 (T 2.5) was measured in the '
+                 'inner-first BEM.',
         implementation=f'{_EP}:SURFACE',
         caveat='Enforced: the field locator refuses a space outside this domain (array mea30_sentinel, electrodes '
                'within 0.1 mm; ensemble; 0.5 mm; surface positions).',
         tests='tests/test_ensemble_posterior.py',
-        reference='bayes-sl reports/TB_map_calibration.md'),
+        reference='validation-tests map_calibration_bemfix/REPORT.md (version 2); bayes-sl '
+                  'reports/TB_map_calibration.md (version 1)'),
 }
 
 _WH = 'source_localization.locate.whitening:NoiseWhitener'

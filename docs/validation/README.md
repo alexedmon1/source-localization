@@ -290,11 +290,12 @@ These do not depend on the atlas (they work on positions), but they answer the q
 `DipolePosterior` assumes the forward model is exact. `ensemble_posterior.EnsemblePosterior` averages its marginal
 likelihood over an ensemble of head models (nominal + `HeadModelPrior` draws) on whitened leadfields. Even so, the
 raw map is overconfident when the truth's head model is a fresh draw. On MEA30 its 90% region held the truth about
-60% of the time. `MapCalibration` tempers the log posterior and then blurs it. `VOLUMETRIC = MapCalibration(1.5, 0.25)`
-gives 88-89% coverage on held-out simulations at half to double SNR, for cortical and deep truths, with a median 90%
-region of 3-8 mm3 (bayes-sl `reports/TB_map_calibration.md`, 2026-10-13). For the surface readout,
-`SURFACE = MapCalibration(2.5, 0)` is approximately calibrated: 88-91% at half and primary SNR, but 83-85% at
-double SNR. This holds for single-source truths only.
+60% of the time. `MapCalibration` tempers the log posterior and then blurs it. Under the corrected BEM solve
+(version 2, 2026-11-14; validation-tests `map_calibration_bemfix/REPORT.md`), `VOLUMETRIC = MapCalibration(1.5, 0.25)`
+gives 87-88% coverage on held-out simulations at half to double SNR, for cortical and deep truths, with a median 90%
+region of about 15 mm3 at primary SNR. For the surface readout, `SURFACE = MapCalibration(2.0, 0)` gives 87-91% for
+cortical truths and 85-86% for cerebellar ones. Version 1 (bayes-sl `reports/TB_map_calibration.md`, 2026-10-13) was
+measured in the inner-first BEM. This holds for single-source truths only.
 A field with several sources (e.g. bilateral auditory cortex) is still read as one confident point between them.
 
 ```bash

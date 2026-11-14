@@ -32,7 +32,7 @@ there. Each catalogued calibration carries that domain:
 | calibration | array | ensemble | grid | positions |
 |---|---|---|---|---|
 | `calibration.volumetric` (T 1.5, blur 0.25 mm) | `mea30_sentinel` | `prior.head_ensemble_pa_phase2` | 0.5 mm | volumetric |
-| `calibration.surface` (T 2.5, no blur) | `mea30_sentinel` | `prior.head_ensemble_pa_phase2` | 0.5 mm | surface |
+| `calibration.surface` (T 2.0, no blur) | `mea30_sentinel` | `prior.head_ensemble_pa_phase2` | 0.5 mm | surface |
 
 The array is identified by `data/calibration/mea30_sentinel.json`: its channel names in order, and every electrode
 within 0.1 mm of its registered position. **The field locator refuses a space outside the domain** (decided
@@ -131,8 +131,13 @@ Calibration covers single-source truths; mirror-pair coverage should be checked 
 `TB_mirror_pair.md` did for MEA30).
 
 **Check (2026-11-09).** Applied to bayes-sl tb11's stored scores (7,200 maps per setting), the selection chooses the
-catalogued settings again: volumetric T 1.5, blur 0.25 mm (90% coverage 88-89% on validation), surface T 2.5, no blur
+version 1 settings again: volumetric T 1.5, blur 0.25 mm (90% coverage 88-89% on validation), surface T 2.5, no blur
 (84-91%) (bayes-sl `scripts/f4c_check_calibration.py`).
+
+**Version 2 (2026-11-14).** Version 1 was measured in the inner-first BEM. `scripts/recalibrate_maps.py` repeats tb11's
+design on this package's geometry, with the corrected solve. Run in the old order, it reproduces tb11's stored scores.
+Under the corrected solve it chooses volumetric T 1.5, blur 0.25 mm again (90% coverage 87-88% on validation) and
+surface T 2.0, no blur (85-91%) (validation-tests `map_calibration_bemfix/REPORT.md`).
 
 ## Each located region's field, and each subject's value along it
 

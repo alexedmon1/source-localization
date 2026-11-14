@@ -46,7 +46,7 @@ A dipole and its mirror image across the midline.
 - **Model:** locate.source_set with configurations (x, x mirrored across the midline x = midline_x_mm), x on the right at least min_offset_mm (default 0.3 mm) from it, mirrors snapped to the grid. Each member has an independent free-orientation moment. position_map gives each member half the mass of its configuration (a map summing to 2 counts both members).
 - **Rests on:** `prior.position_uniform`, `prior.moment_empirical_bayes`, `prior.head_ensemble_pa_phase2`
 - **Validity:** As locate.single_source. The single-source calibration carries over to pair maps on MEA30 (90% region: 92-93% coverage for auditory-cortex pairs, 81-83% for random pairs; bayes-sl reports/TB_mirror_pair.md).
-- **Caveat:** Pairs very close to the midline look like one central source; at high SNR a single deep source can pass for a near-midline pair (bayes-sl tb16 control).
+- **Caveat:** Pairs very close to the midline look like one central source; at high SNR a single deep source can pass for a near-midline pair (bayes-sl tb16 control). The pair coverage was measured with calibration version 1 in the inner-first BEM (before v0.9.0) and has not been re-measured.
 - **Implementation:** `source_localization.locate.ensemble_posterior:MirrorPairPosterior`
 - **Tests:** `tests/test_ensemble_posterior.py`
 - **Reference:** bayes-sl reports/TB_mirror_pair.md
@@ -91,7 +91,7 @@ Any fixed set of dipoles, with model evidence.
 | `prior.position_uniform` | 1 | uniform over candidate positions or configurations |
 | `prior.moment_empirical_bayes` | 1 | dipole moments Gaussian, scale estimated per pattern |
 | `prior.moment_given_sd` | 1 | dipole moment Gaussian with a given SD, or profiled out |
-| `prior.head_ensemble_pa_phase2` | 1 | head-model uncertainty: the 33-model ensemble |
+| `prior.head_ensemble_pa_phase2` | 2 | head-model uncertainty: the 33-model ensemble |
 | `prior.model_odds_equal` | 1 | equal prior odds between source sets |
 
 ### `prior.position_uniform` (version 1)
@@ -121,13 +121,14 @@ Dipole moment Gaussian with a given SD, or profiled out.
 - **Implementation:** `source_localization.validation.posterior:DipolePosterior.posterior`
 - **Tests:** `tests/test_posterior.py`
 
-### `prior.head_ensemble_pa_phase2` (version 1)
+### `prior.head_ensemble_pa_phase2` (version 2)
 
 Head-model uncertainty: the 33-model ensemble.
 
 - **Model:** The nominal head model plus 32 draws from HeadModelPrior: electrode-registration shift ~ N(0, 0.3 mm) per axis, skull-conductivity factor log-uniform on [0.5, 2.0]. Draws from numpy default_rng([20261005, 1, 0]); leadfields on the 0.5 mm volumetric grid, unreferenced as MNE returns them.
 - **Values:** shift SD 0.3 mm (x, y, z), skull factor log-uniform 0.5-2.0, K = 1 nominal + 32 draws, seed [20261005, 1, 0]
 - **Validity:** MEA30 on the ellipsoid BEM. Every calibration in this catalogue was measured with this ensemble.
+- **Caveat:** Version 2 (v0.9.0, 2026-11-14): same draws, leadfields from the corrected (outer-first) BEM solve. Version 1 leadfields were solved inner first.
 - **Implementation:** `source_localization.locate.head_ensemble:ENSEMBLE_PA_PHASE2`
 - **Tests:** `tests/test_locate.py`
 - **Reference:** Ported from probability-atlas Phase 2 (pa/ensemble.py, scripts/phase2_simulate.py VARIANTS["primary"], K_ENS 32, rng_for(1, 0)); draws identical, leadfields equal to a relative 2e-16 on the Sentinel grid (field-method plan, F1)
@@ -139,6 +140,7 @@ Equal prior odds between source sets.
 - **Model:** P(set | y) from the sets' log evidences (locate.source_set.log_evidence) with equal prior probability for each set compared (for example one source vs a mirror pair).
 - **Values:** equal prior probability per set
 - **Validity:** P(pair) roughly calibrated, slightly overconfident, on MEA30 (patterns with P(pair) 0.95-1.0 were pairs 94.5% of the time; bayes-sl reports/TB_mirror_pair.md).
+- **Caveat:** Measured in the inner-first BEM (before v0.9.0); not re-measured.
 - **Implementation:** `source_localization.locate.ensemble_posterior:model_probabilities`
 
 ## Map calibrations
@@ -147,8 +149,8 @@ Equal prior odds between source sets.
 |---|---|---|
 | `calibration.none` | 1 | the raw averaged posterior |
 | `calibration.procedure` | 1 | how a map calibration is measured and chosen for a location space |
-| `calibration.volumetric` | 1 | tempered and blurred, for volumetric maps |
-| `calibration.surface` | 1 | tempered, for the cortical surface readout |
+| `calibration.volumetric` | 2 | tempered and blurred, for volumetric maps |
+| `calibration.surface` | 2 | tempered, for the cortical surface readout |
 
 ### `calibration.none` (version 1)
 
@@ -165,34 +167,34 @@ How a map calibration is measured and chosen for a location space.
 
 - **Model:** Simulate single-source truths in the space (positions uniform over the candidates, random orientations, fresh head models from the ensemble's prior that are not in the ensemble, several SNRs, real held-out whitened noise), in two independent sets. Score each raw map on a grid of (temperature, blur) by the mass above the truth. Choose, on the calibration set, the setting with the smallest worst |coverage - level| over levels 0.5, 0.8, 0.9, 0.95 and over strata (SNR x depth class); check it on the validation set. The result carries its domain (this array, ensemble, spacing, positions).
 - **Values:** levels 0.5, 0.8, 0.9, 0.95, strata: SNR x depth class, grid of temperature x blur
-- **Validity:** Applied to bayes-sl tb11's stored scores it chooses calibration.volumetric (1.5, 0.25) and calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py).
+- **Validity:** Applied to bayes-sl tb11's stored scores it chooses version 1 of calibration.volumetric (1.5, 0.25) and calibration.surface (2.5, 0) again (scripts/f4c_check_calibration.py). Version 2 was measured with tb11's design on this package (scripts/recalibrate_maps.py); run in the old BEM order, that script reproduces tb11's stored scores.
 - **Implementation:** `source_localization.locate.calibrate:calibrate`
 - **Tests:** `tests/test_field_locate.py`
 - **Reference:** bayes-sl scripts/tb11_calibrate_maps.py, tb12_select_calibration.py; reports/TB_map_calibration.md
 
-### `calibration.volumetric` (version 1)
+### `calibration.volumetric` (version 2)
 
 Tempered and blurred, for volumetric maps.
 
 - **Model:** Normalized log posterior divided by T = 1.5, then an isotropic Gaussian blur of 0.25 mm over the candidate positions (mass-conserving).
 - **Values:** temperature 1.5, blur 0.25 mm
-- **Validity:** MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, single-source truths, whitened real noise. 90% region held the truth 88-89% of the time at half, primary and double SNR (80%: 79-81%; 95%: 92-94%). Chosen on one simulated set, checked on another.
+- **Validity:** MEA30, prior.head_ensemble_pa_phase2, 0.5 mm volumetric grid, single-source truths, whitened real noise. 90% region held the truth 87-88% of the time at half, primary and double SNR, cortical and deep (80%: 78-79%; 95%: 91-94%). Chosen on one simulated set, checked on another. Version 2 (2026-11-14): re-measured under the corrected BEM solve; same setting as version 1, which was measured in the inner-first BEM.
 - **Caveat:** Enforced: the field locator refuses a space outside this domain (array mea30_sentinel = data/calibration/mea30_sentinel.json, electrodes within 0.1 mm; ensemble; 0.5 mm; volumetric).
 - **Implementation:** `source_localization.locate.ensemble_posterior:VOLUMETRIC`
 - **Tests:** `tests/test_ensemble_posterior.py`
-- **Reference:** bayes-sl reports/TB_map_calibration.md
+- **Reference:** validation-tests map_calibration_bemfix/REPORT.md (version 2); bayes-sl reports/TB_map_calibration.md (version 1)
 
-### `calibration.surface` (version 1)
+### `calibration.surface` (version 2)
 
 Tempered, for the cortical surface readout.
 
-- **Model:** Normalized log posterior divided by T = 2.5; no blur (blurring made it worse).
-- **Values:** temperature 2.5, blur 0 mm
-- **Validity:** MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory surface positions. Approximately calibrated: 90% region 88-91% at half and primary SNR, 83-85% at double SNR.
+- **Model:** Normalized log posterior divided by T = 2.0; no blur (blurring made it worse).
+- **Values:** temperature 2.0, blur 0 mm
+- **Validity:** MEA30, prior.head_ensemble_pa_phase2, cortical/cerebellar/olfactory surface positions. 90% region held cortical truths 87-91% of the time and cerebellar truths 85-86%, at half to double SNR. Version 2 (2026-11-14): re-measured under the corrected BEM solve; version 1 (T 2.5) was measured in the inner-first BEM.
 - **Caveat:** Enforced: the field locator refuses a space outside this domain (array mea30_sentinel, electrodes within 0.1 mm; ensemble; 0.5 mm; surface positions).
 - **Implementation:** `source_localization.locate.ensemble_posterior:SURFACE`
 - **Tests:** `tests/test_ensemble_posterior.py`
-- **Reference:** bayes-sl reports/TB_map_calibration.md
+- **Reference:** validation-tests map_calibration_bemfix/REPORT.md (version 2); bayes-sl reports/TB_map_calibration.md (version 1)
 
 ## Noise whitening
 

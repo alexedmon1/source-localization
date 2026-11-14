@@ -19,8 +19,9 @@ refuses to run without one (the Conductor, 2026-11-09). The procedure (bayes-sl 
    another is not calibrated.
 4. **Check** it on the validation set, and record the domain.
 
-:func:`select_setting` reproduces tb12's choice of ``calibration.volumetric`` (1.5, 0.25 mm) and
-``calibration.surface`` (2.5, 0) from tb11's stored scores (bayes-sl ``scripts/f4c_check_calibration.py``).
+:func:`select_setting` reproduces tb12's choice of version 1 of ``calibration.volumetric`` (1.5, 0.25 mm) and
+``calibration.surface`` (2.5, 0) from tb11's stored scores (bayes-sl ``scripts/f4c_check_calibration.py``). Version 2
+(1.5, 0.25 and 2.0, 0), under the corrected BEM solve, was chosen the same way by ``scripts/recalibrate_maps.py``.
 """
 from __future__ import annotations
 
