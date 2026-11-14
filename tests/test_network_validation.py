@@ -12,6 +12,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
+from source_localization.bem.solution import StaleForwardError
 from source_localization.validation.networks import signals as sg
 from source_localization.validation.networks.harness import NetworkSpec, NetworkValidation, _resolve_callable
 from source_localization.validation.networks.scoring import auc, resolvable_snr, resolvable_table
@@ -111,9 +112,10 @@ def phase9_spec() -> NetworkSpec:
 # bem/solution.py, 2026-11-13), a physically inconsistent model. Under the corrected solve no truth source's
 # nominal leadfield reproduces the stored pool (1000 of 1000 below r = 0.9999; median r 0.78; the corrected
 # leadfields 6-91x larger), so these fail until probability-atlas rebuilds the runs. Strict: they fail loudly
-# once the references are rebuilt and the marker should go.
+# once the references are rebuilt and the marker should go. StaleForwardError comes first: the geometry_run
+# forward has no solver tag (44f3a69); RuntimeError is the pool mismatch if only the forward is rebuilt.
 STALE_REFERENCES = pytest.mark.xfail(
-    raises=RuntimeError, strict=True,
+    raises=(StaleForwardError, RuntimeError), strict=True,
     reason="Phase 9/10 references built with the inner-first BEM solve (before 2026-11-13); rebuild them")
 
 
